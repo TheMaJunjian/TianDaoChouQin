@@ -79,8 +79,19 @@
       .sort(function (a, b) { return a.start - b.start; });
   }
 
+  /* 合并重叠区间后统计已填时长，避免历史/导入数据重叠导致超过 24 小时。 */
   function filledMinutes(list) {
-    return list.reduce(function (sum, e) { return sum + (e.end - e.start); }, 0);
+    var sorted = list.slice().sort(function (a, b) { return a.start - b.start; });
+    var total = 0;
+    var cursor = -1;
+    sorted.forEach(function (e) {
+      var start = Math.max(e.start, cursor);
+      if (e.end > start) {
+        total += e.end - start;
+        cursor = e.end;
+      }
+    });
+    return total;
   }
 
   function overlaps(list, start, end) {
@@ -116,6 +127,7 @@
     }
 
     var start = toMinutes(startRaw);
+    // 结束时间填 00:00 视为当日 24:00（时间输入框无法表示 24:00）。
     var end = endRaw === '00:00' ? DAY_MINUTES : toMinutes(endRaw);
 
     if (end <= start) {
@@ -145,7 +157,7 @@
     state.viewDate = date;
     el.viewDate.value = date;
     el.activity.value = '';
-    el.startTime.value = toClock(end % DAY_MINUTES);
+    el.startTime.value = end === DAY_MINUTES ? '' : toClock(end);
     el.endTime.value = '';
 
     say('叮，日志写入成功：' + toClock(start) + '-' + toClock(end) + ' ' + activity +
@@ -344,7 +356,7 @@
   }
 
   function renderCategories() {
-    var map = {};
+    var map = Object.create(null);
     state.entries.forEach(function (e) {
       var key = normalize(e.category);
       if (!map[key]) { map[key] = { name: e.category.trim(), minutes: 0 }; }
