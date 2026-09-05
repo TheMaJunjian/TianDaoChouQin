@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>天道酬勤 · 系统面板</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="scanline"></div>
+<header class="panel-header">
+  <h1>【天道酬勤 · 系统面板】</h1>
+  <p class="sys-line" id="bootLine">叮，系统绑定成功。检测模块丢失，需要宿主手动输入。</p>
+</header>
+
+<main class="layout">
+  <section class="card" id="hostCard">
+    <h2>宿主状态</h2>
+    <div class="stat-grid">
+      <div class="stat"><span class="label">宿主（点击可改名）</span><span class="value" id="hostName" title="点击修改称号">未命名修行者</span></div>
+      <div class="stat"><span class="label">今日已录入</span><span class="value" id="todayFilled">0.0 h</span></div>
+      <div class="stat"><span class="label">今日缺失</span><span class="value" id="todayMissing">24.0 h</span></div>
+      <div class="stat"><span class="label">累计修行</span><span class="value" id="totalHours">0.0 h</span></div>
+    </div>
+    <label class="inline">
+      <span>主修方向（一万小时目标）</span>
+      <input id="focusCategory" type="text" placeholder="例如：编程">
+    </label>
+    <div class="progress-block">
+      <div class="progress-title">
+        <span>一万小时进度 · <b id="focusLabel">未设定</b></span>
+        <span id="focusPercent">0.000%</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="focusFill"></div></div>
+      <p class="hint" id="focusHint">叮，未设定主修方向，无法计算大道进度。</p>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>录入时间段</h2>
+    <p class="sys-line">检测功能丢失，需要宿主手动输入：从几点到几点，做了什么。</p>
+    <form id="entryForm" class="entry-form" autocomplete="off">
+      <label><span>日期</span><input type="date" id="entryDate" required></label>
+      <label><span>开始</span><input type="time" id="startTime" required></label>
+      <label><span>结束</span><input type="time" id="endTime" required></label>
+      <label><span>分类</span><input type="text" id="category" placeholder="编程 / 睡眠 / 摸鱼" required></label>
+      <label class="wide"><span>做了什么</span><input type="text" id="activity" placeholder="调试系统面板" required></label>
+      <label class="wide"><span>等级</span>
+        <select id="level">
+          <option value="INFO">INFO · 常规</option>
+          <option value="TRAIN">TRAIN · 修行</option>
+          <option value="WARN">WARN · 消耗</option>
+          <option value="ERROR">ERROR · 虚度</option>
+        </select>
+      </label>
+      <button type="submit" class="btn">写入日志</button>
+    </form>
+    <p class="sys-line" id="formMsg"></p>
+  </section>
+
+  <section class="card">
+    <h2>今日时间轴</h2>
+    <div class="date-nav">
+      <button class="btn ghost" id="prevDay">◀ 前一日</button>
+      <input type="date" id="viewDate">
+      <button class="btn ghost" id="nextDay">后一日 ▶</button>
+    </div>
+    <div class="timeline" id="timeline"></div>
+    <div class="timeline-axis"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>
+    <div class="coverage">
+      <div class="progress-bar"><div class="progress-fill alt" id="coverageFill"></div></div>
+      <p class="hint" id="coverageHint"></p>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>个人日志 · <span id="logDateLabel"></span></h2>
+    <div class="log-view" id="logView"></div>
+    <div class="log-actions">
+      <button class="btn ghost" id="copyLog">复制日志</button>
+      <button class="btn ghost" id="exportData">导出数据</button>
+      <button class="btn ghost danger" id="clearDay">清空当日</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>分类统计（全部记录）</h2>
+    <ul class="cat-list" id="catList"></ul>
+  </section>
+</main>
+
+<footer class="panel-footer">
+  <p class="sys-line">叮，系统提醒：数据仅保存在本机浏览器，清除浏览器数据将导致修行记录丢失。</p>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
