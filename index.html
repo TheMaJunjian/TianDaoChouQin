@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>天道酬勤面板</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">天</div>
+          <div>
+            <p class="eyebrow">工作台</p>
+            <h1>天道酬勤</h1>
+          </div>
+        </div>
+
+        <nav class="nav" aria-label="主导航">
+          <button class="nav-item active">概览</button>
+          <button class="nav-item">任务</button>
+          <button class="nav-item">学习</button>
+          <button class="nav-item">复盘</button>
+          <button class="nav-item">设置</button>
+        </nav>
+
+        <div class="mini-card">
+          <span>今日打卡</span>
+          <strong>18/20</strong>
+          <div class="progress"><i style="width: 90%"></i></div>
+        </div>
+      </aside>
+
+      <main class="panel">
+        <header class="panel-header">
+          <div>
+            <p class="eyebrow">仪表盘</p>
+            <h2>天道酬勤面板</h2>
+          </div>
+          <button class="primary-button">新增目标</button>
+        </header>
+
+        <section class="stats-grid" id="stats-grid" aria-label="关键指标"></section>
+
+        <section class="content-grid">
+          <article class="panel-card chart-card">
+            <div class="card-header">
+              <h3>学习热力</h3>
+              <span>最近7天</span>
+            </div>
+            <div class="bar-chart" aria-label="学习热力图">
+              <span style="--h: 68%"><em>1</em></span>
+              <span style="--h: 82%"><em>2</em></span>
+              <span style="--h: 54%"><em>3</em></span>
+              <span style="--h: 90%"><em>4</em></span>
+              <span style="--h: 74%"><em>5</em></span>
+              <span style="--h: 96%"><em>6</em></span>
+              <span style="--h: 88%"><em>7</em></span>
+            </div>
+          </article>
+
+          <article class="panel-card tasks-card">
+            <div class="card-header">
+              <h3>待办进度</h3>
+              <span>本周</span>
+            </div>
+            <ul class="task-list" id="task-list" aria-label="待办列表"></ul>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
