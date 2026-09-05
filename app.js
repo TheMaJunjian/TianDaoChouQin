@@ -36,15 +36,17 @@
     }
   }
 
-  function save() {
+  function saveKey(key, value) {
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state.entries));
-      window.localStorage.setItem(FOCUS_KEY, JSON.stringify(state.focus));
-      window.localStorage.setItem(NAME_KEY, JSON.stringify(state.host));
+      window.localStorage.setItem(key, JSON.stringify(value));
     } catch (e) {
       say('叮，存储模块异常，本次记录可能无法保存。');
     }
   }
+
+  function saveEntries() { saveKey(STORAGE_KEY, state.entries); }
+  function saveFocus() { saveKey(FOCUS_KEY, state.focus); }
+  function saveHost() { saveKey(NAME_KEY, state.host); }
 
   /* ---------- 工具 ---------- */
   function pad(n) { return (n < 10 ? '0' : '') + n; }
@@ -138,7 +140,7 @@
       activity: activity,
       level: el.level.value
     });
-    save();
+    saveEntries();
 
     state.viewDate = date;
     el.viewDate.value = date;
@@ -154,19 +156,23 @@
   /* ---------- 主修方向 ---------- */
   el.focusCategory.addEventListener('input', function () {
     state.focus = el.focusCategory.value.trim();
-    save();
+    saveFocus();
     renderFocus();
   });
 
   /* ---------- 宿主称号 ---------- */
   el.hostName.addEventListener('click', function () {
+    renameHost();
+  });
+
+  function renameHost() {
     var name = window.prompt('叮，请宿主输入称号：', state.host);
     if (name === null) { return; }
     state.host = name.trim() || '未命名修行者';
-    save();
+    saveHost();
     el.hostName.textContent = state.host;
     say('叮，宿主称号已更新为「' + state.host + '」。');
-  });
+  }
 
   /* ---------- 日期导航 ---------- */
   el.prevDay.addEventListener('click', function () { setViewDate(shiftDate(state.viewDate, -1)); });
@@ -186,7 +192,7 @@
     var id = event.target.getAttribute && event.target.getAttribute('data-del');
     if (!id) { return; }
     state.entries = state.entries.filter(function (e) { return e.id !== id; });
-    save();
+    saveEntries();
     say('叮，该段记录已从时间线抹除。');
     render();
   });
@@ -222,7 +228,7 @@
   el.clearDay.addEventListener('click', function () {
     if (!window.confirm('确认清空 ' + state.viewDate + ' 的全部记录？')) { return; }
     state.entries = state.entries.filter(function (e) { return e.date !== state.viewDate; });
-    save();
+    saveEntries();
     say('叮，当日时间线已重置。');
     render();
   });
@@ -314,6 +320,8 @@
     }).join('');
   }
 
+  function normalize(name) { return String(name).trim().toLowerCase(); }
+
   function renderFocus() {
     var focus = state.focus;
     el.focusLabel.textContent = focus || '未设定';
@@ -323,8 +331,9 @@
       el.focusHint.textContent = '叮，未设定主修方向，无法计算大道进度。';
       return;
     }
+    var key = normalize(focus);
     var minutes = state.entries.reduce(function (sum, e) {
-      return e.category === focus ? sum + (e.end - e.start) : sum;
+      return normalize(e.category) === key ? sum + (e.end - e.start) : sum;
     }, 0);
     var h = minutes / 60;
     var percent = Math.min(h / GOAL_HOURS * 100, 100);
@@ -337,15 +346,18 @@
   function renderCategories() {
     var map = {};
     state.entries.forEach(function (e) {
-      map[e.category] = (map[e.category] || 0) + (e.end - e.start);
+      var key = normalize(e.category);
+      if (!map[key]) { map[key] = { name: e.category.trim(), minutes: 0 }; }
+      map[key].minutes += e.end - e.start;
     });
-    var rows = Object.keys(map).sort(function (a, b) { return map[b] - map[a]; });
+    var rows = Object.keys(map).sort(function (a, b) { return map[b].minutes - map[a].minutes; });
     if (!rows.length) {
       el.catList.innerHTML = '<li><span>暂无数据</span><span>0.0 h</span></li>';
       return;
     }
-    el.catList.innerHTML = rows.map(function (name) {
-      return '<li><span>' + escapeHtml(name) + '</span><span>' + hours(map[name]) + ' h</span></li>';
+    el.catList.innerHTML = rows.map(function (key) {
+      return '<li><span>' + escapeHtml(map[key].name) + '</span><span>' +
+        hours(map[key].minutes) + ' h</span></li>';
     }).join('');
   }
 

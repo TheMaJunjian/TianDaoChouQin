@@ -279,5 +279,16 @@ input:focus, select:focus {
   .stat-grid { grid-template-columns: 1fr; }
 }
 
-#hostName { cursor: pointer; }
-#hostName:hover { color: var(--cyan); }
+.name-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  font: inherit;
+  font-size: 18px;
+  color: var(--green);
+  cursor: pointer;
+}
+
+.name-btn:hover { color: var(--cyan); }
+.name-btn:focus-visible { outline: 1px solid var(--cyan); }
