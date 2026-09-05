@@ -79,7 +79,11 @@
       .sort(function (a, b) { return a.start - b.start; });
   }
 
-  /* 合并重叠区间后统计已填时长，避免历史/导入数据重叠导致超过 24 小时。 */
+  function rawMinutes(list) {
+    return list.reduce(function (sum, e) { return sum + (e.end - e.start); }, 0);
+  }
+
+  /* 合并重叠区间后统计单日已填时长，避免历史/导入数据重叠导致超过 24 小时。 */
   function filledMinutes(list) {
     var sorted = list.slice().sort(function (a, b) { return a.start - b.start; });
     var total = 0;
@@ -128,7 +132,7 @@
 
     var start = toMinutes(startRaw);
     // 结束时间填 00:00 视为当日 24:00（时间输入框无法表示 24:00）。
-    var end = endRaw === '00:00' ? DAY_MINUTES : toMinutes(endRaw);
+    var end = toMinutes(endRaw) || DAY_MINUTES;
 
     if (end <= start) {
       say('叮，时间悖论警告：结束时间须晚于开始时间。跨夜请拆成两段记录。');
@@ -381,7 +385,7 @@
 
     el.todayFilled.textContent = hours(todayFilled) + ' h';
     el.todayMissing.textContent = hours(Math.max(DAY_MINUTES - todayFilled, 0)) + ' h';
-    el.totalHours.textContent = hours(filledMinutes(state.entries)) + ' h';
+    el.totalHours.textContent = hours(rawMinutes(state.entries)) + ' h';
 
     var coverage = Math.min(filled / DAY_MINUTES * 100, 100);
     el.coverageFill.style.width = coverage + '%';
@@ -402,7 +406,7 @@
     el.focusCategory.value = state.focus;
     el.hostName.textContent = state.host;
 
-    var total = filledMinutes(state.entries) / 60;
+    var total = rawMinutes(state.entries) / 60;
     el.bootLine.textContent = state.entries.length
       ? '叮，欢迎回来，宿主。已载入 ' + state.entries.length + ' 条时间记录，累计修行 ' +
         total.toFixed(1) + ' h。检测模块仍未修复，需要宿主手动输入。'
