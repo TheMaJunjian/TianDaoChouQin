@@ -1391,11 +1391,11 @@
         actions = '<button type="button" class="btn" data-submit="' + q.id + '">提交任务</button>';
       }
       actions += '<button type="button" class="btn ghost danger" data-del-quest="' + q.id + '">删除任务</button>';
+      var rewardClass = q.status === 'done' ? '' : ' quest-reward-pending';
       return '<li class="quest-item quest-' + q.status + '">' +
         '<div class="quest-title quest-title-row"><span>' + escapeHtml(q.title) + ' <span class="quest-status">[' + statusLabel + ']</span></span>' +
-        (q.status === 'done' ? '<span class="quest-reward quest-reward-inline">' + reward + '</span>' : '') + '</div>' +
+        '<span class="quest-reward quest-reward-inline' + rewardClass + '">' + reward + '</span></div>' +
         (q.desc ? '<div class="quest-desc">' + escapeHtml(q.desc) + '</div>' : '') +
-        (q.status === 'done' ? '' : '<div class="quest-reward">' + reward + '</div>') +
         '<div class="quest-actions">' + actions + '</div></li>';
     }).join('');
   }

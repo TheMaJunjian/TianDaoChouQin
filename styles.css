@@ -469,12 +469,13 @@ input:focus, select:focus {
 .ach-desc { flex: 1 1 auto; min-width: 0; color: var(--muted); font-size: 11px; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 
 .quest-title { color: var(--cyan); font-size: 13px; }
-.quest-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.quest-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .quest-title-row > span:first-child { min-width: 0; }
 .quest-status { color: var(--muted); font-size: 11px; }
 .quest-desc { color: var(--muted); font-size: 12px; margin: 4px 0; }
 .quest-reward { color: var(--green); font-size: 11px; }
-.quest-reward-inline { flex: 0 0 auto; text-align: right; white-space: nowrap; }
+.quest-reward-inline { flex: 0 0 auto; margin-left: auto; text-align: right; white-space: nowrap; }
+.quest-reward-pending { color: var(--muted); }
 .quest-actions { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
 .quest-progress { color: var(--text); font-size: 13px; margin-bottom: 6px; }
 .quest-card { margin-top: 10px; border: 1px solid var(--line); border-radius: 4px; padding: 10px; }
