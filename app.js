@@ -6,7 +6,7 @@
   'use strict';
 
   /* ---------- 常量 ---------- */
-  var APP_VERSION = '0.2'; // 开发者系统等级：本次更新即「主线任务」背后的真实版本迭代
+  var APP_VERSION = '0.3'; // 开发者系统等级：本次更新即「主线任务」背后的真实版本迭代
   var STORAGE_KEY = 'tiandao.state.v2';
   var LEGACY_ENTRIES_KEY = 'tiandao.entries.v1';
   var LEGACY_FOCUS_KEY = 'tiandao.focus.v1';
@@ -1180,7 +1180,7 @@
   }
 
   function renderTaskFloat() {
-    var mainTotal = MAIN_QUEST_CLUES.length;
+    var mainTotal = availableMainQuestTotal();
     var mainCompleted = Math.min(state.quests.mainCompleted, mainTotal);
     var sideTasks = state.quests.side;
     var sideDone = sideTasks.filter(function (q) { return q.status === 'done'; }).length;
@@ -1188,7 +1188,7 @@
     var completed = useSide ? sideDone : mainCompleted;
     var total = useSide ? sideTasks.length : mainTotal;
     var label = useSide ? '支线任务' : '主线任务';
-    var percent = total ? Math.min(completed / total * 100, 100) : 0;
+    var percent = total ? Math.min(completed / total * (useSide ? 100 : 99), useSide ? 100 : 99) : 0;
     el.polishFloatLabel.textContent = label;
     el.polishFloatPercent.textContent = completed + '/' + total;
     el.polishFloatFill.style.width = percent + '%';
@@ -1215,22 +1215,24 @@
   }
 
   /* ---------- 任务系统 ---------- */
-  function onOpenQuestTab() {
-    if (state.quests.mainRevealed === 0) {
-      state.quests.mainRevealed = 1;
-      persist();
-      toast('获得主线任务：解锁系统面板全部功能，当前进度 0/TREE（' + MAIN_QUEST_CLUES.length + '）。');
-    } else if (state.quests.lastSeenAppVersion !== APP_VERSION &&
-      state.quests.mainRevealed < MAIN_QUEST_CLUES.length &&
-      state.quests.mainCompleted >= state.quests.mainRevealed) {
-      state.quests.mainRevealed += 1;
+  function availableMainQuestTotal() {
+    return Math.min(Math.max(Number(state.quests.mainRevealed) || 0, 0), MAIN_QUEST_CLUES.length);
+  }
+
+  function syncMainQuestAvailability() {
+    var total = MAIN_QUEST_CLUES.length;
+    var versionChanged = state.quests.lastSeenAppVersion !== APP_VERSION;
+    if (!versionChanged) { return; }
+    state.quests.mainRevealed = total;
+    if (versionChanged && state.quests.mainCompleted < total) {
       state.quests.mainAccepted = false;
-      state.quests.lastSeenAppVersion = APP_VERSION;
-      persist();
-      toast('检测到系统更新（' + previousVersionTag() + ' → ' + APP_VERSION +
-        '），解锁主线任务线索 ' + state.quests.mainRevealed + '：' +
-        MAIN_QUEST_CLUES[state.quests.mainRevealed - 1]);
     }
+    state.quests.lastSeenAppVersion = APP_VERSION;
+    persist();
+  }
+
+  function onOpenQuestTab() {
+    syncMainQuestAvailability();
     renderMainQuest();
     renderSideQuests();
     updateQuestBadge();
@@ -1245,33 +1247,35 @@
   function currentClueIndex() { return state.quests.mainCompleted; } // 0-based，指向下一条待完成线索
 
   function renderMainQuest() {
-    var total = MAIN_QUEST_CLUES.length;
+    var total = availableMainQuestTotal();
     var completed = state.quests.mainCompleted;
-    var revealed = state.quests.mainRevealed;
-
-    if (revealed === 0) {
+    if (!total) {
       el.mainQuestBody.innerHTML = '<p class="hint">主线任务尚未加载，请稍候……</p>';
       return;
     }
-
+    var progress = total ? Math.min(completed / total * 99, 99) : 0;
     var html = '<div class="quest-progress">解锁系统面板全部功能 · 进度 ' + completed + '/TREE（' + total + '）</div>' +
-      '<div class="progress-bar"><div class="progress-fill" style="width:' + (completed / total * 100) + '%"></div></div>';
+      '<div class="progress-bar"><div class="progress-fill" style="width:' + progress + '%"></div></div>';
+
+    MAIN_QUEST_CLUES.slice(0, total).forEach(function (clue, index) {
+      var status = index < completed ? '已完成' : (index === completed ? '进行中' : '未开始');
+      var actions = '';
+      if (index === completed && completed < total) {
+        actions = '<div class="quest-actions">' +
+          '<button type="button" class="btn ghost" id="questGuide">查看指引</button>' +
+          (state.quests.mainAccepted
+            ? '<button type="button" class="btn" id="questSubmit">提交任务</button>'
+            : '<button type="button" class="btn" id="questAccept">接受任务</button>') +
+          '</div>';
+      }
+      html += '<div class="quest-card quest-main-' + (index < completed ? 'done' : index === completed ? 'active' : 'locked') + '">' +
+        '<div class="quest-title">线索 ' + (index + 1) + '：' + escapeHtml(clue) + ' <span class="quest-status">[' + status + ']</span></div>' +
+        actions + '</div>';
+    });
 
     if (completed >= total) {
       html += '<p class="hint">当前已发布的主线任务线索已全部完成，系统等级 ' + userVersionText() +
         '。等待开发者发布下一次系统更新（当前系统等级 ' + APP_VERSION + '）。</p>';
-    } else if (completed < revealed) {
-      var clue = MAIN_QUEST_CLUES[completed];
-      html += '<div class="quest-card">' +
-        '<div class="quest-title">线索 ' + (completed + 1) + '：' + escapeHtml(clue) + '</div>' +
-        '<div class="quest-actions">' +
-        '<button type="button" class="btn ghost" id="questGuide">查看指引</button>' +
-        (state.quests.mainAccepted
-          ? '<button type="button" class="btn" id="questSubmit">提交任务</button>'
-          : '<button type="button" class="btn" id="questAccept">接受任务</button>') +
-        '</div></div>';
-    } else {
-      html += '<p class="hint">本条线索已提交，等待系统更新解锁下一条线索。可尝试重新进入本标签页检查更新。</p>';
     }
     el.mainQuestBody.innerHTML = html;
 
@@ -1401,7 +1405,7 @@
   }
 
   function updateQuestBadge() {
-    var pendingMain = (state.quests.mainRevealed > state.quests.mainCompleted) ? 1 : 0;
+    var pendingMain = (availableMainQuestTotal() > state.quests.mainCompleted) ? 1 : 0;
     var pendingSide = state.quests.side.filter(function (q) { return q.status !== 'done'; }).length;
     if (pendingMain + pendingSide > 0) { flashTab('quest'); }
   }
@@ -1556,6 +1560,7 @@
   /* ---------- 初始化 ---------- */
   function init() {
     fillSkillLevelSelect();
+    syncMainQuestAvailability();
     setActiveTab('attr');
     fullRender();
     setupClickHints();
