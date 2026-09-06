@@ -775,8 +775,7 @@
       return '<li class="ach-item">' +
         '<div class="ach-head"><span class="ach-name">🏆 ' + escapeHtml(a2.name) + '</span>' +
         (a2.desc ? '<span class="ach-desc">' + escapeHtml(a2.desc) + '</span>' : '') +
-        '<span class="ach-pt">+' + a2.points + '</span>' +
-        '<button type="button" class="attr-plus" data-attr-plus="ach" aria-label="强化成就">+</button></div>' +
+        '<span class="ach-pt">+' + a2.points + '</span></div>' +
         '</li>';
     }).join('');
     renderAchievementListToggle();

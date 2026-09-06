@@ -494,7 +494,6 @@ input:focus, select:focus {
 /* 技能条目上的置灰 [+]：与基础属性保持一致的锁定样式 */
 .skill-head .attr-plus { width: 22px; height: 22px; font-size: 12px; }
 .skill-head .attr-plus { justify-self: end; }
-.ach-head .attr-plus { width: 22px; height: 22px; font-size: 12px; }
 
 .detail-modal-box { width: min(92vw, 480px); }
 .detail-modal-body { max-height: 50vh; overflow: auto; }
