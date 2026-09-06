@@ -575,6 +575,19 @@
   bindAttrField(el.attrProperty, 'property', '财产');
   bindAttrField(el.attrStatus, 'status', '状态');
 
+  document.querySelectorAll('[data-weight-step]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var step = Number(el.attrWeight.step) || 0.1;
+      var value = Number(el.attrWeight.value);
+      if (!Number.isFinite(value)) { value = 0; }
+      value += (Number(button.getAttribute('data-weight-step')) || 0) * step;
+      value = Math.max(Number(el.attrWeight.min) || 0, value);
+      el.attrWeight.value = value.toFixed(1);
+      el.attrWeight.dispatchEvent(new Event('input', { bubbles: true }));
+      el.attrWeight.focus();
+    });
+  });
+
   /* ---------- 技能 ---------- */
   var MAX_UNLOCKED_LEVEL = SKILL_LEVELS.filter(function (l) { return !l.locked; }).slice(-1)[0];
   var FIRST_LOCKED_LEVEL = SKILL_LEVELS.filter(function (l) { return l.locked; })[0];
