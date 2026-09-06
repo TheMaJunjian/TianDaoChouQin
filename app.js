@@ -650,10 +650,15 @@
   }
 
   function openConfirmModal(message, onConfirm) {
+    if (pendingConfirm) {
+      toast('请先完成当前确认操作。', { level: 'WARN' });
+      return false;
+    }
     pendingConfirm = onConfirm;
     el.confirmMessage.textContent = message;
     el.confirmModal.classList.remove('hidden');
     window.setTimeout(function () { el.confirmAccept.focus(); }, 30);
+    return true;
   }
 
   el.confirmAccept.addEventListener('click', function () {
@@ -1175,10 +1180,14 @@
   el.logView.addEventListener('click', function (event) {
     var id = event.target.getAttribute && event.target.getAttribute('data-del');
     if (!id) { return; }
-    state.entries = state.entries.filter(function (e) { return e.id !== id; });
-    persist();
-    toast('该段记录已从时间线抹除。', { level: 'TRAIN' });
-    refreshAll();
+    var entry = state.entries.filter(function (e) { return e.id === id; })[0];
+    if (!entry) { return; }
+    openConfirmModal('确认删除 ' + toClock(entry.start) + '-' + toClock(entry.end) + ' 的日志记录？', function () {
+      state.entries = state.entries.filter(function (e) { return e.id !== id; });
+      persist();
+      toast('该段记录已从时间线抹除。', { level: 'TRAIN' });
+      refreshAll();
+    });
   });
 
   el.copyLog.addEventListener('click', function () {
@@ -1232,11 +1241,13 @@
           throw new Error('导入数据必须是对象。');
         }
         var importedState = mergeDefaults(parsed);
-        clearQuestUpgradeTimers();
-        state = importedState;
-        persist();
-        toast('宿主数据导入成功，面板已重新同步。', { level: 'SYSTEM' });
-        fullRender();
+        openConfirmModal('确认导入数据并覆盖当前面板数据？', function () {
+          clearQuestUpgradeTimers();
+          state = importedState;
+          persist();
+          toast('宿主数据导入成功，面板已重新同步。', { level: 'SYSTEM' });
+          fullRender();
+        });
       } catch (e) {
         state = previousState;
         toast('导入文件格式异常，数据未变更。', { level: 'ERROR' });
@@ -1714,8 +1725,13 @@
         '，贡献点 +' + quest.rewardContrib + '。', { level: 'REWARD' });
       toast('该支线任务已记入成就簿【' + quest.title + '】，获得成就点 +' + achPoints + '。', { level: 'REWARD' });
     } else if (target.hasAttribute('data-del-quest')) {
-      state.quests.side = state.quests.side.filter(function (q) { return q.id !== id; });
-      persist();
+      openConfirmModal('确认删除支线任务【' + quest.title + '】？已获得的奖励和成就不会撤销。', function () {
+        state.quests.side = state.quests.side.filter(function (q) { return q.id !== id; });
+        persist();
+        toast('支线任务【' + quest.title + '】已删除。', { level: 'SYSTEM' });
+        refreshAll();
+      });
+      return;
     }
     refreshAll();
   });
@@ -1790,10 +1806,12 @@
   }
 
   el.clearNotices.addEventListener('click', function () {
-    state.notifications = [];
-    state.noticeSeenCount = 0;
-    persist();
-    renderNotifications();
+    openConfirmModal('确认清空全部提示记录？此操作不可撤销。', function () {
+      state.notifications = [];
+      state.noticeSeenCount = 0;
+      persist();
+      renderNotifications();
+    });
   });
 
   /* ---------- 异常检测彩蛋 ---------- */
