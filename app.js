@@ -56,6 +56,7 @@
         side: []
       },
       notifications: [],
+      noticeSeenCount: 0,
       viewDate: todayStr(),
       firstRun: true
     };
@@ -110,20 +111,25 @@
 
   function mergeDefaults(parsed) {
     var base = defaultState();
+    if (!parsed || typeof parsed !== 'object') { return base; }
     var merged = base;
-    try {
-      merged.entries = Array.isArray(parsed.entries) ? parsed.entries : base.entries;
-      merged.focus = typeof parsed.focus === 'string' ? parsed.focus : base.focus;
-      merged.host = Object.assign({}, base.host, parsed.host || {});
-      merged.skills = Array.isArray(parsed.skills) ? parsed.skills : base.skills;
-      merged.achievements = Array.isArray(parsed.achievements) ? parsed.achievements : base.achievements;
-      merged.points = Object.assign({}, base.points, parsed.points || {});
-      merged.quests = Object.assign({}, base.quests, parsed.quests || {});
+
+    function safe(fn) { try { fn(); } catch (e) { /* keep default for this field only */ } }
+
+    safe(function () { merged.entries = Array.isArray(parsed.entries) ? parsed.entries : base.entries; });
+    safe(function () { merged.focus = typeof parsed.focus === 'string' ? parsed.focus : base.focus; });
+    safe(function () { merged.host = Object.assign({}, base.host, (parsed.host && typeof parsed.host === 'object') ? parsed.host : {}); });
+    safe(function () { merged.skills = Array.isArray(parsed.skills) ? parsed.skills : base.skills; });
+    safe(function () { merged.achievements = Array.isArray(parsed.achievements) ? parsed.achievements : base.achievements; });
+    safe(function () { merged.points = Object.assign({}, base.points, (parsed.points && typeof parsed.points === 'object') ? parsed.points : {}); });
+    safe(function () {
+      merged.quests = Object.assign({}, base.quests, (parsed.quests && typeof parsed.quests === 'object') ? parsed.quests : {});
       merged.quests.side = Array.isArray(merged.quests.side) ? merged.quests.side : [];
-      merged.notifications = Array.isArray(parsed.notifications) ? parsed.notifications : [];
-      merged.viewDate = typeof parsed.viewDate === 'string' ? parsed.viewDate : todayStr();
-      merged.firstRun = false;
-    } catch (e) { return base; }
+    });
+    safe(function () { merged.notifications = Array.isArray(parsed.notifications) ? parsed.notifications : []; });
+    safe(function () { merged.noticeSeenCount = typeof parsed.noticeSeenCount === 'number' ? parsed.noticeSeenCount : 0; });
+    safe(function () { merged.viewDate = typeof parsed.viewDate === 'string' ? parsed.viewDate : todayStr(); });
+    merged.firstRun = false;
     return merged;
   }
 
@@ -139,9 +145,15 @@
 
   /* 简单校验签名：用于检测宿主是否绕过面板直接改写 localStorage 数值。 */
   function computeSignature() {
+    var sideRewardSum = state.quests.side.reduce(function (sum, q) {
+      return sum + (q.status === 'done' ? q.rewardAttr + q.rewardContrib : 0);
+    }, 0);
+    var achPointSum = state.achievements.reduce(function (sum, a) { return sum + a.points; }, 0);
+    var skillHourSum = state.skills.reduce(function (sum, s) { return sum + s.hours; }, 0);
     var payload = [
       state.points.attribute, state.points.contribution, state.points.achievement,
-      state.quests.mainCompleted, state.quests.mainRevealed
+      state.quests.mainCompleted, state.quests.mainRevealed,
+      sideRewardSum, achPointSum, skillHourSum
     ].join('|');
     var hash = 0;
     for (var i = 0; i < payload.length; i++) {
@@ -291,6 +303,11 @@
       p.classList.toggle('active', p.getAttribute('data-tab-panel') === tab);
     });
     if (tab === 'quest') { onOpenQuestTab(); }
+    if (tab === 'notice') {
+      state.noticeSeenCount = state.notifications.length;
+      persist();
+      updateNoticeBadge();
+    }
   }
 
   /* ---------- 宿主称号 ---------- */
@@ -966,11 +983,17 @@
           '</div>';
       }).join('');
     }
-    el.noticeBadge.textContent = '';
+    updateNoticeBadge();
+  }
+
+  function updateNoticeBadge() {
+    var unread = Math.max(state.notifications.length - state.noticeSeenCount, 0);
+    el.noticeBadge.textContent = unread > 0 ? unread : '';
   }
 
   el.clearNotices.addEventListener('click', function () {
     state.notifications = [];
+    state.noticeSeenCount = 0;
     persist();
     renderNotifications();
   });
