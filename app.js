@@ -6,7 +6,7 @@
   'use strict';
 
   /* ---------- 常量 ---------- */
-  var APP_VERSION = '0.2'; // 开发者固件版本：本次更新即「主线任务」背后的真实版本迭代
+  var APP_VERSION = '0.2'; // 开发者系统等级：本次更新即「主线任务」背后的真实版本迭代
   var STORAGE_KEY = 'tiandao.state.v2';
   var LEGACY_ENTRIES_KEY = 'tiandao.entries.v1';
   var LEGACY_FOCUS_KEY = 'tiandao.focus.v1';
@@ -67,11 +67,12 @@
   var el = {};
   [
     'toastStack', 'userVersion', 'pAch', 'pContrib', 'pAttr', 'tabbar',
-    'questBadge', 'noticeBadge',
+    'polishFloat', 'polishFloatFill', 'polishFloatPercent', 'polishBlock',
+    'attrSkillSummary', 'attrAchSummary', 'skillCard', 'achCard',
     'hostName', 'todayFilled', 'todayMissing', 'totalHours', 'focusCategory',
     'focusLabel', 'focusPercent', 'focusFill', 'focusHint',
     'attrWeight', 'attrEdu', 'attrTalent', 'attrProperty', 'attrStatus',
-    'polishPercent', 'polishFill', 'polishHint',
+    'polishPercent', 'polishFill',
     'skillForm', 'skillName', 'skillMode', 'skillLevelWrap', 'skillLevel',
     'skillHoursWrap', 'skillHours', 'skillList',
     'achForm', 'achName', 'achPoints', 'achDesc', 'achList',
@@ -139,7 +140,7 @@
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (e) {
-      toast('叮，存储模块异常，本次记录可能无法持久化保存。', { level: 'ERROR' });
+      toast('存储模块异常，本次记录可能无法持久化保存。', { level: 'ERROR' });
       return;
     }
     // 签名计算涉及多次数组遍历，防抖到空闲时统一计算一次，避免频繁操作（如逐字输入）时反复重算。
@@ -265,11 +266,9 @@
       card.className = 'toast' + (opts.level ? ' toast-' + opts.level.toLowerCase() : '');
       card.textContent = text;
       el.toastStack.appendChild(card);
-      window.setTimeout(function () { card.classList.add('show'); }, 10);
-      window.setTimeout(function () {
-        card.classList.remove('show');
-        window.setTimeout(function () { card.remove(); }, 400);
-      }, 4200);
+      // 弹窗在屏幕中央出现，上移一段距离后悬停，最后虚化消失（动画由 CSS 负责）。
+      card.addEventListener('animationend', function () { card.remove(); });
+      window.setTimeout(function () { card.remove(); }, 5200);
     }
 
     // 记录到提示标签页：即便短时间重复触发也只在日志里追加一次「(x n)」计数，避免刷屏。
@@ -288,7 +287,17 @@
   /* ---------- 属性点强化：始终锁定，仅作为「未来可期」的占位 ---------- */
   document.querySelectorAll('.attr-plus').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      toast('叮，系统等级不足，当前功能缺失。请完成主线任务以解锁属性强化模块。', { level: 'WARN' });
+      var jump = btn.getAttribute('data-jump');
+      if (jump) {
+        var card = document.getElementById(jump);
+        if (card) {
+          card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          var input = card.querySelector('input');
+          if (input) { window.setTimeout(function () { input.focus(); }, 300); }
+        }
+        return;
+      }
+      toast('系统等级不足，当前功能缺失。请完成主线任务以解锁属性强化模块。', { level: 'WARN' });
     });
   });
 
@@ -306,6 +315,7 @@
     document.querySelectorAll('.tab-panel').forEach(function (p) {
       p.classList.toggle('active', p.getAttribute('data-tab-panel') === tab);
     });
+    updatePolishFloat();
     if (tab === 'quest') { onOpenQuestTab(); }
     if (tab === 'notice') {
       state.noticeSeenCount = state.notifications.length;
@@ -316,12 +326,12 @@
 
   /* ---------- 宿主称号 ---------- */
   el.hostName.addEventListener('click', function () {
-    var name = window.prompt('叮，请宿主输入称号：', state.host.name);
+    var name = window.prompt('请宿主输入称号：', state.host.name);
     if (name === null) { return; }
     state.host.name = name.trim() || '未命名修行者';
     persist();
     el.hostName.textContent = state.host.name;
-    toast('叮，宿主称号已更新为「' + state.host.name + '」。系统已绑定。');
+    toast('宿主称号已更新为「' + state.host.name + '」。系统已绑定。');
     renderPolish();
   });
 
@@ -339,7 +349,7 @@
       state.host[field] = value;
       persist();
       if (value) {
-        toast('叮，检测到宿主' + label + '数据录入：【' + value + '】，属性面板已更新。');
+        toast('检测到宿主' + label + '数据复写：【' + value + '】，属性面板已更新。');
       }
       renderPolish();
     });
@@ -351,12 +361,30 @@
   bindAttrField(el.attrStatus, 'status', '状态');
 
   /* ---------- 技能 ---------- */
+  var MAX_UNLOCKED_LEVEL = SKILL_LEVELS.filter(function (l) { return !l.locked; }).slice(-1)[0];
+  var FIRST_LOCKED_LEVEL = SKILL_LEVELS.filter(function (l) { return l.locked; })[0];
+
   function fillSkillLevelSelect() {
-    el.skillLevel.innerHTML = SKILL_LEVELS.filter(function (l) { return !l.locked; }).map(function (l) {
-      return '<option value="' + l.key + '">' + l.label + '（约 ' + l.minHours + '+ 小时）</option>';
+    // 锁定等级同样展示（开放可见），但不可被选中：选中后会被系统还原并给出提示。
+    el.skillLevel.innerHTML = SKILL_LEVELS.map(function (l) {
+      return '<option value="' + l.key + '"' + (l.locked ? ' class="level-locked"' : '') + '>' +
+        l.label + '（约 ' + l.minHours + '+ 小时）' + (l.locked ? ' · 系统等级限制' : '') + '</option>';
     }).join('');
+    el.skillLevel.value = SKILL_LEVELS[0].key;
+    lastSkillLevel = el.skillLevel.value;
   }
+  var lastSkillLevel = SKILL_LEVELS[0].key;
   fillSkillLevelSelect();
+
+  el.skillLevel.addEventListener('change', function () {
+    var picked = SKILL_LEVELS.filter(function (l) { return l.key === el.skillLevel.value; })[0];
+    if (picked && picked.locked) {
+      el.skillLevel.value = lastSkillLevel;
+      toast('宿主技能超过当前系统等级限制，「' + picked.label + '」暂不可复写。', { level: 'WARN' });
+      return;
+    }
+    lastSkillLevel = el.skillLevel.value;
+  });
 
   el.skillMode.addEventListener('change', function () {
     var byLevel = el.skillMode.value === 'level';
@@ -364,12 +392,17 @@
     el.skillHoursWrap.classList.toggle('hidden', byLevel);
   });
 
+  /* 受系统等级限制：无论累计多少小时，展示等级都不会越过最高的未锁定等级。 */
   function levelForHours(h) {
     var current = SKILL_LEVELS[0];
     for (var i = 0; i < SKILL_LEVELS.length; i++) {
-      if (h >= SKILL_LEVELS[i].minHours) { current = SKILL_LEVELS[i]; }
+      if (!SKILL_LEVELS[i].locked && h >= SKILL_LEVELS[i].minHours) { current = SKILL_LEVELS[i]; }
     }
     return current;
+  }
+
+  function exceedsSystemLimit(h) {
+    return !!FIRST_LOCKED_LEVEL && h >= FIRST_LOCKED_LEVEL.minHours;
   }
 
   el.skillForm.addEventListener('submit', function (event) {
@@ -395,8 +428,14 @@
     persist();
 
     var lv = levelForHours(hoursValue);
-    toast('叮，检测到宿主技能【' + name + '】，当前等级：' + lv.label +
+    toast('检测到宿主技能【' + name + '】，当前等级：' + lv.label +
       '（累计 ' + hoursValue + ' 小时）。');
+
+    if (exceedsSystemLimit(hoursValue)) {
+      toast('技能【' + name + '】累计已突破 ' + FIRST_LOCKED_LEVEL.minHours +
+        ' 小时，本应进入下一等级「' + FIRST_LOCKED_LEVEL.label +
+        '」，但受当前系统等级限制，该功能缺失。', { level: 'WARN' });
+    }
 
     el.skillForm.reset();
     fillSkillLevelSelect();
@@ -412,7 +451,7 @@
     var skill = state.skills.filter(function (s) { return s.id === id; })[0];
     state.skills = state.skills.filter(function (s) { return s.id !== id; });
     persist();
-    if (skill) { toast('叮，技能【' + skill.name + '】记录已从面板抹除。'); }
+    if (skill) { toast('技能【' + skill.name + '】记录已从面板抹除。'); }
     renderSkills();
     renderPolish();
   });
@@ -425,16 +464,20 @@
     el.skillList.innerHTML = state.skills.slice().sort(function (a, b) { return b.hours - a.hours; }).map(function (s) {
       var lv = levelForHours(s.hours);
       var next = SKILL_LEVELS[SKILL_LEVELS.indexOf(lv) + 1];
-      var progressText = next
-        ? (next.locked
-          ? '（检测到更高等级「' + next.label + '」，功能缺失，需完成主线任务解锁）'
-          : '（距「' + next.label + '」还差 ' + Math.max(next.minHours - s.hours, 0) + ' 小时）')
-        : '';
-      return '<li class="skill-item' + (lv.locked ? ' locked' : '') + '">' +
-        '<div class="skill-head"><span class="skill-name">' + escapeHtml(s.name) + '</span>' +
-        '<span class="skill-lv">' + lv.label + '</span></div>' +
-        '<div class="skill-meta">累计 ' + s.hours + ' 小时 ' + progressText + '</div>' +
-        '<button type="button" class="del" data-del-skill="' + s.id + '" title="删除">[x]</button>' +
+      var capped = exceedsSystemLimit(s.hours);
+      var progressText = capped
+        ? '已突破 ' + FIRST_LOCKED_LEVEL.minHours + ' 小时，下一等级「' + FIRST_LOCKED_LEVEL.label + '」受系统等级限制'
+        : (next
+          ? '距「' + next.label + '」还差 ' + Math.max(next.minHours - s.hours, 0) + ' 小时'
+          : '');
+      return '<li class="skill-item' + (capped ? ' capped' : '') + '">' +
+        '<div class="skill-head">' +
+        '<span class="skill-name">' + escapeHtml(s.name) + '</span>' +
+        '<span class="skill-lv">' + lv.label + '</span>' +
+        '<button type="button" class="del" data-del-skill="' + s.id + '" title="删除技能">[x]</button>' +
+        '</div>' +
+        '<div class="skill-meta">累计 ' + s.hours + ' 小时' +
+        (progressText ? ' · ' + progressText : '') + '</div>' +
         '</li>';
     }).join('');
   }
@@ -449,7 +492,7 @@
     state.achievements.push({ id: uid(), name: name, points: points, desc: desc });
     state.points.achievement += points;
     persist();
-    toast('叮，检测到宿主达成成就【' + name + '】，获得成就点 +' + points + '。');
+    toast('检测到宿主达成成就【' + name + '】，获得成就点 +' + points + '。');
     el.achForm.reset();
     el.achPoints.value = 10;
     renderAchievements();
@@ -470,15 +513,17 @@
       el.achList.innerHTML = '<li class="empty">暂无成就，宿主的传说尚待书写。</li>';
       return;
     }
-    el.achList.innerHTML = state.achievements.slice().reverse().map(function (a) {
-      return '<li class="ach-item"><span class="ach-name">🏆 ' + escapeHtml(a.name) +
-        '</span><span class="ach-pt">+' + a.points + '</span>' +
+    el.achList.innerHTML = state.achievements.slice().map(function (a) {
+      return '<li class="ach-item">' +
+        '<div class="ach-head"><span class="ach-name">🏆 ' + escapeHtml(a.name) + '</span>' +
+        '<span class="ach-pt">+' + a.points + '</span>' +
+        '<button type="button" class="del" data-del-ach="' + a.id + '" title="删除成就">[x]</button></div>' +
         (a.desc ? '<div class="ach-desc">' + escapeHtml(a.desc) + '</div>' : '') +
-        '<button type="button" class="del" data-del-ach="' + a.id + '" title="删除">[x]</button></li>';
+        '</li>';
     }).join('');
   }
 
-  /* ---------- 录入时间段 ---------- */
+  /* ---------- 复写时间段 ---------- */
   el.entryForm.addEventListener('submit', function (event) {
     event.preventDefault();
 
@@ -489,7 +534,7 @@
     var activity = el.activity.value.trim();
 
     if (!date || !startRaw || !endRaw || !category || !activity) {
-      toast('叮，输入不完整，检测功能丢失，需要宿主手动补全。', { level: 'WARN' });
+      toast('输入不完整，检测功能丢失，需要宿主手动补全。', { level: 'WARN' });
       return;
     }
 
@@ -497,14 +542,14 @@
     var end = toMinutes(endRaw) || DAY_MINUTES;
 
     if (end <= start) {
-      toast('叮，时间悖论警告：结束时间须晚于开始时间。跨夜请拆成两段记录。', { level: 'ERROR' });
+      toast('时间悖论警告：结束时间须晚于开始时间。跨夜请拆成两段记录。', { level: 'ERROR' });
       return;
     }
 
     var dayList = byDate(date);
     var clash = overlaps(dayList, start, end);
     if (clash) {
-      toast('叮，时间线冲突：' + toClock(clash.start) + '-' + toClock(clash.end) +
+      toast('时间线冲突：' + toClock(clash.start) + '-' + toClock(clash.end) +
         ' 已记录「' + clash.activity + '」，宿主无法分身。', { level: 'ERROR' });
       return;
     }
@@ -526,7 +571,7 @@
     el.startTime.value = end === DAY_MINUTES ? '' : toClock(end);
     el.endTime.value = '';
 
-    toast('叮，日志写入成功：' + toClock(start) + '-' + toClock(end) + ' ' + activity +
+    toast('日志写入成功：' + toClock(start) + '-' + toClock(end) + ' ' + activity +
       '（+' + hours(end - start) + ' h）。');
     render();
   });
@@ -551,7 +596,7 @@
     if (!id) { return; }
     state.entries = state.entries.filter(function (e) { return e.id !== id; });
     persist();
-    toast('叮，该段记录已从时间线抹除。');
+    toast('该段记录已从时间线抹除。');
     render();
   });
 
@@ -561,12 +606,12 @@
     }).join('\n');
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(function () {
-        toast('叮，日志已复制到剪贴板。');
+        toast('日志已复制到剪贴板。');
       }, function () {
-        toast('叮，剪贴板权限缺失，需要宿主手动选中复制。', { level: 'WARN' });
+        toast('剪贴板权限缺失，需要宿主手动选中复制。', { level: 'WARN' });
       });
     } else {
-      toast('叮，剪贴板模块丢失，需要宿主手动选中复制。', { level: 'WARN' });
+      toast('剪贴板模块丢失，需要宿主手动选中复制。', { level: 'WARN' });
     }
   });
 
@@ -574,7 +619,7 @@
     if (!window.confirm('确认清空 ' + state.viewDate + ' 的全部记录？')) { return; }
     state.entries = state.entries.filter(function (e) { return e.date !== state.viewDate; });
     persist();
-    toast('叮，当日时间线已重置。');
+    toast('当日时间线已重置。');
     render();
   });
 
@@ -589,7 +634,7 @@
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    toast('叮，修行数据已导出备份。');
+    toast('修行数据已导出备份。');
   });
 
   el.importBtn.addEventListener('click', function () { el.importFile.click(); });
@@ -602,10 +647,10 @@
         var parsed = JSON.parse(String(reader.result));
         state = mergeDefaults(parsed);
         persist();
-        toast('叮，宿主数据导入成功，面板已重新同步。');
+        toast('宿主数据导入成功，面板已重新同步。');
         fullRender();
       } catch (e) {
-        toast('叮，导入文件格式异常，数据未变更。', { level: 'ERROR' });
+        toast('导入文件格式异常，数据未变更。', { level: 'ERROR' });
       }
     };
     reader.readAsText(file);
@@ -616,7 +661,7 @@
     if (!window.confirm('确认重置全部本地数据？此操作不可撤销，请先导出备份。')) { return; }
     state = defaultState();
     persist();
-    toast('叮，系统已恢复出厂设置。检测模块丢失，一切需要宿主重新手动输入。');
+    toast('系统已恢复出厂设置。检测模块丢失，一切需要宿主重新手动输入。');
     fullRender();
   });
 
@@ -676,7 +721,7 @@
       time: '23:59:59',
       level: filled >= DAY_MINUTES ? 'SYSTEM' : 'WARN',
       message: filled >= DAY_MINUTES
-        ? '叮，当日时间线已填满，日志归档完成，共 ' + list.length + ' 条记录。'
+        ? '当日时间线已填满，日志归档完成，共 ' + list.length + ' 条记录。'
         : '当日日志尚未闭合，剩余 ' + hours(DAY_MINUTES - filled) + ' h 去向不明。',
       id: null
     });
@@ -713,7 +758,7 @@
     if (!focus) {
       el.focusFill.style.width = '0%';
       el.focusPercent.textContent = '0.000%';
-      el.focusHint.textContent = '叮，未设定主修方向，无法计算大道进度。';
+      el.focusHint.textContent = '未设定主修方向，无法计算大道进度。';
       return;
     }
     var key = normalize(focus);
@@ -724,7 +769,7 @@
     var percent = Math.min(h / GOAL_HOURS * 100, 100);
     el.focusFill.style.width = percent + '%';
     el.focusPercent.textContent = percent.toFixed(3) + '%';
-    el.focusHint.textContent = '叮，「' + focus + '」已累计 ' + h.toFixed(1) +
+    el.focusHint.textContent = '「' + focus + '」已累计 ' + h.toFixed(1) +
       ' h，距一万小时之境还差 ' + Math.max(GOAL_HOURS - h, 0).toFixed(1) + ' h。';
   }
 
@@ -762,19 +807,92 @@
     var percent = Math.round(filled / checks.length * 100);
     el.polishPercent.textContent = percent + '%';
     el.polishFill.style.width = percent + '%';
+    el.polishFloatPercent.textContent = percent + '%';
+    el.polishFloatFill.style.width = percent + '%';
+    renderAttrSummaries();
 
     var tier = percent >= 100 ? 4 : percent >= 75 ? 3 : percent >= 50 ? 2 : percent >= 25 ? 1 : 0;
     document.body.className = document.body.className.replace(/\bpolish-\d\b/g, '').trim();
     document.body.classList.add('polish-' + tier);
 
     var hints = [
-      '叮，面板仍是最朴素的调试界面，快去补全属性。',
-      '叮，检测到属性数据流入，面板开始泛起微光。',
-      '叮，属性完整度过半，系统外壳纹路逐渐显现。',
-      '叮，属性接近完整，面板特效即将全部激活。',
-      '叮，属性已全部录入！完整版特效面板已激活——此刻，你才是真正的天选宿主。'
+      '面板仍是最朴素的调试界面，快去补全属性。',
+      '检测到属性数据流入，面板开始泛起微光。',
+      '属性完整度过半，系统外壳纹路逐渐显现。',
+      '属性接近完整，面板特效即将全部激活。',
+      '属性已全部复写！完整版特效面板已激活——此刻，你才是真正的天选宿主。'
     ];
-    el.polishHint.textContent = hints[tier];
+    // 静态提示文字已移除：完整度跨过新的档位时才以弹窗形式提示一次。
+    if (lastPolishTier !== null && tier !== lastPolishTier) { toast(hints[tier]); }
+    lastPolishTier = tier;
+    updatePolishFloat();
+  }
+
+  var lastPolishTier = null;
+
+  function renderAttrSummaries() {
+    el.attrSkillSummary.textContent = state.skills.length
+      ? state.skills.length + ' 项 · ' + state.skills.slice().sort(function (a, b) {
+        return b.hours - a.hours;
+      })[0].name
+      : '暂无';
+    el.attrAchSummary.textContent = state.achievements.length
+      ? state.achievements.length + ' 项 · 成就点 ' + state.points.achievement
+      : '暂无';
+  }
+
+  /* ---------- 手机端：面板完整度进度条吸附显示 ---------- */
+  function isNarrowScreen() {
+    return window.matchMedia && window.matchMedia('(max-width: 720px)').matches;
+  }
+
+  function updatePolishFloat() {
+    var attrActive = document.querySelector('.tab-panel[data-tab-panel="attr"]');
+    var visiblePanel = attrActive && attrActive.classList.contains('active');
+    if (!isNarrowScreen() || !visiblePanel) {
+      el.polishFloat.classList.add('hidden');
+      return;
+    }
+    var rect = el.polishBlock.getBoundingClientRect();
+    var inView = rect.bottom > 0 && rect.top < window.innerHeight;
+    if (inView) {
+      el.polishFloat.classList.add('hidden');
+      return;
+    }
+    // 不在可视区域时，按相对位置吸附在顶部或底部。
+    var atTop = rect.bottom <= 0;
+    el.polishFloat.classList.toggle('at-top', atTop);
+    el.polishFloat.classList.toggle('at-bottom', !atTop);
+    el.polishFloat.classList.remove('hidden');
+  }
+
+  window.addEventListener('scroll', updatePolishFloat, { passive: true });
+  window.addEventListener('resize', updatePolishFloat);
+
+  /* ---------- 滑动到区域时弹出对应文字提示 ---------- */
+  function setupScrollHints() {
+    var nodes = Array.prototype.slice.call(document.querySelectorAll('[data-hint]'));
+    if (!nodes.length || typeof window.IntersectionObserver !== 'function') { return; }
+    var primed = false;
+    var observer = new window.IntersectionObserver(function (records) {
+      records.forEach(function (record) {
+        if (!primed) {
+          // 首次回调只记录初始可见状态，避免打开页面时一次性弹出全部提示。
+          record.target.setAttribute('data-hint-shown', record.isIntersecting ? '1' : '0');
+          return;
+        }
+        var node = record.target;
+        if (record.isIntersecting) {
+          if (node.getAttribute('data-hint-shown') === '1') { return; }
+          node.setAttribute('data-hint-shown', '1');
+          toast(node.getAttribute('data-hint'));
+        } else {
+          node.setAttribute('data-hint-shown', '0');
+        }
+      });
+    }, { threshold: 0.35 });
+    nodes.forEach(function (node) { observer.observe(node); });
+    window.setTimeout(function () { primed = true; }, 600);
   }
 
   /* ---------- 积分展示 ---------- */
@@ -799,7 +917,7 @@
     if (state.quests.mainRevealed === 0) {
       state.quests.mainRevealed = 1;
       persist();
-      toast('叮，获得主线任务：解锁系统面板全部功能，当前进度 0/' + MAIN_QUEST_CLUES.length + '。');
+      toast('获得主线任务：解锁系统面板全部功能，当前进度 0/' + MAIN_QUEST_CLUES.length + '。');
     } else if (state.quests.lastSeenAppVersion !== APP_VERSION &&
       state.quests.mainRevealed < MAIN_QUEST_CLUES.length &&
       state.quests.mainCompleted >= state.quests.mainRevealed) {
@@ -807,7 +925,7 @@
       state.quests.mainAccepted = false;
       state.quests.lastSeenAppVersion = APP_VERSION;
       persist();
-      toast('叮，检测到系统固件更新（' + previousVersionTag() + ' → ' + APP_VERSION +
+      toast('检测到系统更新（' + previousVersionTag() + ' → ' + APP_VERSION +
         '），解锁主线任务线索 ' + state.quests.mainRevealed + '：' +
         MAIN_QUEST_CLUES[state.quests.mainRevealed - 1]);
     }
@@ -830,7 +948,7 @@
     var revealed = state.quests.mainRevealed;
 
     if (revealed === 0) {
-      el.mainQuestBody.innerHTML = '<p class="hint">叮，主线任务尚未加载，请稍候……</p>';
+      el.mainQuestBody.innerHTML = '<p class="hint">主线任务尚未加载，请稍候……</p>';
       return;
     }
 
@@ -838,8 +956,8 @@
       '<div class="progress-bar"><div class="progress-fill" style="width:' + (completed / total * 100) + '%"></div></div>';
 
     if (completed >= total) {
-      html += '<p class="hint">叮，当前已发布的主线任务线索已全部完成，固件版本 ' + userVersionText() +
-        '。等待开发者发布下一次系统更新（当前固件 ' + APP_VERSION + '）。</p>';
+      html += '<p class="hint">当前已发布的主线任务线索已全部完成，系统等级 ' + userVersionText() +
+        '。等待开发者发布下一次系统更新（当前系统等级 ' + APP_VERSION + '）。</p>';
     } else if (completed < revealed) {
       var clue = MAIN_QUEST_CLUES[completed];
       html += '<div class="quest-card">' +
@@ -851,14 +969,14 @@
           : '<button type="button" class="btn" id="questAccept">接受任务</button>') +
         '</div></div>';
     } else {
-      html += '<p class="hint">叮，本条线索已提交，等待固件更新解锁下一条线索。可尝试重新进入本标签页检查更新。</p>';
+      html += '<p class="hint">本条线索已提交，等待系统更新解锁下一条线索。可尝试重新进入本标签页检查更新。</p>';
     }
     el.mainQuestBody.innerHTML = html;
 
     var guideBtn = document.getElementById('questGuide');
     if (guideBtn) {
       guideBtn.addEventListener('click', function () {
-        toast('叮，任务指引：完成后点击「提交任务」，系统将自动核算固件版本，奖励属性点 +5。');
+        toast('任务指引：完成后点击「提交任务」，系统将自动核算系统等级，奖励属性点 +5。');
       });
     }
     var acceptBtn = document.getElementById('questAccept');
@@ -866,7 +984,7 @@
       acceptBtn.addEventListener('click', function () {
         state.quests.mainAccepted = true;
         persist();
-        toast('叮，已接受主线任务线索 ' + (completed + 1) + '，祝宿主武运昌隆。');
+        toast('已接受主线任务线索 ' + (completed + 1) + '，祝宿主武运昌隆。');
         renderMainQuest();
       });
     }
@@ -883,11 +1001,11 @@
     persist();
     renderPoints();
     renderVersion();
-    toast('叮，系统正在升级……');
+    toast('系统正在升级……');
     window.setTimeout(function () {
-      toast('叮，系统升级完成。');
+      toast('系统升级完成。');
       window.setTimeout(function () {
-        toast('叮，系统已经升级到第 ' + userVersionText() + ' 版，获得属性点 +5。');
+        toast('系统已经升级到第 ' + userVersionText() + ' 版，获得属性点 +5。');
         renderMainQuest();
         updateQuestBadge();
       }, 700);
@@ -907,7 +1025,7 @@
       status: 'open'
     });
     persist();
-    toast('叮，宿主已发布支线任务【' + title + '】。');
+    toast('宿主已发布支线任务【' + title + '】。');
     el.sideQuestForm.reset();
     el.sideRewardAttr.value = 1;
     el.sideRewardContrib.value = 1;
@@ -927,13 +1045,13 @@
     if (target.hasAttribute('data-accept')) {
       quest.status = 'accepted';
       persist();
-      toast('叮，已接受支线任务【' + quest.title + '】。');
+      toast('已接受支线任务【' + quest.title + '】。');
     } else if (target.hasAttribute('data-submit')) {
       quest.status = 'done';
       state.points.attribute += quest.rewardAttr;
       state.points.contribution += quest.rewardContrib;
       persist();
-      toast('叮，支线任务【' + quest.title + '】已完成，获得属性点 +' + quest.rewardAttr +
+      toast('支线任务【' + quest.title + '】已完成，获得属性点 +' + quest.rewardAttr +
         '，贡献点 +' + quest.rewardContrib + '。');
       renderPoints();
     } else if (target.hasAttribute('data-del-quest')) {
@@ -949,7 +1067,7 @@
       el.sideQuestList.innerHTML = '<li class="empty">暂无支线任务，快给自己安排一个吧。</li>';
       return;
     }
-    el.sideQuestList.innerHTML = state.quests.side.slice().reverse().map(function (q) {
+    el.sideQuestList.innerHTML = state.quests.side.slice().map(function (q) {
       var statusLabel = { open: '未接受', accepted: '进行中', done: '已完成' }[q.status];
       var actions = '';
       if (q.status === 'open') {
@@ -957,7 +1075,7 @@
       } else if (q.status === 'accepted') {
         actions = '<button type="button" class="btn" data-submit="' + q.id + '">提交任务</button>';
       }
-      actions += '<button type="button" class="del" data-del-quest="' + q.id + '" title="删除">[x]</button>';
+      actions += '<button type="button" class="btn ghost danger" data-del-quest="' + q.id + '">删除任务</button>';
       return '<li class="quest-item quest-' + q.status + '">' +
         '<div class="quest-title">' + escapeHtml(q.title) + ' <span class="quest-status">[' + statusLabel + ']</span></div>' +
         (q.desc ? '<div class="quest-desc">' + escapeHtml(q.desc) + '</div>' : '') +
@@ -969,13 +1087,12 @@
   function updateQuestBadge() {
     var pendingMain = (state.quests.mainRevealed > state.quests.mainCompleted) ? 1 : 0;
     var pendingSide = state.quests.side.filter(function (q) { return q.status !== 'done'; }).length;
-    var total = pendingMain + pendingSide;
-    el.questBadge.textContent = total > 0 ? total : '';
+    if (pendingMain + pendingSide > 0) { flashTab('quest'); }
   }
 
   /* ---------- 提示标签页 ---------- */
   function renderNotifications() {
-    var list = state.notifications.slice().reverse();
+    var list = state.notifications.slice();
     if (!list.length) {
       el.noticeView.innerHTML = '<div class="log-line"><span class="msg">暂无提示记录。</span></div>';
     } else {
@@ -986,13 +1103,27 @@
           escapeHtml(n.text) + '</span>' + (n.count > 1 ? ' <span class="hint">(×' + n.count + ')</span>' : '') +
           '</div>';
       }).join('');
+      el.noticeView.scrollTop = el.noticeView.scrollHeight;
     }
     updateNoticeBadge();
   }
 
   function updateNoticeBadge() {
     var unread = Math.max(state.notifications.length - state.noticeSeenCount, 0);
-    el.noticeBadge.textContent = unread > 0 ? unread : '';
+    if (unread > 0) { flashTab('notice'); }
+  }
+
+  /* 不使用红点与数字角标：仅让对应标签高亮 1 秒作为提醒。 */
+  var flashTimers = {};
+  function flashTab(tab) {
+    var btn = document.querySelector('.tab-btn[data-tab="' + tab + '"]');
+    if (!btn || btn.classList.contains('active')) { return; }
+    btn.classList.add('flash');
+    if (flashTimers[tab]) { window.clearTimeout(flashTimers[tab]); }
+    flashTimers[tab] = window.setTimeout(function () {
+      btn.classList.remove('flash');
+      flashTimers[tab] = null;
+    }, 1000);
   }
 
   el.clearNotices.addEventListener('click', function () {
@@ -1054,7 +1185,7 @@
     el.coverageFill.style.width = coverage + '%';
     el.coverageHint.textContent = state.viewDate + ' 时间线覆盖 ' + coverage.toFixed(1) + '%（' +
       hours(filled) + ' h / 24.0 h）' +
-      (filled >= DAY_MINUTES ? ' · 叮，当日日志已闭合。' : ' · 检测功能丢失，剩余时段需要宿主手动输入。');
+      (filled >= DAY_MINUTES ? ' · 当日日志已闭合。' : ' · 检测功能丢失，剩余时段需要宿主手动输入。');
 
     renderTimeline(list);
     renderLog(state.viewDate);
@@ -1090,21 +1221,23 @@
     fillSkillLevelSelect();
     setActiveTab('attr');
     fullRender();
+    setupScrollHints();
+    updatePolishFloat();
     checkTamperOnBoot();
 
     if (state.firstRun && !state.notifications.length) {
       state.firstRun = false;
       persist();
-      toast('叮，恭喜您获得天道酬勤系统面板！');
+      toast('恭喜您获得天道酬勤系统面板！');
       window.setTimeout(function () {
-        toast('叮，请宿主点击「宿主」处输入称号以完成系统绑定。');
+        toast('请宿主点击「宿主」处输入称号以完成系统绑定。');
       }, 1600);
     } else {
       state.firstRun = false;
       persist();
       var total = rawMinutes(state.entries) / 60;
       if (state.entries.length) {
-        toast('叮，欢迎回来，宿主。已载入 ' + state.entries.length + ' 条时间记录，累计修行 ' +
+        toast('欢迎回来，宿主。已载入 ' + state.entries.length + ' 条时间记录，累计修行 ' +
           total.toFixed(1) + ' h。');
       }
     }
