@@ -13,6 +13,7 @@
   var LEGACY_NAME_KEY = 'tiandao.host.v1';
   var GOAL_HOURS = 10000;
   var DAY_MINUTES = 1440;
+  var TOAST_DURATION_MS = 4600;
 
   var SKILL_LEVELS = [
     { key: 'aware', label: '了解', minHours: 0, locked: false },
@@ -264,6 +265,8 @@
     safe(function () {
       merged.skills = Array.isArray(parsed.skills) ? parsed.skills.filter(function (item) {
         return item && typeof item === 'object' && typeof item.name === 'string' && Number.isFinite(Number(item.hours));
+      }).map(function (item) {
+        return Object.assign({}, item, { hours: Number(item.hours) });
       }) : base.skills;
     });
     safe(function () {
@@ -274,14 +277,29 @@
     safe(function () {
       merged.achievements = Array.isArray(parsed.achievements) ? parsed.achievements.filter(function (item) {
         return item && typeof item === 'object' && typeof item.name === 'string' && Number.isFinite(Number(item.points));
+      }).map(function (item) {
+        return Object.assign({}, item, { points: Number(item.points) });
       }) : base.achievements;
     });
-    safe(function () { merged.points = Object.assign({}, base.points, (parsed.points && typeof parsed.points === 'object') ? parsed.points : {}); });
+    safe(function () {
+      var parsedPoints = parsed.points && typeof parsed.points === 'object' ? parsed.points : {};
+      merged.points = Object.keys(base.points).reduce(function (points, key) {
+        var value = Number(parsedPoints[key]);
+        points[key] = Number.isFinite(value) ? value : base.points[key];
+        return points;
+      }, {});
+    });
     safe(function () {
       merged.quests = Object.assign({}, base.quests, (parsed.quests && typeof parsed.quests === 'object') ? parsed.quests : {});
       merged.quests.side = Array.isArray(merged.quests.side) ? merged.quests.side.filter(function (item) {
         return item && typeof item === 'object' && typeof item.title === 'string' &&
-          ['open', 'accepted', 'done'].indexOf(item.status) >= 0;
+          ['open', 'accepted', 'done'].indexOf(item.status) >= 0 &&
+          Number.isFinite(Number(item.rewardAttr)) && Number.isFinite(Number(item.rewardContrib));
+      }).map(function (item) {
+        return Object.assign({}, item, {
+          rewardAttr: Number(item.rewardAttr),
+          rewardContrib: Number(item.rewardContrib)
+        });
       }) : [];
     });
     safe(function () {
@@ -301,11 +319,17 @@
 
   var saveTimer = null;
   var sigTimer = null;
+  var storageErrorShown = false;
   function persist() {
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      storageErrorShown = false;
     } catch (e) {
-      toast('存储模块异常，本次记录可能无法持久化保存。', { level: 'ERROR' });
+      if (!storageErrorShown) {
+        storageErrorShown = true;
+        console.error('[storage] FAILED', e);
+        toast('存储模块异常，本次记录可能无法持久化保存。', { level: 'ERROR' });
+      }
       return;
     }
     // 签名计算涉及多次数组遍历，防抖到空闲时统一计算一次，避免频繁操作（如逐字输入）时反复重算。
@@ -462,7 +486,7 @@
     el.toastStack.appendChild(card);
     // 弹窗从屏幕中央出现，一路上移到可视区域顶部悬停，最后虚化消失（动画由 CSS 负责）。
     card.addEventListener('animationend', function () { card.remove(); });
-    window.setTimeout(function () { card.remove(); }, 5200);
+    window.setTimeout(function () { card.remove(); }, TOAST_DURATION_MS);
 
     state.notifications.push({ id: uid(), text: text, level: level, ts: Date.now(), count: 1 });
     if (state.notifications.length > 300) { state.notifications.shift(); }
@@ -1526,7 +1550,7 @@
       return;
     }
     var progress = total ? Math.min(completed / total * 99, 99) : 0;
-    var html = '<div class="quest-progress">系统升级，解锁系统面板全部功能 · 进度 ' + completed + '/TREE（3）</div>' +
+    var html = '<div class="quest-progress">系统升级，解锁系统面板全部功能 · 进度 ' + completed + '/' + total + '</div>' +
       '<div class="progress-bar"><div class="progress-fill" style="width:' + progress + '%"></div></div>';
 
     MAIN_QUEST_CLUES.slice(0, total).forEach(function (clue, index) {
@@ -1850,13 +1874,12 @@
   /* ---------- 初始化 ---------- */
   function init() {
     fillSkillLevelSelect();
+    checkTamperOnBoot();
     syncMainQuestAvailability();
-    renderTamperSignature();
     setActiveTab('attr');
     fullRender();
     setupClickHints();
     updatePolishFloat();
-    checkTamperOnBoot();
 
     if (state.firstRun && !state.notifications.length) {
       state.firstRun = false;
