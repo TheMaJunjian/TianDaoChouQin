@@ -320,10 +320,11 @@ input:focus, select:focus {
   font-family: inherit;
   font-size: 11px;
   white-space: nowrap;
+  text-align: center;
 }
 .skill-toggle:hover { border-color: var(--cyan); color: var(--cyan); }
 .skill-toggle-label { flex: 0 0 auto; color: var(--cyan); font-size: 18px; line-height: 1; }
-.attr-row .skill-toggle { flex: 0 0 auto; min-width: 52px; padding: 4px 8px; font-size: 11px; text-align: center; }
+.attr-row .skill-toggle { flex: 0 0 auto; width: auto; padding: 4px 6px; font-size: 11px; }
 .attr-summary-list {
   flex: 1;
   min-width: 0;
@@ -459,7 +460,7 @@ input:focus, select:focus {
 .hidden-skills-block { margin-top: 14px; border-top: 1px dashed var(--line); padding-top: 10px; }
 .hidden-skills-title { display: flex; align-items: center; justify-content: space-between; }
 .hidden-skills-block h3 { margin: 0 0 8px; color: var(--muted); font-size: 12px; font-weight: normal; }
-.hidden-skills-title .skill-toggle { flex: 0 0 auto; min-width: 52px; padding: 4px 8px; font-size: 11px; text-align: center; }
+.hidden-skills-title .skill-toggle { flex: 0 0 auto; width: auto; padding: 4px 6px; font-size: 11px; }
 .hidden-skill-list { margin-top: 0; }
 .hidden-skill-item { border-color: var(--line); background: rgba(111, 142, 160, 0.06); }
 
