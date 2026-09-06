@@ -8,90 +8,232 @@
 </head>
 <body>
 <div class="scanline"></div>
+
+<div class="toast-stack" id="toastStack" aria-live="polite"></div>
+
 <header class="panel-header">
   <h1>【天道酬勤 · 系统面板】</h1>
-  <p class="sys-line" id="bootLine">叮，系统绑定成功。检测模块丢失，需要宿主手动输入。</p>
+  <p class="ver-line">固件版本 <b id="userVersion">0.1</b> ｜ 成就点 <b id="pAch">0</b> ｜ 贡献点 <b id="pContrib">0</b> ｜ 属性点 <b id="pAttr">0</b></p>
 </header>
 
+<nav class="tabbar" id="tabbar" role="tablist">
+  <button type="button" class="tab-btn" data-tab="attr" role="tab">属性</button>
+  <button type="button" class="tab-btn" data-tab="entry" role="tab">录入</button>
+  <button type="button" class="tab-btn" data-tab="timeline" role="tab">时间轴</button>
+  <button type="button" class="tab-btn" data-tab="quest" role="tab">任务 <span class="badge" id="questBadge"></span></button>
+  <button type="button" class="tab-btn" data-tab="notice" role="tab">提示 <span class="badge" id="noticeBadge"></span></button>
+</nav>
+
 <main class="layout">
-  <section class="card" id="hostCard">
-    <h2>宿主状态</h2>
-    <div class="stat-grid">
-      <div class="stat"><span class="label">宿主（点击可改名）</span><button type="button" class="value name-btn" id="hostName" title="点击修改称号">未命名修行者</button></div>
-      <div class="stat"><span class="label">今日已录入</span><span class="value" id="todayFilled">0.0 h</span></div>
-      <div class="stat"><span class="label">今日缺失</span><span class="value" id="todayMissing">24.0 h</span></div>
-      <div class="stat"><span class="label">累计修行</span><span class="value" id="totalHours">0.0 h</span></div>
-    </div>
-    <label class="inline">
-      <span>主修方向（一万小时目标）</span>
-      <input id="focusCategory" type="text" placeholder="例如：编程">
-    </label>
-    <div class="progress-block">
-      <div class="progress-title">
-        <span>一万小时进度 · <b id="focusLabel">未设定</b></span>
-        <span id="focusPercent">0.000%</span>
+
+  <!-- ========== 属性 ========== -->
+  <section class="tab-panel" id="tab-attr" data-tab-panel="attr">
+    <section class="card" id="hostCard">
+      <h2>宿主状态</h2>
+      <div class="stat-grid">
+        <div class="stat"><span class="label">宿主（点击可改名）</span><button type="button" class="value name-btn" id="hostName" title="点击修改称号">未命名修行者</button></div>
+        <div class="stat"><span class="label">今日已录入</span><span class="value" id="todayFilled">0.0 h</span></div>
+        <div class="stat"><span class="label">今日缺失</span><span class="value" id="todayMissing">24.0 h</span></div>
+        <div class="stat"><span class="label">累计修行</span><span class="value" id="totalHours">0.0 h</span></div>
       </div>
-      <div class="progress-bar"><div class="progress-fill" id="focusFill"></div></div>
-      <p class="hint" id="focusHint">叮，未设定主修方向，无法计算大道进度。</p>
-    </div>
-  </section>
-
-  <section class="card">
-    <h2>录入时间段</h2>
-    <p class="sys-line">检测功能丢失，需要宿主手动输入：从几点到几点，做了什么。</p>
-    <form id="entryForm" class="entry-form" autocomplete="off">
-      <label><span>日期</span><input type="date" id="entryDate" required></label>
-      <label><span>开始</span><input type="time" id="startTime" required></label>
-      <label><span>结束（00:00 表示当日 24:00）</span><input type="time" id="endTime" required></label>
-      <label><span>分类</span><input type="text" id="category" placeholder="编程 / 睡眠 / 摸鱼" required></label>
-      <label class="wide"><span>做了什么</span><input type="text" id="activity" placeholder="调试系统面板" required></label>
-      <label class="wide"><span>等级</span>
-        <select id="level">
-          <option value="INFO">INFO · 常规</option>
-          <option value="TRAIN">TRAIN · 修行</option>
-          <option value="WARN">WARN · 消耗</option>
-          <option value="ERROR">ERROR · 虚度</option>
-        </select>
+      <label class="inline">
+        <span>主修方向（一万小时目标）</span>
+        <input id="focusCategory" type="text" placeholder="例如：编程">
       </label>
-      <button type="submit" class="btn">写入日志</button>
-    </form>
-    <p class="sys-line" id="formMsg"></p>
+      <div class="progress-block">
+        <div class="progress-title">
+          <span>一万小时进度 · <b id="focusLabel">未设定</b></span>
+          <span id="focusPercent">0.000%</span>
+        </div>
+        <div class="progress-bar"><div class="progress-fill" id="focusFill"></div></div>
+        <p class="hint" id="focusHint">叮，未设定主修方向，无法计算大道进度。</p>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>基础属性</h2>
+      <div class="attr-row">
+        <span class="attr-label">体重</span>
+        <input type="number" id="attrWeight" placeholder="kg" min="0" step="0.1">
+        <button type="button" class="attr-plus" data-attr-plus="weight">+</button>
+      </div>
+      <div class="attr-row">
+        <span class="attr-label">学历</span>
+        <input type="text" id="attrEdu" placeholder="例如：本科">
+        <button type="button" class="attr-plus" data-attr-plus="edu">+</button>
+      </div>
+      <div class="attr-row">
+        <span class="attr-label">天赋</span>
+        <input type="text" id="attrTalent" placeholder="例如：过目不忘（逗号分隔多个）">
+        <button type="button" class="attr-plus" data-attr-plus="talent">+</button>
+      </div>
+      <div class="attr-row">
+        <span class="attr-label">财产</span>
+        <input type="text" id="attrProperty" placeholder="例如：现金 8000 元">
+        <button type="button" class="attr-plus" data-attr-plus="property">+</button>
+      </div>
+      <div class="attr-row">
+        <span class="attr-label">宿主状态</span>
+        <input type="text" id="attrStatus" placeholder="例如：健康，略疲惫">
+        <button type="button" class="attr-plus" data-attr-plus="status">+</button>
+      </div>
+      <p class="hint">灰色 [+] 为属性强化功能，可用属性点解锁 —— 目前仍处于功能缺失状态。</p>
+      <div class="progress-block">
+        <div class="progress-title"><span>面板完整度</span><span id="polishPercent">0%</span></div>
+        <div class="progress-bar"><div class="progress-fill alt" id="polishFill"></div></div>
+        <p class="hint" id="polishHint"></p>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>技能</h2>
+      <form id="skillForm" class="entry-form" autocomplete="off">
+        <label class="wide"><span>技能名称</span><input type="text" id="skillName" placeholder="例如：Python" required></label>
+        <label><span>录入方式</span>
+          <select id="skillMode">
+            <option value="level">按等级录入（自动折算小时）</option>
+            <option value="hours">按小时录入</option>
+          </select>
+        </label>
+        <label id="skillLevelWrap"><span>等级</span>
+          <select id="skillLevel"></select>
+        </label>
+        <label id="skillHoursWrap" class="hidden"><span>投入小时</span><input type="number" id="skillHours" min="0" step="1"></label>
+        <button type="submit" class="btn wide">录入 / 更新技能</button>
+      </form>
+      <ul class="skill-list" id="skillList"></ul>
+    </section>
+
+    <section class="card">
+      <h2>成就</h2>
+      <form id="achForm" class="entry-form" autocomplete="off">
+        <label class="wide"><span>成就名称</span><input type="text" id="achName" placeholder="例如：连续录入 7 天" required></label>
+        <label><span>成就点数</span><input type="number" id="achPoints" min="1" max="999" value="10"></label>
+        <label class="wide"><span>备注</span><input type="text" id="achDesc" placeholder="选填"></label>
+        <button type="submit" class="btn wide">记录成就</button>
+      </form>
+      <ul class="ach-list" id="achList"></ul>
+    </section>
   </section>
 
-  <section class="card">
-    <h2>今日时间轴</h2>
-    <div class="date-nav">
-      <button type="button" class="btn ghost" id="prevDay">◀ 前一日</button>
-      <input type="date" id="viewDate">
-      <button type="button" class="btn ghost" id="nextDay">后一日 ▶</button>
-    </div>
-    <div class="timeline" id="timeline"></div>
-    <div class="timeline-axis"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>
-    <div class="coverage">
-      <div class="progress-bar"><div class="progress-fill alt" id="coverageFill"></div></div>
-      <p class="hint" id="coverageHint"></p>
-    </div>
+  <!-- ========== 录入 ========== -->
+  <section class="tab-panel" id="tab-entry" data-tab-panel="entry">
+    <section class="card">
+      <h2>录入时间段</h2>
+      <p class="sys-line">检测功能丢失，需要宿主手动输入：从几点到几点，做了什么。</p>
+      <form id="entryForm" class="entry-form" autocomplete="off">
+        <label><span>日期</span><input type="date" id="entryDate" required></label>
+        <label><span>开始</span><input type="time" id="startTime" required></label>
+        <label><span>结束（00:00 表示当日 24:00）</span><input type="time" id="endTime" required></label>
+        <label><span>分类</span><input type="text" id="category" placeholder="编程 / 睡眠 / 摸鱼" required></label>
+        <label class="wide"><span>做了什么</span><input type="text" id="activity" placeholder="调试系统面板" required></label>
+        <label class="wide"><span>等级</span>
+          <select id="level">
+            <option value="INFO">INFO · 常规</option>
+            <option value="TRAIN">TRAIN · 修行</option>
+            <option value="WARN">WARN · 消耗</option>
+            <option value="ERROR">ERROR · 虚度</option>
+          </select>
+        </label>
+        <button type="submit" class="btn wide">写入日志</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>数据管理</h2>
+      <p class="hint">宿主的所有操作都会自动保存到本机浏览器。代码更新不会覆盖宿主本地数据，建议定期导出备份。</p>
+      <div class="log-actions">
+        <button type="button" class="btn ghost" id="exportData">导出数据</button>
+        <button type="button" class="btn ghost" id="importBtn">导入数据</button>
+        <input type="file" id="importFile" accept="application/json" class="hidden">
+        <button type="button" class="btn ghost danger" id="resetAll">重置全部数据</button>
+      </div>
+    </section>
   </section>
 
-  <section class="card">
-    <h2>个人日志 · <span id="logDateLabel"></span></h2>
-    <div class="log-view" id="logView"></div>
-    <div class="log-actions">
-      <button type="button" class="btn ghost" id="copyLog">复制日志</button>
-      <button type="button" class="btn ghost" id="exportData">导出数据</button>
-      <button type="button" class="btn ghost danger" id="clearDay">清空当日</button>
-    </div>
+  <!-- ========== 时间轴 ========== -->
+  <section class="tab-panel" id="tab-timeline" data-tab-panel="timeline">
+    <section class="card">
+      <h2>今日时间轴</h2>
+      <div class="date-nav">
+        <button type="button" class="btn ghost" id="prevDay">◀ 前一日</button>
+        <input type="date" id="viewDate">
+        <button type="button" class="btn ghost" id="nextDay">后一日 ▶</button>
+      </div>
+      <div class="timeline" id="timeline"></div>
+      <div class="timeline-axis"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>
+      <div class="coverage">
+        <div class="progress-bar"><div class="progress-fill alt" id="coverageFill"></div></div>
+        <p class="hint" id="coverageHint"></p>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>个人日志 · <span id="logDateLabel"></span></h2>
+      <div class="log-view" id="logView"></div>
+      <div class="log-actions">
+        <button type="button" class="btn ghost" id="copyLog">复制日志</button>
+        <button type="button" class="btn ghost danger" id="clearDay">清空当日</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>分类统计（全部记录）</h2>
+      <ul class="cat-list" id="catList"></ul>
+    </section>
   </section>
 
-  <section class="card">
-    <h2>分类统计（全部记录）</h2>
-    <ul class="cat-list" id="catList"></ul>
+  <!-- ========== 任务 ========== -->
+  <section class="tab-panel" id="tab-quest" data-tab-panel="quest">
+    <section class="card">
+      <h2>主线任务</h2>
+      <p class="hint">由系统开发者发布，所有宿主共享同一条主线，进度独立记录于各自本地版本号。</p>
+      <div id="mainQuestBody"></div>
+    </section>
+
+    <section class="card">
+      <h2>支线任务</h2>
+      <p class="hint">宿主自行发布、自行接受、自行提交（系统不检测真实完成情况，一切全凭宿主本心）。</p>
+      <form id="sideQuestForm" class="entry-form" autocomplete="off">
+        <label class="wide"><span>任务名称</span><input type="text" id="sideTitle" placeholder="例如：今日阅读一小时" required></label>
+        <label class="wide"><span>任务描述</span><input type="text" id="sideDesc" placeholder="选填"></label>
+        <label><span>奖励属性点</span><input type="number" id="sideRewardAttr" min="0" max="20" value="1"></label>
+        <label><span>奖励贡献点</span><input type="number" id="sideRewardContrib" min="0" max="20" value="1"></label>
+        <button type="submit" class="btn wide">发布支线任务</button>
+      </form>
+      <ul class="quest-list" id="sideQuestList"></ul>
+    </section>
   </section>
+
+  <!-- ========== 提示 ========== -->
+  <section class="tab-panel" id="tab-notice" data-tab-panel="notice">
+    <section class="card">
+      <h2>系统提示记录</h2>
+      <div class="log-actions">
+        <button type="button" class="btn ghost danger" id="clearNotices">清空提示记录</button>
+      </div>
+      <div class="log-view" id="noticeView"></div>
+    </section>
+  </section>
+
 </main>
 
 <footer class="panel-footer">
   <p class="sys-line">叮，系统提醒：数据仅保存在本机浏览器，清除浏览器数据将导致修行记录丢失。</p>
 </footer>
+
+<!-- ========== 异常检测彩蛋 ========== -->
+<div class="egg-mask hidden" id="eggMask">
+  <div class="egg-box">
+    <h2>叮，检测到数据异常</h2>
+    <p>世界毁灭倒计时：<span id="eggCount">100</span></p>
+    <p class="hint">（温馨提示：短时间内不要选择「加速」）</p>
+    <div class="egg-actions">
+      <button type="button" class="btn ghost" id="eggPause">时间停止</button>
+      <button type="button" class="btn danger-solid" id="eggBoost">加速</button>
+    </div>
+  </div>
+</div>
 
 <script src="app.js"></script>
 </body>

@@ -6,6 +6,7 @@
   --gold: #ffd479;
   --green: #63f2a0;
   --red: #ff7b72;
+  --purple: #b98bff;
   --text: #cfe9f2;
   --muted: #6f8ea0;
 }
@@ -22,7 +23,10 @@ body {
   color: var(--text);
   font-family: "Consolas", "Menlo", "Courier New", "Microsoft YaHei", monospace;
   min-height: 100vh;
+  transition: background 0.6s ease;
 }
+
+.hidden { display: none !important; }
 
 .scanline {
   position: fixed;
@@ -38,6 +42,38 @@ body {
   z-index: 5;
 }
 
+/* ---------- 面板华丽度分级 ---------- */
+body.polish-1 .panel-header h1 { text-shadow: 0 0 16px rgba(79, 227, 255, 0.7); }
+body.polish-2 .panel-header h1 { text-shadow: 0 0 20px rgba(79, 227, 255, 0.85), 0 0 4px #fff; }
+body.polish-2 .card { box-shadow: 0 0 18px rgba(19, 63, 88, 0.6) inset, 0 0 8px rgba(79, 227, 255, 0.12); }
+body.polish-3 .panel-header h1 {
+  text-shadow: 0 0 22px rgba(79, 227, 255, 0.95), 0 0 8px #fff, 0 0 30px var(--gold);
+}
+body.polish-3 .card {
+  border-color: var(--cyan);
+  box-shadow: 0 0 18px rgba(19, 63, 88, 0.6) inset, 0 0 14px rgba(79, 227, 255, 0.25);
+}
+body.polish-4 { background:
+  radial-gradient(circle at 20% 0%, #163a55 0%, transparent 60%),
+  radial-gradient(circle at 90% 10%, #1c3f57 0%, transparent 50%),
+  radial-gradient(circle at 50% 100%, #241a44 0%, transparent 60%),
+  var(--bg);
+}
+body.polish-4 .panel-header h1 {
+  background: linear-gradient(90deg, var(--cyan), var(--gold), var(--purple), var(--cyan));
+  background-size: 300% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shine 5s linear infinite;
+  text-shadow: none;
+}
+body.polish-4 .card {
+  border-color: var(--gold);
+  box-shadow: 0 0 18px rgba(19, 63, 88, 0.6) inset, 0 0 20px rgba(255, 212, 121, 0.3);
+}
+@keyframes shine { to { background-position: 300% center; } }
+
 .panel-header {
   text-align: center;
   padding: 28px 16px 8px;
@@ -51,6 +87,12 @@ body {
   text-shadow: 0 0 12px rgba(79, 227, 255, 0.55);
 }
 
+.ver-line {
+  color: var(--gold);
+  font-size: 13px;
+  margin: 8px 0 0;
+}
+
 .sys-line {
   color: var(--gold);
   font-size: 13px;
@@ -58,14 +100,63 @@ body {
   min-height: 18px;
 }
 
-.layout {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: 16px;
+/* ---------- 标签页容器 ---------- */
+.tabbar {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
   max-width: 1200px;
   margin: 16px auto 0;
   padding: 0 16px;
 }
+
+.tab-btn {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  padding: 8px 18px;
+  border-radius: 4px 4px 0 0;
+  font-family: inherit;
+  font-size: 13px;
+  letter-spacing: 2px;
+  cursor: pointer;
+  position: relative;
+}
+
+.tab-btn:hover { color: var(--cyan); border-color: var(--cyan); }
+
+.tab-btn.active {
+  color: var(--cyan);
+  border-color: var(--cyan);
+  background: rgba(79, 227, 255, 0.08);
+  box-shadow: 0 -2px 10px rgba(79, 227, 255, 0.25);
+}
+
+.badge {
+  display: inline-block;
+  min-width: 14px;
+  padding: 0 4px;
+  margin-left: 4px;
+  border-radius: 8px;
+  background: var(--red);
+  color: #1a0505;
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.tab-panel {
+  display: none;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 16px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.tab-panel.active { display: grid; }
+
+.layout { margin-top: 12px; }
 
 .card {
   background: var(--panel);
@@ -73,6 +164,7 @@ body {
   border-radius: 6px;
   padding: 16px;
   box-shadow: 0 0 18px rgba(19, 63, 88, 0.5) inset;
+  align-self: start;
 }
 
 .card h2 {
@@ -153,6 +245,7 @@ input:focus, select:focus {
 .btn.ghost { background: transparent; border-color: var(--line); color: var(--muted); }
 .btn.ghost:hover { color: var(--cyan); border-color: var(--cyan); }
 .btn.danger:hover { color: var(--red); border-color: var(--red); }
+.btn.danger-solid { background: linear-gradient(180deg, #6b1f1a, #3a0d0a); border-color: var(--red); color: var(--red); }
 
 .progress-block { margin-top: 8px; }
 
@@ -182,6 +275,79 @@ input:focus, select:focus {
 .progress-fill.alt { background: linear-gradient(90deg, #24607f, var(--cyan)); }
 
 .hint { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+
+/* ---------- 属性行 ---------- */
+.attr-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.attr-row .attr-label {
+  flex: 0 0 56px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.attr-row input { flex: 1; }
+.attr-plus {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  border: 1px dashed #3a4b56;
+  background: #0b141b;
+  color: #4a5a64;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.attr-plus:hover { border-color: var(--muted); color: var(--muted); }
+
+/* ---------- 技能 / 成就 ---------- */
+.skill-list, .ach-list, .quest-list { list-style: none; margin: 12px 0 0; padding: 0; }
+
+.skill-item, .ach-item, .quest-item {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 8px 28px 8px 10px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.skill-item.locked { opacity: 0.6; border-style: dashed; }
+
+.skill-head { display: flex; justify-content: space-between; }
+.skill-name { color: var(--text); }
+.skill-lv { color: var(--gold); font-weight: bold; }
+.skill-meta { color: var(--muted); font-size: 11px; margin-top: 4px; }
+
+.ach-item .ach-name { color: var(--gold); }
+.ach-item .ach-pt { float: right; color: var(--green); }
+.ach-desc { color: var(--muted); font-size: 11px; margin-top: 4px; clear: both; }
+
+.quest-title { color: var(--cyan); font-size: 13px; }
+.quest-status { color: var(--muted); font-size: 11px; }
+.quest-desc { color: var(--muted); font-size: 12px; margin: 4px 0; }
+.quest-reward { color: var(--green); font-size: 11px; }
+.quest-actions { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
+.quest-progress { color: var(--text); font-size: 13px; margin-bottom: 6px; }
+.quest-card { margin-top: 10px; border: 1px solid var(--line); border-radius: 4px; padding: 10px; }
+.quest-item.quest-done { opacity: 0.6; }
+
+.del {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+}
+.del:hover { color: var(--red); }
+
+.empty { color: var(--muted); font-size: 12px; list-style: none; }
 
 .date-nav {
   display: flex;
@@ -250,13 +416,9 @@ input:focus, select:focus {
 .log-line .msg { color: var(--text); }
 
 .log-line .del {
-  background: none;
-  border: none;
-  color: var(--muted);
-  cursor: pointer;
-  font-family: inherit;
+  position: static;
+  margin-left: 4px;
 }
-.log-line .del:hover { color: var(--red); }
 
 .log-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 
@@ -277,6 +439,7 @@ input:focus, select:focus {
 @media (max-width: 520px) {
   .entry-form { grid-template-columns: 1fr; }
   .stat-grid { grid-template-columns: 1fr; }
+  .tabbar { justify-content: flex-start; overflow-x: auto; flex-wrap: nowrap; }
 }
 
 .name-btn {
@@ -292,3 +455,59 @@ input:focus, select:focus {
 
 .name-btn:hover { color: var(--cyan); }
 .name-btn:focus-visible { outline: 1px solid var(--cyan); }
+
+/* ---------- 弹出提示 toast ---------- */
+.toast-stack {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(92vw, 420px);
+  pointer-events: none;
+}
+
+.toast {
+  background: rgba(6, 18, 27, 0.95);
+  border: 1px solid var(--cyan);
+  color: var(--gold);
+  padding: 10px 14px;
+  border-radius: 4px;
+  font-size: 13px;
+  box-shadow: 0 0 16px rgba(79, 227, 255, 0.35);
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast-WARN { border-color: var(--gold); color: var(--gold); }
+.toast-ERROR { border-color: var(--red); color: var(--red); }
+
+/* ---------- 异常检测彩蛋 ---------- */
+.egg-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(2, 4, 8, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.egg-box {
+  background: #0b1420;
+  border: 1px solid var(--red);
+  border-radius: 6px;
+  padding: 24px 30px;
+  text-align: center;
+  box-shadow: 0 0 40px rgba(255, 123, 114, 0.4);
+}
+
+.egg-box h2 { color: var(--red); margin-top: 0; }
+.egg-box #eggCount { font-size: 28px; color: var(--gold); }
+.egg-box #eggCount.negative { color: var(--red); }
+.egg-actions { display: flex; gap: 12px; justify-content: center; margin-top: 16px; }
