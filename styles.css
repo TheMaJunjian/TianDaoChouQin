@@ -781,16 +781,18 @@ input:focus, select:focus {
   left: 50%;
   transform: translateX(-50%);
   z-index: 50;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
+  max-height: min(70vh, 420px);
   width: min(92vw, 420px);
   pointer-events: none;
+  overflow: hidden;
 }
 
 /* 中间弹出 → 一路上移到可视区域顶部悬停 → 虚化消失 */
 .toast {
+  position: absolute;
+  top: var(--toast-offset, 0px);
+  left: 0;
+  transition: top 0.35s ease;
   width: 100%;
   background: rgba(6, 18, 27, 0.95);
   border: 1px solid var(--cyan);
@@ -814,7 +816,17 @@ input:focus, select:focus {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .toast { animation-duration: 4.6s; animation-timing-function: linear; }
+  .toast {
+    animation-name: toast-fade;
+    animation-duration: 4.6s;
+    animation-timing-function: linear;
+  }
+}
+
+@keyframes toast-fade {
+  0%, 10% { opacity: 0; filter: none; }
+  20%, 80% { opacity: 1; filter: none; }
+  100% { opacity: 0; filter: none; }
 }
 .toast-warn { border-color: var(--warn); color: var(--warn); }
 .toast-error { border-color: var(--red); color: var(--red); }

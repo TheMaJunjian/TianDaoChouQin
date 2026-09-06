@@ -14,6 +14,7 @@
   var GOAL_HOURS = 10000;
   var DAY_MINUTES = 1440;
   var TOAST_DURATION_MS = 4600;
+  var TOAST_MAX_VISIBLE = 5;
 
   var SKILL_LEVELS = [
     { key: 'aware', label: '了解', minHours: 0, locked: false },
@@ -484,14 +485,34 @@
     card.className = 'toast' + (level !== 'INFO' ? ' toast-' + level.toLowerCase() : '');
     card.textContent = text;
     el.toastStack.appendChild(card);
+    reflowToastSlots();
     // 弹窗从屏幕中央出现，一路上移到可视区域顶部悬停，最后虚化消失（动画由 CSS 负责）。
-    card.addEventListener('animationend', function () { card.remove(); });
-    window.setTimeout(function () { card.remove(); }, TOAST_DURATION_MS);
+    function removeToast() {
+      if (!card.parentNode) { return; }
+      card.remove();
+      reflowToastSlots();
+    }
+    card.addEventListener('animationend', function (event) {
+      if (event.target === card && event.animationName === 'toast-float') { removeToast(); }
+    });
+    window.setTimeout(removeToast, TOAST_DURATION_MS);
+    var cards = el.toastStack.querySelectorAll('.toast');
+    if (cards.length > TOAST_MAX_VISIBLE) { cards[0].remove(); }
+    reflowToastSlots();
 
     state.notifications.push({ id: uid(), text: text, level: level, ts: Date.now(), count: 1 });
     if (state.notifications.length > 300) { state.notifications.shift(); }
     persist();
     renderNotifications();
+  }
+
+  function reflowToastSlots() {
+    var offset = 0;
+    var gap = 8;
+    Array.prototype.forEach.call(el.toastStack.querySelectorAll('.toast'), function (card, index) {
+      card.style.setProperty('--toast-offset', offset + 'px');
+      offset += card.offsetHeight + gap;
+    });
   }
 
   /* ---------- 点击空白区域弹出对应区域的提示 ---------- */
