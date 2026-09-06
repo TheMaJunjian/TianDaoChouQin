@@ -4,6 +4,7 @@
   --line: #1c3b4d;
   --cyan: #4fe3ff;
   --gold: #ffd479;
+  --warn: #ffad66;
   --green: #63f2a0;
   --red: #ff7b72;
   --purple: #b98bff;
@@ -214,6 +215,14 @@ input, select {
   width: 100%;
 }
 
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] { -moz-appearance: textfield; }
+
 input:focus, select:focus {
   outline: none;
   border-color: var(--cyan);
@@ -288,6 +297,40 @@ input:focus, select:focus {
   color: var(--muted);
 }
 .attr-row input { flex: 1; }
+.attr-number-control {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+.attr-number-control input {
+  min-width: 0;
+  border-radius: 4px 0 0 4px;
+}
+.number-stepper {
+  display: flex;
+  flex-direction: column;
+  width: 24px;
+  flex: 0 0 24px;
+  border: 1px solid var(--line);
+  border-left: 0;
+  border-radius: 0 4px 4px 0;
+  overflow: hidden;
+  background: #0b141b;
+}
+.number-stepper-btn {
+  flex: 1;
+  min-height: 14px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1;
+}
+.number-stepper-btn + .number-stepper-btn { border-top: 1px solid var(--line); }
+.number-stepper-btn:hover { background: #17546f; color: var(--cyan); }
 .attr-plus {
   flex: 0 0 auto;
   width: 28px;
@@ -492,7 +535,7 @@ input:focus, select:focus {
   white-space: nowrap;
 }
 .del:hover { color: var(--red); }
-.del.warn { color: var(--gold); }
+.del.warn { color: var(--warn); }
 .del.warn:hover { color: var(--cyan); }
 
 /* 技能条目上的置灰 [+]：与基础属性保持一致的锁定样式 */
@@ -570,10 +613,23 @@ input:focus, select:focus {
 .log-line .ts { color: var(--muted); }
 .log-line .lv-INFO { color: var(--cyan); }
 .log-line .lv-TRAIN { color: var(--green); }
-.log-line .lv-WARN { color: var(--gold); }
+.log-line .lv-WARN { color: var(--warn); }
 .log-line .lv-ERROR { color: var(--red); }
 .log-line .lv-SYSTEM { color: #b98bff; }
+.log-line .lv-REWARD { color: var(--gold); }
 .log-line .msg { color: var(--text); }
+.notice-line { border-left: 3px solid var(--line); padding-left: 8px; }
+.notice-info { border-left-color: var(--cyan); }
+.notice-train { border-left-color: var(--green); }
+.notice-train .msg { color: var(--green); }
+.notice-warn { border-left-color: var(--warn); }
+.notice-warn .msg { color: var(--warn); }
+.notice-error { border-left-color: var(--red); }
+.notice-error .msg { color: var(--red); }
+.notice-system { border-left-color: #b98bff; }
+.notice-system .msg { color: #b98bff; }
+.notice-reward { border-left-color: var(--gold); }
+.notice-reward .msg { color: var(--gold); }
 
 .log-line .del {
   position: static;
@@ -669,8 +725,9 @@ input:focus, select:focus {
 @media (prefers-reduced-motion: reduce) {
   .toast { animation-duration: 4.6s; animation-timing-function: linear; }
 }
-.toast-warn { border-color: var(--gold); color: var(--gold); }
+.toast-warn { border-color: var(--warn); color: var(--warn); }
 .toast-error { border-color: var(--red); color: var(--red); }
+.toast-reward { border-color: var(--gold); color: var(--gold); }
 
 /* ---------- 异常检测彩蛋 ---------- */
 .egg-mask {

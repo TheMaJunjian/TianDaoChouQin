@@ -35,7 +35,7 @@
 
   <!-- ========== 属性 ========== -->
   <section class="tab-panel" id="tab-attr" data-tab-panel="attr">
-    <section class="card" id="baseAttrCard" data-hint="技能和成就列表支持折叠显示；灰色 [+] 表示尚未开放的强化功能。">
+    <section class="card" id="baseAttrCard" data-hint="技能和成就列表支持折叠显示。">
       <h2>基础属性</h2>
       <div class="attr-row">
         <span class="attr-label">宿主</span>
@@ -43,7 +43,13 @@
       </div>
       <div class="attr-row">
         <span class="attr-label">体重</span>
-        <input type="number" id="attrWeight" placeholder="kg" min="0" step="0.1">
+        <div class="attr-number-control">
+          <input type="number" id="attrWeight" placeholder="例如：65" min="0" step="0.1">
+          <div class="number-stepper" aria-label="调整体重">
+            <button type="button" class="number-stepper-btn" data-weight-step="1" aria-label="增加体重">+</button>
+            <button type="button" class="number-stepper-btn" data-weight-step="-1" aria-label="减少体重">−</button>
+          </div>
+        </div>
         <button type="button" class="attr-plus" data-attr-plus="weight" aria-label="强化体重">+</button>
       </div>
       <div class="attr-row">
@@ -53,7 +59,7 @@
       </div>
       <div class="attr-row">
         <span class="attr-label">天赋</span>
-        <input type="text" id="attrTalent" placeholder="例如：过目不忘">
+        <input type="text" id="attrTalent" placeholder="例如：专注、记忆力强">
         <button type="button" class="attr-plus" data-attr-plus="talent" aria-label="强化天赋">+</button>
       </div>
       <div class="attr-row">
@@ -87,18 +93,18 @@
     <section class="card" id="hostCard" data-hint="宿主状态由复写的时间自动结算，主修方向决定一万小时大道进度。">
       <h2>宿主状态</h2>
       <div class="stat-grid">
-        <div class="stat"><span class="label">今日已复写</span><span class="value" id="todayFilled">0.0 h</span></div>
-        <div class="stat"><span class="label">今日缺失</span><span class="value" id="todayMissing">24.0 h</span></div>
+        <div class="stat"><span class="label">今日已记录</span><span class="value" id="todayFilled">0.0 h</span></div>
+        <div class="stat"><span class="label">今日未记录</span><span class="value" id="todayMissing">24.0 h</span></div>
         <div class="stat"><span class="label">累计修行</span><span class="value" id="totalHours">0.0 h</span></div>
         <div class="stat"><span class="label">技能数量</span><span class="value" id="skillCount">0</span></div>
       </div>
       <label class="inline">
-        <span>主修方向（一万小时目标 · 从已有技能中选择）</span>
+        <span>主修方向（从已有技能中选择）</span>
         <select id="focusCategory"></select>
       </label>
       <div class="progress-block">
         <div class="progress-title">
-          <span>一万小时进度 · <b id="focusLabel">未设定</b></span>
+          <span>可视化进度 · <b id="focusLabel">未设定</b></span>
           <span id="focusPercent">0.000%</span>
         </div>
         <div class="progress-bar"><div class="progress-fill" id="focusFill"></div></div>
@@ -108,8 +114,8 @@
 
     <section class="card" id="skillCard" data-hint="技能是宿主与世界交换价值的凭证，投入的每一小时都会沉淀在此。">
       <h2>复写技能</h2>
-      <form id="skillForm" class="entry-form" autocomplete="off">
-        <label class="wide"><span>技能名称</span><input type="text" id="skillName" placeholder="例如：Python" required></label>
+      <form id="skillForm" class="entry-form" autocomplete="off" novalidate>
+        <label class="wide"><span>技能名称</span><input type="text" id="skillName" placeholder="例如：剑术、炼丹" required></label>
         <label><span>复写方式</span>
           <select id="skillMode">
             <option value="level">按等级复写</option>
@@ -135,16 +141,16 @@
 
   <!-- ========== 复写 ========== -->
   <section class="tab-panel" id="tab-entry" data-tab-panel="entry">
-    <section class="card" data-hint="检测功能丢失，需要宿主手动复写：从几点到几点，做了什么。">
+    <section class="card" data-hint="记录一段时间：从何时开始，到何时结束，以及完成了什么。">
       <h2>复写时间段</h2>
-      <form id="entryForm" class="entry-form" autocomplete="off">
+      <form id="entryForm" class="entry-form" autocomplete="off" novalidate>
         <label><span>日期</span><input type="date" id="entryDate" required></label>
         <label><span>开始</span><input type="time" id="startTime" required></label>
         <label><span>结束</span><input type="time" id="endTime" required></label>
         <label><span>技能</span>
           <select id="category" required></select>
         </label>
-        <label class="wide"><span>做了什么</span><input type="text" id="activity" placeholder="调试系统面板" required></label>
+        <label class="wide"><span>做了什么</span><input type="text" id="activity" placeholder="例如：完成今日修行" required></label>
         <label class="wide"><span>日志等级</span>
           <select id="level">
             <option value="INFO">INFO · 常规</option>
@@ -185,7 +191,7 @@
       </div>
     </section>
 
-    <section class="card" data-hint="个人日志由系统自动生成：空洞时段代表检测功能丢失，需要宿主手动复写。">
+    <section class="card" data-hint="个人日志会按时间整理你的复写记录，空白时段表示尚未记录。">
       <h2>个人日志 · <span id="logDateLabel"></span></h2>
       <div class="log-view" id="logView"></div>
       <div class="log-actions">
@@ -202,7 +208,7 @@
 
   <!-- ========== 任务 ========== -->
   <section class="tab-panel" id="tab-quest" data-tab-panel="quest">
-    <section class="card" data-hint="主线任务由系统开发者发布，所有宿主共享同一条主线，进度独立记录于各自本地系统等级。">
+    <section class="card" data-hint="主线任务由系统发布，所有宿主共享同一条主线，进度独立记录于各自本地系统等级。">
       <h2>主线任务</h2>
       <div id="mainQuestBody"></div>
     </section>
@@ -214,9 +220,9 @@
 
     <section class="card" data-hint="支线任务由宿主自行发布、自行接受、自行提交，一切全凭宿主本心。">
       <h2>发布支线任务</h2>
-      <form id="sideQuestForm" class="entry-form" autocomplete="off">
-        <label class="wide"><span>任务名称</span><input type="text" id="sideTitle" placeholder="例如：今日阅读一小时" required></label>
-        <label class="wide"><span>任务描述</span><input type="text" id="sideDesc" placeholder="选填"></label>
+      <form id="sideQuestForm" class="entry-form" autocomplete="off" novalidate>
+        <label class="wide"><span>任务名称</span><input type="text" id="sideTitle" placeholder="例如：晨读" required></label>
+        <label class="wide"><span>任务描述</span><input type="text" id="sideDesc" placeholder="例如：阅读《道藏》第一卷"></label>
         <label><span>奖励属性点</span><input type="number" id="sideRewardAttr" min="0" max="20" value="1"></label>
         <label><span>奖励贡献点</span><input type="number" id="sideRewardContrib" min="0" max="20" value="1"></label>
         <button type="submit" class="btn wide">发布支线任务</button>
@@ -242,9 +248,9 @@
 
 <!-- ========== 自定义输入弹窗 ========== -->
 <div class="modal-mask hidden" id="nameModal">
-  <div class="modal-box">
-    <h2>宿主称号绑定</h2>
-    <p class="hint">请宿主输入称号，系统将以此称呼宿主。</p>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="nameTitle" aria-describedby="nameHint">
+    <h2 id="nameTitle">宿主称号绑定</h2>
+    <p class="hint" id="nameHint">请宿主输入称号，系统将以此称呼宿主。</p>
     <input type="text" id="nameInput" maxlength="24" placeholder="未命名修行者">
     <div class="modal-actions">
       <button type="button" class="btn ghost" id="nameCancel">取消</button>
@@ -253,8 +259,19 @@
   </div>
 </div>
 
+<div class="modal-mask hidden" id="confirmModal">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
+    <h2 id="confirmTitle">系统确认</h2>
+    <p class="hint" id="confirmMessage"></p>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" id="confirmCancel">取消</button>
+      <button type="button" class="btn danger-solid" id="confirmAccept">确认</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-mask hidden" id="detailModal">
-  <div class="modal-box detail-modal-box" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+  <div class="modal-box detail-modal-box" role="dialog" aria-modal="true" aria-labelledby="detailTitle" aria-describedby="detailBody">
     <h2 id="detailTitle"></h2>
     <div class="detail-modal-body" id="detailBody"></div>
     <div class="modal-actions">
@@ -268,10 +285,10 @@
   <div class="egg-box">
     <h2>检测到数据异常</h2>
     <p>世界毁灭倒计时：<span id="eggCount">100</span></p>
-    <p class="hint">（温馨提示：短时间内不要选择「加速」）</p>
+    <p class="hint">将自动点击加速</p>
     <div class="egg-actions">
       <button type="button" class="btn ghost" id="eggClose">关闭</button>
-      <button type="button" class="btn ghost" id="eggPause">时间停止</button>
+      <button type="button" class="btn ghost" id="eggPause">时间静止</button>
       <button type="button" class="btn danger-solid" id="eggBoost">加速</button>
     </div>
   </div>
