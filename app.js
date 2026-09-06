@@ -1824,6 +1824,7 @@
     renderMainQuest();
     renderSideQuests();
     updateQuestBadge();
+    syncCustomSelects();
   }
 
   function fullRender() {
