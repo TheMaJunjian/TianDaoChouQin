@@ -1223,8 +1223,11 @@
     var total = MAIN_QUEST_CLUES.length;
     var versionChanged = state.quests.lastSeenAppVersion !== APP_VERSION;
     if (!versionChanged) { return; }
-    state.quests.mainRevealed = total;
-    if (versionChanged && state.quests.mainCompleted < total) {
+    var hasNewQuests = total > state.quests.mainRevealed;
+    if (hasNewQuests) {
+      state.quests.mainRevealed = total;
+    }
+    if (hasNewQuests && state.quests.mainCompleted < total) {
       state.quests.mainAccepted = false;
     }
     state.quests.lastSeenAppVersion = APP_VERSION;
