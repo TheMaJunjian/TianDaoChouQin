@@ -76,8 +76,8 @@
         <span class="attr-label">成就</span>
         <button type="button" class="attr-summary-list" id="attrAchSummary" aria-haspopup="dialog">暂无</button>
         <button type="button" class="skill-toggle" id="achListToggle" aria-controls="achList" aria-expanded="true" aria-label="折叠成就">折叠</button>
-        <button type="button" class="attr-plus" data-attr-plus="ach" aria-label="强化成就">+</button>
       </div>
+      <ul class="ach-list featured" id="achList"></ul>
       <div class="progress-block" id="polishBlock">
         <div class="progress-title"><span>面板完整度</span><span id="polishPercent">0%</span></div>
         <div class="progress-bar"><div class="progress-fill alt" id="polishFill"></div></div>
@@ -131,10 +131,6 @@
       </div>
     </section>
 
-    <section class="card" id="achCard" data-hint="成就由支线任务结算而来：每完成一条支线任务，系统便为宿主刻下一枚成就。">
-      <h2>成就</h2>
-      <ul class="ach-list" id="achList"></ul>
-    </section>
   </section>
 
   <!-- ========== 复写 ========== -->
