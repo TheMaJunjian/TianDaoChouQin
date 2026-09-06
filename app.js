@@ -134,13 +134,17 @@
   }
 
   var saveTimer = null;
+  var sigTimer = null;
   function persist() {
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      renderTamperSignature();
     } catch (e) {
       toast('叮，存储模块异常，本次记录可能无法持久化保存。', { level: 'ERROR' });
+      return;
     }
+    // 签名计算涉及多次数组遍历，防抖到空闲时统一计算一次，避免频繁操作（如逐字输入）时反复重算。
+    if (sigTimer) { window.clearTimeout(sigTimer); }
+    sigTimer = window.setTimeout(renderTamperSignature, 300);
   }
 
   /* 简单校验签名：用于检测宿主是否绕过面板直接改写 localStorage 数值。 */
@@ -251,7 +255,7 @@
   function toast(text, opts) {
     opts = opts || {};
     var now = Date.now();
-    var key = text;
+    var key = text + '|' + (opts.level || '');
     var dupe = key === lastToastKey && (now - lastToastAt) < TOAST_DEDUPE_MS;
     lastToastKey = key;
     lastToastAt = now;
