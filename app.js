@@ -55,6 +55,7 @@
       focus: '',
       host: {
         name: '未命名修行者',
+        boundAt: '',
         weight: '',
         education: '',
         talent: '',
@@ -83,6 +84,7 @@
   var skillListCollapsed = false;
   var hiddenSkillListCollapsed = false;
   var achievementListCollapsed = false;
+  var timelineZoom = { start: 0, end: DAY_MINUTES, anchor: null };
 
   var el = {};
   [
@@ -99,8 +101,8 @@
     'skillForm', 'skillName', 'skillMode', 'skillLevelWrap', 'skillLevel',
     'skillHoursWrap', 'skillHours', 'skillList', 'hiddenSkillsBlock', 'hiddenSkillList', 'hiddenSkillToggle',
     'achList',
-    'entryForm', 'entryDate', 'startTime', 'endTime', 'category', 'activity',
-    'level', 'prevDay', 'nextDay', 'viewDate', 'timeline', 'coverageFill',
+    'entryForm', 'startDate', 'startTime', 'endDate', 'endTime', 'category', 'activity',
+    'level', 'prevDay', 'nextDay', 'viewDate', 'timeline', 'timelineRuler', 'timelineStartCursor', 'timelineEndCursor', 'timelineAxis', 'coverageFill',
     'coverageHint', 'logDateLabel', 'logView', 'copyLog', 'exportData',
     'importBtn', 'importFile', 'resetAll', 'clearDay', 'catList',
     'mainQuestBody', 'sideQuestForm', 'sideTitle', 'sideDesc', 'sideRewardAttr',
@@ -255,17 +257,28 @@
     function safe(fn) { try { fn(); } catch (e) { /* keep default for this field only */ } }
 
     safe(function () {
-      merged.entries = Array.isArray(parsed.entries) ? parsed.entries.filter(function (item) {
-        return item && typeof item === 'object' && typeof item.date === 'string' &&
-          Number.isFinite(Number(item.start)) && Number.isFinite(Number(item.end)) &&
-          typeof item.category === 'string' && typeof item.activity === 'string';
-      }).map(function (item) {
+      merged.entries = Array.isArray(parsed.entries) ? parsed.entries.map(function (item) {
+        if (!item || typeof item !== 'object' || typeof item.category !== 'string' || typeof item.activity !== 'string') {
+          return null;
+        }
+        var startDate = typeof item.startDate === 'string' ? item.startDate : item.date;
+        var endDate = typeof item.endDate === 'string' ? item.endDate : startDate;
+        var start = Number(item.start);
+        var end = Number(item.end);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate) ||
+          !Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start >= DAY_MINUTES ||
+          end < 0 || end > DAY_MINUTES || dateTimeStamp(endDate, end) <= dateTimeStamp(startDate, start)) {
+          return null;
+        }
         return Object.assign({}, item, {
-          start: Number(item.start),
-          end: Number(item.end),
+          date: startDate,
+          startDate: startDate,
+          endDate: endDate,
+          start: start,
+          end: end,
           level: ['INFO', 'TRAIN', 'WARN', 'ERROR'].indexOf(item.level) >= 0 ? item.level : 'INFO'
         });
-      }) : base.entries;
+      }).filter(function (item) { return item !== null; }) : base.entries;
     });
     safe(function () { merged.focus = typeof parsed.focus === 'string' ? parsed.focus : base.focus; });
     safe(function () { merged.host = Object.assign({}, base.host, (parsed.host && typeof parsed.host === 'object') ? parsed.host : {}); });
@@ -416,6 +429,42 @@
 
   function hours(minutes) { return (minutes / 60).toFixed(1); }
 
+  function dateIndex(dateStr) {
+    var p = dateStr.split('-');
+    return Math.floor(Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2])) / 86400000);
+  }
+
+  function dateFromIndex(index) {
+    var d = new Date(index * 86400000);
+    return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate());
+  }
+
+  function dateTimeStamp(dateStr, minutes) {
+    return dateIndex(dateStr) * DAY_MINUTES + minutes;
+  }
+
+  function entryStartStamp(entry) {
+    return dateTimeStamp(entry.startDate || entry.date, entry.start);
+  }
+
+  function entryEndStamp(entry) {
+    return dateTimeStamp(entry.endDate || entry.date, entry.end);
+  }
+
+  function entryDuration(entry) {
+    return entryEndStamp(entry) - entryStartStamp(entry);
+  }
+
+  function stampParts(stamp) {
+    var day = Math.floor(stamp / DAY_MINUTES);
+    return { date: dateFromIndex(day), minutes: stamp - day * DAY_MINUTES };
+  }
+
+  function currentStamp() {
+    var now = new Date();
+    return dateTimeStamp(todayStr(), now.getHours() * 60 + now.getMinutes());
+  }
+
   /* 当日进行中的时间不算「空洞」：结算上限取当前时刻。 */
   function nowMinutes() {
     var d = new Date();
@@ -427,12 +476,21 @@
   }
 
   function byDate(dateStr) {
-    return state.entries.filter(function (e) { return e.date === dateStr; })
-      .sort(function (a, b) { return a.start - b.start; });
+    var dayStart = dateTimeStamp(dateStr, 0);
+    var dayEnd = dayStart + DAY_MINUTES;
+    return state.entries.filter(function (e) {
+      return entryStartStamp(e) < dayEnd && entryEndStamp(e) > dayStart;
+    }).map(function (e) {
+      return Object.assign({}, e, {
+        start: Math.max(0, entryStartStamp(e) - dayStart),
+        end: Math.min(DAY_MINUTES, entryEndStamp(e) - dayStart),
+        date: dateStr
+      });
+    }).sort(function (a, b) { return a.start - b.start; });
   }
 
   function rawMinutes(list) {
-    return list.reduce(function (sum, e) { return sum + (e.end - e.start); }, 0);
+    return list.reduce(function (sum, e) { return sum + (e.startDate ? entryDuration(e) : e.end - e.start); }, 0);
   }
 
   function filledMinutes(list) {
@@ -462,6 +520,87 @@
       if (start < list[i].end && end > list[i].start) { return list[i]; }
     }
     return null;
+  }
+
+  function entryOverlap(startStamp, endStamp) {
+    for (var i = 0; i < state.entries.length; i++) {
+      if (startStamp < entryEndStamp(state.entries[i]) && endStamp > entryStartStamp(state.entries[i])) {
+        return state.entries[i];
+      }
+    }
+    return null;
+  }
+
+  function nextEntryStartStamp() {
+    var boundStamp = state.host.boundAt ? Number(state.host.boundAt) : currentStamp() - 60;
+    var latestEnd = state.entries.reduce(function (latest, entry) {
+      return Math.max(latest, entryEndStamp(entry));
+    }, boundStamp);
+    var candidate = Math.max(boundStamp, latestEnd);
+    var clash;
+    while ((clash = entryOverlap(candidate, candidate + 1))) {
+      candidate = entryEndStamp(clash);
+    }
+    return candidate;
+  }
+
+  function applyEntryDefaults() {
+    var startStamp = nextEntryStartStamp();
+    var nowStamp = currentStamp();
+    var start = stampParts(startStamp);
+    var end = stampParts(Math.max(nowStamp, startStamp));
+    el.startDate.value = start.date;
+    el.startTime.value = toClock(start.minutes);
+    el.endDate.value = end.date;
+    el.endTime.value = end.minutes > start.minutes || end.date !== start.date ? toClock(end.minutes) : '';
+  }
+
+  function entriesOverlapping(startStamp, endStamp) {
+    return state.entries.filter(function (entry) {
+      return startStamp < entryEndStamp(entry) && endStamp > entryStartStamp(entry);
+    });
+  }
+
+  function entryWithRange(entry, startStamp, endStamp, id) {
+    var start = stampParts(startStamp);
+    var end = stampParts(endStamp);
+    return Object.assign({}, entry, {
+      id: id || entry.id,
+      date: start.date,
+      startDate: start.date,
+      endDate: end.date,
+      start: start.minutes,
+      end: end.minutes
+    });
+  }
+
+  function rewriteOverlappingEntries(startStamp, endStamp, newEntry) {
+    var rewritten = [];
+    var newEntryId = newEntry.id;
+    state.entries.forEach(function (entry) {
+      var entryStart = entryStartStamp(entry);
+      var entryEnd = entryEndStamp(entry);
+      if (endStamp <= entryStart || startStamp >= entryEnd) {
+        rewritten.push(entry);
+        return;
+      }
+      var hasLeft = entryStart < startStamp;
+      var hasRight = entryEnd > endStamp;
+      if (hasLeft) {
+        rewritten.push(entryWithRange(entry, entryStart, startStamp, entry.id));
+        newEntryId = uid();
+      }
+      if (hasRight) {
+        rewritten.push(entryWithRange(entry, endStamp, entryEnd, hasLeft ? uid() : entry.id));
+        newEntryId = uid();
+      }
+      if (!hasLeft && !hasRight && newEntryId === newEntry.id) {
+        newEntryId = entry.id;
+      }
+    });
+    newEntry.id = newEntryId;
+    rewritten.push(newEntry);
+    state.entries = rewritten;
   }
 
   function escapeHtml(text) {
@@ -624,6 +763,7 @@
   function confirmName() {
     var name = el.nameInput.value.trim() || '未命名修行者';
     state.host.name = name;
+    if (!state.host.boundAt) { state.host.boundAt = String(currentStamp()); }
     persist();
     closeNameModal();
     toast('宿主称号已更新为「' + state.host.name + '」。系统已绑定。', { level: 'SYSTEM' });
@@ -646,16 +786,18 @@
 
   function closeConfirmModal() {
     pendingConfirm = null;
+    el.confirmAccept.textContent = '确认';
     el.confirmModal.classList.add('hidden');
   }
 
-  function openConfirmModal(message, onConfirm) {
+  function openConfirmModal(message, onConfirm, acceptLabel) {
     if (pendingConfirm) {
       toast('请先完成当前确认操作。', { level: 'WARN' });
       return false;
     }
     pendingConfirm = onConfirm;
     el.confirmMessage.textContent = message;
+    el.confirmAccept.textContent = acceptLabel || '确认';
     el.confirmModal.classList.remove('hidden');
     window.setTimeout(function () { el.confirmAccept.focus(); }, 30);
     return true;
@@ -1096,7 +1238,8 @@
   el.entryForm.addEventListener('submit', function (event) {
     event.preventDefault();
 
-    var date = el.entryDate.value;
+    var startDate = el.startDate.value;
+    var endDate = el.endDate.value;
     var startRaw = el.startTime.value;
     var endRaw = el.endTime.value;
     var category = el.category.value.trim();
@@ -1107,59 +1250,71 @@
       return;
     }
 
-    if (!date || !startRaw || !endRaw || !category || !activity) {
-      toast('输入不完整，请补全日期、时间、技能和活动内容。', { level: 'WARN' });
+    if (!startDate || !endDate || !startRaw || !endRaw || !category || !activity) {
+      toast('输入不完整，请补全开始日期、开始时间、结束日期、结束时间、技能和活动内容。', { level: 'WARN' });
       return;
     }
 
     var start = toMinutes(startRaw);
-    var end = toMinutes(endRaw) || DAY_MINUTES;
+    var end = toMinutes(endRaw);
+    var startStamp = dateTimeStamp(startDate, start);
+    var endStamp = dateTimeStamp(endDate, end);
 
-    if (end <= start) {
-      toast('时间悖论警告：结束时间须晚于开始时间。跨夜请拆成两段记录。', { level: 'ERROR' });
-      return;
-    }
-
-    var dayList = byDate(date);
-    var clash = overlaps(dayList, start, end);
-    if (clash) {
-      toast('时间线冲突：' + toClock(clash.start) + '-' + toClock(clash.end) +
-        ' 已记录「' + clash.activity + '」，宿主无法分身。', { level: 'ERROR' });
+    if (endStamp <= startStamp) {
+      toast('时间悖论警告：结束日期时间须晚于开始日期时间。', { level: 'ERROR' });
       return;
     }
 
     var skillBeforeEntry = skillByName(category);
     var previousSkillHours = skillBeforeEntry ? effectiveHours(skillBeforeEntry) : 0;
-    state.entries.push({
+    var newEntry = {
       id: uid(),
-      date: date,
+      date: startDate,
+      startDate: startDate,
+      endDate: endDate,
       start: start,
       end: end,
       category: category,
       activity: activity,
       level: el.level.value
-    });
-    persist();
+    };
+    var conflicts = entriesOverlapping(startStamp, endStamp);
+    function writeEntry(rewrite) {
+      if (rewrite) {
+        rewriteOverlappingEntries(startStamp, endStamp, newEntry);
+      } else {
+        state.entries.push(newEntry);
+      }
+      persist();
 
-    state.viewDate = date;
-    el.viewDate.value = date;
-    el.activity.value = '';
-    el.startTime.value = end === DAY_MINUTES ? '' : toClock(end);
-    el.endTime.value = '';
+      state.viewDate = startDate;
+      el.viewDate.value = startDate;
+      el.activity.value = '';
+      applyEntryDefaults();
 
-    toast('时间段记录成功：' + toClock(start) + '-' + toClock(end) + ' ' + activity +
-      '（+' + hours(end - start) + ' h）。', { level: 'TRAIN' });
+      toast((rewrite ? '冲突时间段已更正并写入：' : '时间段记录成功：') + startDate + ' ' + toClock(start) + '-' + endDate + ' ' + toClock(end) + ' ' + activity +
+        '（+' + hours(endStamp - startStamp) + ' h）。', { level: 'TRAIN' });
 
-    var skill = skillByName(category);
-    if (skill) {
-      var currentSkillHours = effectiveHours(skill);
-      var lv = levelForHours(currentSkillHours);
-      toast('技能【' + skill.name + '】累计时间已更新，当前等级：' + lv.label +
-        '（累计 ' + currentSkillHours.toFixed(1) + ' 小时）。', { level: 'TRAIN' });
-      notifySkillLevelUp(skill, previousSkillHours, currentSkillHours);
+      var skill = skillByName(category);
+      if (skill) {
+        var currentSkillHours = effectiveHours(skill);
+        var lv = levelForHours(currentSkillHours);
+        toast('技能【' + skill.name + '】累计时间已更新，当前等级：' + lv.label +
+          '（累计 ' + currentSkillHours.toFixed(1) + ' 小时）。', { level: 'TRAIN' });
+        notifySkillLevelUp(skill, previousSkillHours, currentSkillHours);
+      }
+      refreshAll();
     }
+
+    if (conflicts.length) {
+      openConfirmModal('检测到 ' + conflicts.length + ' 条时间记录重叠，点击“更正”将保留未覆盖部分并写入当前记录。', function () {
+        writeEntry(true);
+      }, '更正');
+      return;
+    }
+    writeEntry(false);
+
     // 数据更新后立即刷新全部面板，无需切换标签页。
-    refreshAll();
   });
 
   /* ---------- 日期导航 ---------- */
@@ -1171,6 +1326,7 @@
 
   function setViewDate(dateStr) {
     state.viewDate = dateStr;
+    timelineZoom = { start: 0, end: DAY_MINUTES, anchor: null };
     el.viewDate.value = dateStr;
     persist();
     refreshAll();
@@ -1207,7 +1363,24 @@
 
   el.clearDay.addEventListener('click', function () {
     openConfirmModal('确认清空 ' + state.viewDate + ' 的全部记录？', function () {
-      state.entries = state.entries.filter(function (e) { return e.date !== state.viewDate; });
+      var dayStart = dateTimeStamp(state.viewDate, 0);
+      var dayEnd = dayStart + DAY_MINUTES;
+      var retained = [];
+      state.entries.forEach(function (entry) {
+        var entryStart = entryStartStamp(entry);
+        var entryEnd = entryEndStamp(entry);
+        if (entryEnd <= dayStart || entryStart >= dayEnd) {
+          retained.push(entry);
+          return;
+        }
+        if (entryStart < dayStart) {
+          retained.push(entryWithRange(entry, entryStart, dayStart, entry.id));
+        }
+        if (entryEnd > dayEnd) {
+          retained.push(entryWithRange(entry, dayEnd, entryEnd, entryStart < dayStart ? uid() : entry.id));
+        }
+      });
+      state.entries = retained;
       persist();
       toast('当日时间线已重置。', { level: 'SYSTEM' });
       refreshAll();
@@ -1339,17 +1512,176 @@
   }
 
   /* ---------- 渲染：时间轴 / 日志 / 统计 ---------- */
+  function timelineZoomRange() {
+    return timelineZoom.end - timelineZoom.start;
+  }
+
+  function updateTimelineZoomLabel() {
+    var span = timelineZoom.end - timelineZoom.start;
+    el.timelineAxis.innerHTML = [0, 1, 2, 3, 4].map(function (index) {
+      var mark = Math.round((timelineZoom.start + span * index / 4) / 60) * 60;
+      return '<span>' + toClock(mark) + '</span>';
+    }).join('');
+    el.timelineStartCursor.style.left = (timelineZoom.start / DAY_MINUTES * 100) + '%';
+    el.timelineEndCursor.style.left = (timelineZoom.end / DAY_MINUTES * 100) + '%';
+    el.timelineStartCursor.setAttribute('aria-valuenow', String(Math.floor(timelineZoom.start / 60)));
+    el.timelineStartCursor.setAttribute('aria-valuetext', toClock(timelineZoom.start));
+    el.timelineEndCursor.setAttribute('aria-valuenow', String(Math.ceil(timelineZoom.end / 60)));
+    el.timelineEndCursor.setAttribute('aria-valuetext', toClock(timelineZoom.end));
+    el.timelineStartCursor.setAttribute('data-value', toClock(timelineZoom.start));
+    el.timelineEndCursor.setAttribute('data-value', toClock(timelineZoom.end));
+    el.timelineStartCursor.title = '开始 ' + toClock(timelineZoom.start) + '，拖动设置开始时间';
+    el.timelineEndCursor.title = '结束 ' + toClock(timelineZoom.end) + '，拖动设置结束时间';
+  }
+
+  function setTimelineZoom(start, end, anchor) {
+    var span = Math.max(60, Math.min(DAY_MINUTES, end - start));
+    var boundedStart = Math.max(0, Math.min(DAY_MINUTES - span, start));
+    timelineZoom.start = boundedStart;
+    timelineZoom.end = boundedStart + span;
+    timelineZoom.anchor = anchor === undefined ? timelineZoom.anchor : anchor;
+    updateTimelineZoomLabel();
+    renderTimeline(byDate(state.viewDate));
+  }
+
   function renderTimeline(list) {
     el.timeline.innerHTML = '';
+    var viewStart = timelineZoom.start;
+    var viewSpan = timelineZoomRange();
     list.forEach(function (e) {
+      var visibleStart = Math.max(e.start, viewStart);
+      var visibleEnd = Math.min(e.end, timelineZoom.end);
+      if (visibleEnd <= visibleStart) { return; }
       var slot = document.createElement('div');
       slot.className = 'slot ' + e.level;
-      slot.style.left = (e.start / DAY_MINUTES * 100) + '%';
-      slot.style.width = ((e.end - e.start) / DAY_MINUTES * 100) + '%';
-      slot.title = toClock(e.start) + '-' + toClock(e.end) + ' ' + e.category + ' · ' + e.activity;
+      slot.setAttribute('role', 'button');
+      slot.setAttribute('tabindex', '0');
+      slot.setAttribute('data-entry-id', e.id);
+      slot.setAttribute('aria-label', toClock(e.start) + '-' + toClock(e.end) + ' ' + e.category + '：' + e.activity);
+      slot.style.left = ((visibleStart - viewStart) / viewSpan * 100) + '%';
+      slot.style.width = ((visibleEnd - visibleStart) / viewSpan * 100) + '%';
+      slot.setAttribute('data-tooltip', toClock(e.start) + '-' + toClock(e.end) + ' · ' + e.category + ' · ' + e.activity);
       el.timeline.appendChild(slot);
     });
+    updateTimelineZoomLabel();
   }
+
+  function showTimelineEntry(entry) {
+    openDetailModal(toClock(entry.start) + '-' + toClock(entry.end) + ' · ' + entry.category,
+      '<div class="timeline-detail-time">' + escapeHtml(state.viewDate + ' ' + toClock(entry.start) + '-' + toClock(entry.end)) + '</div>' +
+      '<div class="detail-row"><span>技能</span><b>' + escapeHtml(entry.category) + '</b></div>' +
+      '<div class="detail-row"><span>活动</span><b>' + escapeHtml(entry.activity) + '</b></div>' +
+      '<div class="detail-row"><span>记录等级</span><b>' + escapeHtml(entry.level || 'INFO') + '</b></div>' +
+      '<div class="detail-row"><span>投入时间</span><b>' + hours(entry.end - entry.start) + ' h</b></div>');
+  }
+
+  function timelineEntryFromTarget(target) {
+    var id = target && target.getAttribute && target.getAttribute('data-entry-id');
+    if (!id) { return null; }
+    return state.entries.filter(function (entry) { return entry.id === id; })[0] || null;
+  }
+
+  el.timeline.addEventListener('click', function (event) {
+    var entry = timelineEntryFromTarget(event.target);
+    if (entry) {
+      var displayEntry = byDate(state.viewDate).filter(function (item) { return item.id === entry.id; })[0] || entry;
+      timelineZoom.anchor = (displayEntry.start + displayEntry.end) / 2;
+      showTimelineEntry(displayEntry);
+    }
+  });
+
+  el.timeline.addEventListener('keydown', function (event) {
+    if (event.key !== 'Enter' && event.key !== ' ') { return; }
+    var entry = timelineEntryFromTarget(event.target);
+    if (entry) {
+      event.preventDefault();
+      var displayEntry = byDate(state.viewDate).filter(function (item) { return item.id === entry.id; })[0] || entry;
+      timelineZoom.anchor = (displayEntry.start + displayEntry.end) / 2;
+      showTimelineEntry(displayEntry);
+    }
+  });
+
+  el.timeline.addEventListener('pointerover', function (event) {
+    var entry = timelineEntryFromTarget(event.target);
+    if (!entry) { return; }
+    var displayEntry = byDate(state.viewDate).filter(function (item) { return item.id === entry.id; })[0] || entry;
+    timelineZoom.anchor = (displayEntry.start + displayEntry.end) / 2;
+  });
+
+  el.timeline.addEventListener('pointermove', function (event) {
+    if (event.pointerType !== 'touch') { return; }
+    var target = event.target.closest && event.target.closest('.slot');
+    Array.prototype.forEach.call(el.timeline.querySelectorAll('.slot.touch-active'), function (slot) {
+      if (slot !== target) { slot.classList.remove('touch-active'); }
+    });
+    if (target) { target.classList.add('touch-active'); }
+  });
+
+  el.timeline.addEventListener('pointerleave', function () {
+    Array.prototype.forEach.call(el.timeline.querySelectorAll('.slot.touch-active'), function (slot) {
+      slot.classList.remove('touch-active');
+    });
+  });
+
+  function moveTimelineCursor(cursor, event) {
+    var rect = el.timelineRuler.getBoundingClientRect();
+    var ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+    var minutes = Math.round(ratio * DAY_MINUTES / 60) * 60;
+    if (cursor === 'start') {
+      minutes = Math.min(minutes, timelineZoom.end - 60);
+      setTimelineZoom(minutes, timelineZoom.end, null);
+    } else {
+      minutes = Math.max(minutes, timelineZoom.start + 60);
+      setTimelineZoom(timelineZoom.start, minutes, null);
+    }
+  }
+
+  function bindTimelineCursor(cursorElement, cursorName) {
+    cursorElement.addEventListener('pointerdown', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      cursorElement.classList.add('dragging');
+      cursorElement.setPointerCapture(event.pointerId);
+      moveTimelineCursor(cursorName, event);
+    });
+    cursorElement.addEventListener('pointermove', function (event) {
+      if (cursorElement.hasPointerCapture(event.pointerId)) {
+        moveTimelineCursor(cursorName, event);
+      }
+    });
+    cursorElement.addEventListener('pointerup', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      cursorElement.classList.remove('dragging');
+      if (cursorElement.hasPointerCapture(event.pointerId)) {
+        cursorElement.releasePointerCapture(event.pointerId);
+      }
+    });
+    cursorElement.addEventListener('pointercancel', function () {
+      cursorElement.classList.remove('dragging');
+    });
+    cursorElement.addEventListener('click', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    cursorElement.addEventListener('keydown', function (event) {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') { return; }
+      event.preventDefault();
+      var delta = event.key === 'ArrowLeft' ? -60 : 60;
+      if (cursorName === 'start') {
+        setTimelineZoom(Math.max(0, Math.min(timelineZoom.start + delta, timelineZoom.end - 60)), timelineZoom.end, null);
+      } else {
+        setTimelineZoom(timelineZoom.start, Math.min(DAY_MINUTES, Math.max(timelineZoom.end + delta, timelineZoom.start + 60)), null);
+      }
+    });
+  }
+
+  bindTimelineCursor(el.timelineStartCursor, 'start');
+  bindTimelineCursor(el.timelineEndCursor, 'end');
+
+  el.timeline.addEventListener('dblclick', function () {
+    setTimelineZoom(0, DAY_MINUTES, null);
+  });
 
   function renderLog(dateStr) {
     el.logDateLabel.textContent = dateStr;
@@ -1405,7 +1737,7 @@
     state.entries.forEach(function (e) {
       var key = normalize(e.category);
       if (!map[key]) { map[key] = { name: String(e.category).trim(), hours: 0, known: false }; }
-      if (!map[key].known) { map[key].hours += (e.end - e.start) / 60; }
+      if (!map[key].known) { map[key].hours += entryDuration(e) / 60; }
     });
     var rows = Object.keys(map).sort(function (x, y) { return map[y].hours - map[x].hours; });
     el.catList.innerHTML = rows.map(function (key) {
@@ -1917,7 +2249,6 @@
   }
 
   function fullRender() {
-    el.entryDate.value = todayStr();
     el.viewDate.value = state.viewDate;
     el.attrWeight.value = state.host.weight;
     el.attrEdu.value = state.host.education;
@@ -1926,6 +2257,7 @@
     el.attrStatus.value = state.host.status;
 
     refreshAll();
+    applyEntryDefaults();
     renderNotifications();
   }
 

@@ -144,9 +144,10 @@
     <section class="card" data-hint="记录一段时间：从何时开始，到何时结束，以及完成了什么。">
       <h2>复写时间段</h2>
       <form id="entryForm" class="entry-form" autocomplete="off" novalidate>
-        <label><span>日期</span><input type="date" id="entryDate" required></label>
-        <label><span>开始</span><input type="time" id="startTime" required></label>
-        <label><span>结束</span><input type="time" id="endTime" required></label>
+        <label><span>开始日期</span><input type="date" id="startDate" required></label>
+        <label><span>开始时间</span><input type="time" id="startTime" required></label>
+        <label><span>结束日期</span><input type="date" id="endDate" required></label>
+        <label><span>结束时间</span><input type="time" id="endTime" required></label>
         <label><span>技能</span>
           <select id="category" required></select>
         </label>
@@ -183,8 +184,12 @@
         <input type="date" id="viewDate">
         <button type="button" class="btn ghost" id="nextDay">后一日 ▶</button>
       </div>
+      <div class="timeline-ruler" id="timelineRuler" aria-label="拖动三角游标设置时间轴范围">
+        <span class="timeline-cursor start" id="timelineStartCursor" role="slider" tabindex="0" aria-label="时间轴开始游标" aria-valuemin="0" aria-valuemax="23" aria-valuestep="1" title="拖动设置开始时间"></span>
+        <span class="timeline-cursor end" id="timelineEndCursor" role="slider" tabindex="0" aria-label="时间轴结束游标" aria-valuemin="1" aria-valuemax="24" aria-valuestep="1" title="拖动设置结束时间"></span>
+      </div>
       <div class="timeline" id="timeline"></div>
-      <div class="timeline-axis"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>
+      <div class="timeline-axis" id="timelineAxis"></div>
       <div class="coverage">
         <div class="progress-bar"><div class="progress-fill alt" id="coverageFill"></div></div>
         <p class="hint" id="coverageHint"></p>

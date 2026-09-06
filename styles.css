@@ -650,9 +650,74 @@ input:focus, select:focus {
   margin-bottom: 12px;
 }
 
+.timeline-ruler {
+  position: relative;
+  height: 20px;
+  margin-top: 4px;
+  touch-action: none;
+}
+
+.timeline-cursor {
+  position: absolute;
+  bottom: 0;
+  z-index: 3;
+  width: 20px;
+  height: 20px;
+  transform: translateX(-50%);
+  cursor: grab;
+  touch-action: none;
+}
+
+.timeline-cursor::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  bottom: 0;
+  border-top: 10px solid var(--cyan);
+  border-right: 7px solid transparent;
+  border-left: 7px solid transparent;
+}
+
+.timeline-cursor:hover::before,
+.timeline-cursor:focus-visible::before,
+.timeline-cursor.dragging::before {
+  border-top-color: var(--gold);
+}
+
+.timeline-cursor:focus-visible {
+  outline: 1px solid var(--cyan);
+  outline-offset: 1px;
+}
+
+.timeline-cursor.dragging {
+  cursor: grabbing;
+}
+
+.timeline-cursor::after {
+  content: attr(data-value);
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  display: none;
+  padding: 2px 5px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: #07131d;
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.timeline-cursor.dragging::after {
+  display: block;
+}
+
 .timeline {
   position: relative;
-  height: 34px;
+  height: 40px;
   border: 1px solid var(--line);
   border-radius: 3px;
   background: repeating-linear-gradient(
@@ -669,8 +734,59 @@ input:focus, select:focus {
   position: absolute;
   top: 0;
   bottom: 0;
-  opacity: 0.85;
+  border: 0;
   border-right: 1px solid rgba(0, 0, 0, 0.4);
+  color: rgba(255, 255, 255, 0.9);
+  font: inherit;
+  font-size: 10px;
+  line-height: 40px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  opacity: 0.85;
+  transition: opacity 120ms ease, box-shadow 120ms ease;
+}
+
+.slot:hover,
+.slot:focus-visible,
+.slot.touch-active {
+  z-index: 2;
+  opacity: 1;
+  outline: 0;
+  box-shadow: 0 0 0 2px var(--gold), 0 0 12px rgba(238, 193, 91, 0.45);
+}
+
+.slot::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 4;
+  display: none;
+  width: max-content;
+  max-width: min(72vw, 360px);
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: #07131d;
+  color: var(--text);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: normal;
+  pointer-events: none;
+}
+
+.slot:hover::after,
+.slot:focus-visible::after,
+.slot.touch-active::after { display: block; }
+
+.timeline-detail-time {
+  margin-bottom: 8px;
+  color: var(--cyan);
+  font-size: 12px;
 }
 
 .slot.INFO { background: #2f7fa5; }
