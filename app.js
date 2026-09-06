@@ -259,6 +259,12 @@
         return item && typeof item === 'object' && typeof item.date === 'string' &&
           Number.isFinite(Number(item.start)) && Number.isFinite(Number(item.end)) &&
           typeof item.category === 'string' && typeof item.activity === 'string';
+      }).map(function (item) {
+        return Object.assign({}, item, {
+          start: Number(item.start),
+          end: Number(item.end),
+          level: ['INFO', 'TRAIN', 'WARN', 'ERROR'].indexOf(item.level) >= 0 ? item.level : 'INFO'
+        });
       }) : base.entries;
     });
     safe(function () { merged.focus = typeof parsed.focus === 'string' ? parsed.focus : base.focus; });
@@ -302,6 +308,12 @@
           rewardContrib: Number(item.rewardContrib)
         });
       }) : [];
+      var mainTotal = MAIN_QUEST_CLUES.length;
+      var revealed = Math.max(0, Math.min(mainTotal, Math.floor(Number(merged.quests.mainRevealed) || 0)));
+      var completed = Math.max(0, Math.min(revealed, Math.floor(Number(merged.quests.mainCompleted) || 0)));
+      merged.quests.mainRevealed = Math.max(revealed, completed);
+      merged.quests.mainCompleted = completed;
+      merged.quests.mainAccepted = merged.quests.mainAccepted === true;
     });
     safe(function () {
       merged.notifications = Array.isArray(parsed.notifications) ? parsed.notifications.filter(function (item) {
@@ -312,7 +324,12 @@
         return Object.assign({}, item, { level: level });
       }) : [];
     });
-    safe(function () { merged.noticeSeenCount = typeof parsed.noticeSeenCount === 'number' ? parsed.noticeSeenCount : 0; });
+    safe(function () {
+      var seenCount = Math.floor(Number(parsed.noticeSeenCount));
+      merged.noticeSeenCount = Number.isFinite(seenCount)
+        ? Math.max(0, Math.min(seenCount, merged.notifications.length))
+        : 0;
+    });
     safe(function () { merged.viewDate = typeof parsed.viewDate === 'string' ? parsed.viewDate : todayStr(); });
     merged.firstRun = false;
     return merged;
@@ -501,7 +518,10 @@
     reflowToastSlots();
 
     state.notifications.push({ id: uid(), text: text, level: level, ts: Date.now(), count: 1 });
-    if (state.notifications.length > 300) { state.notifications.shift(); }
+    if (state.notifications.length > 300) {
+      state.notifications.shift();
+      state.noticeSeenCount = Math.max(0, state.noticeSeenCount - 1);
+    }
     persist();
     renderNotifications();
   }
@@ -1449,10 +1469,7 @@
     var attrActive = document.querySelector('.tab-panel[data-tab-panel="attr"]');
     var visiblePanel = attrActive && attrActive.classList.contains('active');
     if (polishPercentValue >= 100) {
-      renderTaskFloat();
-      el.polishFloat.classList.remove('at-top');
-      el.polishFloat.classList.add('at-bottom');
-      el.polishFloat.classList.remove('hidden');
+      el.polishFloat.classList.add('hidden');
       return;
     }
     if (!visiblePanel) {
@@ -1514,8 +1531,8 @@
   /* ---------- 版本号 ---------- */
   function userVersionText() {
     return state.quests.mainCompleted > 0
-      ? '0.1' + pad3(state.quests.mainCompleted)
-      : '0.1';
+      ? 'v0.1' + pad3(state.quests.mainCompleted)
+      : 'v0.1';
   }
   function renderVersion() {
     el.userVersion.textContent = userVersionText();

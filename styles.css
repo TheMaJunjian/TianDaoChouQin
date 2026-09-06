@@ -781,7 +781,7 @@ input:focus, select:focus {
   left: 50%;
   transform: translateX(-50%);
   z-index: 50;
-  max-height: min(70vh, 420px);
+  height: calc(100vh - 24px);
   width: min(92vw, 420px);
   pointer-events: none;
   overflow: hidden;
