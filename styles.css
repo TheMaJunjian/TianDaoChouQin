@@ -297,40 +297,6 @@ input:focus, select:focus {
   color: var(--muted);
 }
 .attr-row input { flex: 1; }
-.attr-number-control {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-}
-.attr-number-control input {
-  min-width: 0;
-  border-radius: 4px 0 0 4px;
-}
-.number-stepper {
-  display: flex;
-  flex-direction: column;
-  width: 24px;
-  flex: 0 0 24px;
-  border: 1px solid var(--line);
-  border-left: 0;
-  border-radius: 0 4px 4px 0;
-  overflow: hidden;
-  background: #0b141b;
-}
-.number-stepper-btn {
-  flex: 1;
-  min-height: 14px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 12px;
-  line-height: 1;
-}
-.number-stepper-btn + .number-stepper-btn { border-top: 1px solid var(--line); }
-.number-stepper-btn:hover { background: #17546f; color: var(--cyan); }
 .attr-plus {
   flex: 0 0 auto;
   width: 28px;
