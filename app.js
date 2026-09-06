@@ -1278,7 +1278,7 @@
 
     if (completed >= total) {
       html += '<p class="hint">当前已发布的主线任务线索已全部完成，系统等级 ' + userVersionText() +
-        '。等待开发者发布下一次系统更新（当前开发版本 ' + APP_VERSION + '）。</p>';
+        '。等待开发者发布下一次系统更新。</p>';
     }
     el.mainQuestBody.innerHTML = html;
 
