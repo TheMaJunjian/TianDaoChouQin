@@ -312,7 +312,46 @@ input:focus, select:focus {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.attr-row-link .attr-plus { border-style: solid; border-color: var(--cyan); color: var(--cyan); }
+.attr-row .name-btn {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 自定义输入弹窗 ---------- */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(2, 4, 8, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.modal-box {
+  width: min(92vw, 380px);
+  background: #0b1420;
+  border: 1px solid var(--cyan);
+  border-radius: 6px;
+  padding: 18px 20px;
+  box-shadow: 0 0 30px rgba(79, 227, 255, 0.35);
+}
+
+.modal-box h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  color: var(--cyan);
+  letter-spacing: 2px;
+}
+
+.modal-box input { margin-top: 10px; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
 
 /* ---------- 手机端：面板完整度吸附条 ---------- */
 .polish-float {
@@ -397,6 +436,11 @@ input:focus, select:focus {
   white-space: nowrap;
 }
 .del:hover { color: var(--red); }
+.del.warn { color: var(--gold); }
+.del.warn:hover { color: var(--cyan); }
+
+/* 技能条目上的置灰 [+]：与基础属性保持一致的锁定样式 */
+.skill-head .attr-plus { width: 22px; height: 22px; font-size: 12px; }
 
 .empty { color: var(--muted); font-size: 12px; list-style: none; }
 
@@ -521,9 +565,9 @@ input:focus, select:focus {
 /* ---------- 弹出提示 toast ---------- */
 .toast-stack {
   position: fixed;
-  top: 50%;
+  top: 12px;
   left: 50%;
-  transform: translate(-50%, -50%);
+  transform: translateX(-50%);
   z-index: 50;
   display: flex;
   flex-direction: column;
@@ -533,7 +577,7 @@ input:focus, select:focus {
   pointer-events: none;
 }
 
-/* 中间弹出 → 上移一段距离后悬停 → 虚化消失 */
+/* 中间弹出 → 一路上移到可视区域顶部悬停 → 虚化消失 */
 .toast {
   width: 100%;
   background: rgba(6, 18, 27, 0.95);
@@ -550,11 +594,11 @@ input:focus, select:focus {
 }
 
 @keyframes toast-float {
-  0% { opacity: 0; transform: translateY(16px) scale(0.96); filter: blur(4px); }
-  10% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
-  30% { opacity: 1; transform: translateY(-40px); filter: blur(0); }
-  75% { opacity: 1; transform: translateY(-48px); filter: blur(0); }
-  100% { opacity: 0; transform: translateY(-72px); filter: blur(8px); }
+  0% { opacity: 0; transform: translateY(46vh) scale(0.96); filter: blur(4px); }
+  10% { opacity: 1; transform: translateY(42vh) scale(1); filter: blur(0); }
+  40% { opacity: 1; transform: translateY(0); filter: blur(0); }
+  80% { opacity: 1; transform: translateY(0); filter: blur(0); }
+  100% { opacity: 0; transform: translateY(-12px); filter: blur(8px); }
 }
 
 @media (prefers-reduced-motion: reduce) {
