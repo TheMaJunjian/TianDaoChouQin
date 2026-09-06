@@ -35,8 +35,13 @@
 
   <!-- ========== 属性 ========== -->
   <section class="tab-panel" id="tab-attr" data-tab-panel="attr">
-    <section class="card" id="baseAttrCard" data-hint="灰色 [+] 为属性强化功能，需属性点解锁 —— 目前仍处于功能缺失状态。">
+    <section class="card" id="baseAttrCard" data-hint="灰色 [+] 为属性强化功能，需消耗属性点 / 成就点 —— 目前仍处于功能缺失状态。">
       <h2>基础属性</h2>
+      <div class="attr-row">
+        <span class="attr-label">宿主</span>
+        <button type="button" class="attr-summary name-btn" id="hostName" title="点击修改称号">未命名修行者</button>
+        <button type="button" class="attr-plus" data-attr-plus="name" aria-label="强化称号">+</button>
+      </div>
       <div class="attr-row">
         <span class="attr-label">体重</span>
         <input type="number" id="attrWeight" placeholder="kg" min="0" step="0.1">
@@ -65,12 +70,13 @@
       <div class="attr-row attr-row-link">
         <span class="attr-label">技能</span>
         <span class="attr-summary" id="attrSkillSummary">暂无</span>
-        <button type="button" class="attr-plus" data-jump="skillCard" aria-label="新增技能">+</button>
+        <button type="button" class="attr-plus" data-attr-plus="skill" aria-label="强化技能">+</button>
       </div>
+      <ul class="skill-list featured" id="skillList"></ul>
       <div class="attr-row attr-row-link">
         <span class="attr-label">成就</span>
         <span class="attr-summary" id="attrAchSummary">暂无</span>
-        <button type="button" class="attr-plus" data-jump="achCard" aria-label="新增成就">+</button>
+        <button type="button" class="attr-plus" data-attr-plus="ach" aria-label="强化成就">+</button>
       </div>
       <div class="progress-block" id="polishBlock">
         <div class="progress-title"><span>面板完整度</span><span id="polishPercent">0%</span></div>
@@ -81,14 +87,14 @@
     <section class="card" id="hostCard" data-hint="宿主状态由复写的时间自动结算，主修方向决定一万小时大道进度。">
       <h2>宿主状态</h2>
       <div class="stat-grid">
-        <div class="stat"><span class="label">宿主（点击可改名）</span><button type="button" class="value name-btn" id="hostName" title="点击修改称号">未命名修行者</button></div>
         <div class="stat"><span class="label">今日已复写</span><span class="value" id="todayFilled">0.0 h</span></div>
         <div class="stat"><span class="label">今日缺失</span><span class="value" id="todayMissing">24.0 h</span></div>
         <div class="stat"><span class="label">累计修行</span><span class="value" id="totalHours">0.0 h</span></div>
+        <div class="stat"><span class="label">技能数量</span><span class="value" id="skillCount">0</span></div>
       </div>
       <label class="inline">
-        <span>主修方向（一万小时目标）</span>
-        <input id="focusCategory" type="text" placeholder="例如：编程">
+        <span>主修方向（一万小时目标 · 从已有技能中选择）</span>
+        <select id="focusCategory"></select>
       </label>
       <div class="progress-block">
         <div class="progress-title">
@@ -101,8 +107,7 @@
     </section>
 
     <section class="card" id="skillCard" data-hint="技能是宿主与世界交换价值的凭证，投入的每一小时都会沉淀在此。">
-      <h2>技能</h2>
-      <ul class="skill-list featured" id="skillList"></ul>
+      <h2>复写技能</h2>
       <form id="skillForm" class="entry-form" autocomplete="off">
         <label class="wide"><span>技能名称</span><input type="text" id="skillName" placeholder="例如：Python" required></label>
         <label><span>复写方式</span>
@@ -119,15 +124,9 @@
       </form>
     </section>
 
-    <section class="card" id="achCard" data-hint="成就是宿主走过的路标，记录下来，系统才会承认它存在。">
+    <section class="card" id="achCard" data-hint="成就由支线任务结算而来：每完成一条支线任务，系统便为宿主刻下一枚成就。">
       <h2>成就</h2>
       <ul class="ach-list" id="achList"></ul>
-      <form id="achForm" class="entry-form" autocomplete="off">
-        <label class="wide"><span>成就名称</span><input type="text" id="achName" placeholder="例如：连续复写 7 天" required></label>
-        <label><span>成就点数</span><input type="number" id="achPoints" min="1" max="999" value="10"></label>
-        <label class="wide"><span>备注</span><input type="text" id="achDesc" placeholder="选填"></label>
-        <button type="submit" class="btn wide">记录成就</button>
-      </form>
     </section>
   </section>
 
@@ -139,7 +138,9 @@
         <label><span>日期</span><input type="date" id="entryDate" required></label>
         <label><span>开始</span><input type="time" id="startTime" required></label>
         <label><span>结束</span><input type="time" id="endTime" required></label>
-        <label><span>分类</span><input type="text" id="category" placeholder="编程 / 睡眠 / 摸鱼" required></label>
+        <label><span>技能</span>
+          <select id="category" required></select>
+        </label>
         <label class="wide"><span>做了什么</span><input type="text" id="activity" placeholder="调试系统面板" required></label>
         <label class="wide"><span>日志等级</span>
           <select id="level">
@@ -181,7 +182,7 @@
       </div>
     </section>
 
-    <section class="card">
+    <section class="card" data-hint="个人日志由系统自动生成：空洞时段代表检测功能丢失，需要宿主手动复写。">
       <h2>个人日志 · <span id="logDateLabel"></span></h2>
       <div class="log-view" id="logView"></div>
       <div class="log-actions">
@@ -190,8 +191,8 @@
       </div>
     </section>
 
-    <section class="card">
-      <h2>分类统计（全部记录）</h2>
+    <section class="card" data-hint="技能统计汇总宿主全部复写记录，投入的小时会直接抬升对应技能等级。">
+      <h2>技能统计（全部记录）</h2>
       <ul class="cat-list" id="catList"></ul>
     </section>
   </section>
@@ -203,7 +204,7 @@
       <div id="mainQuestBody"></div>
     </section>
 
-    <section class="card">
+    <section class="card" data-hint="支线任务完成后即刻转化为成就，并结算属性点与贡献点。">
       <h2>已发布支线任务</h2>
       <ul class="quest-list" id="sideQuestList"></ul>
     </section>
@@ -222,7 +223,7 @@
 
   <!-- ========== 提示 ========== -->
   <section class="tab-panel" id="tab-notice" data-tab-panel="notice">
-    <section class="card">
+    <section class="card" data-hint="系统提示记录保存宿主触发过的全部提示，可随时清空。">
       <h2>系统提示记录</h2>
       <div class="log-actions">
         <button type="button" class="btn ghost danger" id="clearNotices">清空提示记录</button>
@@ -234,7 +235,21 @@
 </main>
 
 <footer class="panel-footer" data-hint="系统提醒：数据仅保存在本机浏览器，清除浏览器数据将导致修行记录丢失。">
+  <p class="hint">点击面板空白处，系统会给出该区域的提示。</p>
 </footer>
+
+<!-- ========== 自定义输入弹窗 ========== -->
+<div class="modal-mask hidden" id="nameModal">
+  <div class="modal-box">
+    <h2>宿主称号绑定</h2>
+    <p class="hint">请宿主输入称号，系统将以此称呼宿主。</p>
+    <input type="text" id="nameInput" maxlength="24" placeholder="未命名修行者">
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" id="nameCancel">取消</button>
+      <button type="button" class="btn" id="nameConfirm">确认绑定</button>
+    </div>
+  </div>
+</div>
 
 <!-- ========== 异常检测彩蛋 ========== -->
 <div class="egg-mask hidden" id="eggMask">
