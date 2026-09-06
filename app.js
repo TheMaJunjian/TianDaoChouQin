@@ -288,6 +288,7 @@
    */
   function toast(text, opts) {
     opts = opts || {};
+    text = String(text).indexOf('叮，') === 0 ? String(text) : '叮，' + text;
 
     var card = document.createElement('div');
     card.className = 'toast' + (opts.level ? ' toast-' + opts.level.toLowerCase() : '');
