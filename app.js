@@ -108,6 +108,120 @@
     el[id] = document.getElementById(id);
   });
 
+  /* ---------- 自定义下拉：保留原生 select 作为真实值源 ---------- */
+  var customSelects = [];
+  var openCustomSelect = null;
+
+  function selectedOption(select) {
+    return select.options[select.selectedIndex] || select.options[0];
+  }
+
+  function syncCustomSelect(item) {
+    var option = selectedOption(item.select);
+    item.trigger.textContent = option ? option.textContent : '暂无选项';
+    item.trigger.disabled = !item.select.options.length;
+    item.list.innerHTML = '';
+    Array.prototype.forEach.call(item.select.options, function (selectOption, index) {
+      var optionButton = document.createElement('button');
+      optionButton.type = 'button';
+      optionButton.className = 'custom-select-option';
+      optionButton.setAttribute('role', 'option');
+      optionButton.setAttribute('aria-selected', selectOption.selected ? 'true' : 'false');
+      optionButton.disabled = selectOption.disabled;
+      optionButton.dataset.index = String(index);
+      optionButton.textContent = selectOption.textContent;
+      item.list.appendChild(optionButton);
+    });
+  }
+
+  function closeCustomSelect(item) {
+    if (!item) { return; }
+    item.shell.classList.remove('open');
+    item.shell.classList.remove('open-up');
+    item.list.style.maxHeight = '';
+    item.trigger.setAttribute('aria-expanded', 'false');
+    if (openCustomSelect === item) { openCustomSelect = null; }
+  }
+
+  function openSelectOptions(item) {
+    if (!item.select.options.length) { return; }
+    if (openCustomSelect && openCustomSelect !== item) { closeCustomSelect(openCustomSelect); }
+    item.shell.classList.add('open');
+    var rect = item.trigger.getBoundingClientRect();
+    var menuHeight = item.list.scrollHeight;
+    var spaceBelow = window.innerHeight - rect.bottom - 8;
+    var spaceAbove = rect.top - 8;
+    var opensUp = spaceBelow < menuHeight && spaceAbove > spaceBelow;
+    var availableSpace = opensUp ? spaceAbove : spaceBelow;
+    item.shell.classList.toggle('open-up', opensUp);
+    item.list.style.maxHeight = Math.max(0, Math.min(menuHeight, availableSpace)) + 'px';
+    item.trigger.setAttribute('aria-expanded', 'true');
+    openCustomSelect = item;
+  }
+
+  function setupCustomSelects() {
+    Array.prototype.forEach.call(document.querySelectorAll('select'), function (select) {
+      var shell = document.createElement('div');
+      shell.className = 'custom-select';
+      select.parentNode.insertBefore(shell, select);
+      shell.appendChild(select);
+
+      var trigger = document.createElement('button');
+      trigger.type = 'button';
+      trigger.className = 'custom-select-trigger';
+      trigger.setAttribute('aria-haspopup', 'listbox');
+      trigger.setAttribute('aria-expanded', 'false');
+      trigger.setAttribute('aria-controls', select.id + '-options');
+
+      var list = document.createElement('div');
+      list.className = 'custom-select-options';
+      list.id = select.id + '-options';
+      list.setAttribute('role', 'listbox');
+      shell.appendChild(trigger);
+      shell.appendChild(list);
+
+      var item = { select: select, shell: shell, trigger: trigger, list: list };
+      customSelects.push(item);
+      select.classList.add('custom-select-native');
+      syncCustomSelect(item);
+
+      trigger.addEventListener('click', function () {
+        if (shell.classList.contains('open')) { closeCustomSelect(item); }
+        else { openSelectOptions(item); }
+      });
+      trigger.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') { closeCustomSelect(item); return; }
+        if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
+          event.preventDefault();
+          openSelectOptions(item);
+        }
+      });
+      list.addEventListener('click', function (event) {
+        var optionButton = event.target.closest('.custom-select-option');
+        if (!optionButton || optionButton.disabled) { return; }
+        select.selectedIndex = Number(optionButton.dataset.index);
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        syncCustomSelect(item);
+        closeCustomSelect(item);
+        trigger.focus();
+      });
+      select.addEventListener('change', function () {
+        syncCustomSelect(item);
+        closeCustomSelect(item);
+      });
+    });
+  }
+
+  function syncCustomSelects() {
+    customSelects.forEach(syncCustomSelect);
+  }
+
+  document.addEventListener('click', function (event) {
+    if (openCustomSelect && !openCustomSelect.shell.contains(event.target)) {
+      closeCustomSelect(openCustomSelect);
+    }
+  });
+
   /* ---------- 存储 ---------- */
   function loadState() {
     try {
@@ -603,11 +717,13 @@
   }
   var lastSkillLevel = SKILL_LEVELS[0].key;
   fillSkillLevelSelect();
+  setupCustomSelects();
 
   el.skillLevel.addEventListener('change', function () {
     var picked = SKILL_LEVELS.filter(function (l) { return l.key === el.skillLevel.value; })[0];
     if (picked && picked.locked) {
       el.skillLevel.value = lastSkillLevel;
+      syncCustomSelects();
       toast('宿主技能超过当前系统等级限制，「' + picked.label + '」等级尚未解锁。', { level: 'WARN' });
       return;
     }
@@ -650,6 +766,14 @@
     return state.skills.filter(function (s2) { return normalize(s2.name) === normalize(name); })[0];
   }
 
+  function notifySkillLevelUp(skill, previousHours, currentHours) {
+    var previousLevel = levelForHours(previousHours);
+    var currentLevel = levelForHours(currentHours);
+    if (SKILL_LEVELS.indexOf(currentLevel) <= SKILL_LEVELS.indexOf(previousLevel)) { return; }
+    toast('技能【' + skill.name + '】已提升至「' + currentLevel.label + '」阶段，累计 ' +
+      currentHours.toFixed(1) + ' 小时。', { level: 'REWARD' });
+  }
+
   el.skillForm.addEventListener('submit', function (event) {
     event.preventDefault();
     var name = el.skillName.value.trim();
@@ -669,6 +793,7 @@
     }
 
     var existing = skillByName(name);
+    var previousHours = existing ? effectiveHours(existing) : 0;
     if (existing) {
       existing.hours = hoursValue;
     } else {
@@ -680,6 +805,7 @@
     var lv = levelForHours(total);
     toast('已录入技能【' + name + '】，当前等级：' + lv.label +
       '（累计 ' + total.toFixed(1) + ' 小时）。', { level: 'TRAIN' });
+    notifySkillLevelUp(skillByName(name), previousHours, total);
 
     el.skillForm.reset();
     fillSkillLevelSelect();
@@ -825,7 +951,7 @@
         '<span class="skill-name">' + escapeHtml(s2.name) + '</span>' +
         '<span class="skill-actions">' +
         (capped ? '<button type="button" class="del warn" data-capped-skill="' + s2.id + '" title="系统提示">[!]</button>' : '') +
-        '<button type="button" class="skill-action" data-hide-skill="' + s2.id + '" title="隐藏技能项">隐藏</button>' +
+        '<button type="button" class="del" data-hide-skill="' + s2.id + '" title="隐藏技能项">隐藏</button>' +
         '<button type="button" class="del" data-del-skill="' + s2.id + '" title="删除技能">删除</button>' +
         '</span>' +
         '<span class="skill-lv">' + lv.label + '</span>' +
@@ -847,8 +973,8 @@
       var h = effectiveHours(s2);
       return '<li class="skill-item hidden-skill-item">' +
         '<div class="skill-head"><span class="skill-name">' + escapeHtml(s2.name) + '</span>' +
-        '<span class="skill-lv">' + levelForHours(h).label + '</span>' +
-        '<button type="button" class="skill-action" data-show-skill="' + s2.id + '">显示</button></div>' +
+        '<button type="button" class="del" data-show-skill="' + s2.id + '">显示</button>' +
+        '<span class="skill-lv">' + levelForHours(h).label + '</span></div>' +
         '<div class="skill-meta">累计 ' + h.toFixed(1) + ' 小时</div>' +
         '</li>';
     }).join('');
@@ -888,7 +1014,7 @@
     }
     el.achList.innerHTML = state.achievements.slice().map(function (a2) {
       return '<li class="ach-item">' +
-        '<div class="ach-head"><span class="ach-name">🏆 ' + escapeHtml(a2.name) + '</span>' +
+        '<div class="ach-head"><span class="ach-name">' + escapeHtml(a2.name) + '</span>' +
         (a2.desc ? '<span class="ach-desc">' + escapeHtml(a2.desc) + '</span>' : '') +
         '<span class="ach-pt">+' + a2.points + '</span></div>' +
         '</li>';
@@ -932,6 +1058,8 @@
       return;
     }
 
+    var skillBeforeEntry = skillByName(category);
+    var previousSkillHours = skillBeforeEntry ? effectiveHours(skillBeforeEntry) : 0;
     state.entries.push({
       id: uid(),
       date: date,
@@ -954,9 +1082,11 @@
 
     var skill = skillByName(category);
     if (skill) {
-      var lv = levelForHours(effectiveHours(skill));
+      var currentSkillHours = effectiveHours(skill);
+      var lv = levelForHours(currentSkillHours);
       toast('技能【' + skill.name + '】累计时间已更新，当前等级：' + lv.label +
-        '（累计 ' + effectiveHours(skill).toFixed(1) + ' 小时）。', { level: 'TRAIN' });
+        '（累计 ' + currentSkillHours.toFixed(1) + ' 小时）。', { level: 'TRAIN' });
+      notifySkillLevelUp(skill, previousSkillHours, currentSkillHours);
     }
     // 数据更新后立即刷新全部面板，无需切换标签页。
     refreshAll();
@@ -1016,7 +1146,7 @@
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
     a.href = url;
-    a.download = 'tiandao-chouqin-' + todayStr() + '.json';
+    a.download = 'tiandaochouqin-' + todayStr() + '.json';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1229,11 +1359,11 @@
     document.body.classList.add('polish-' + tier);
 
     var hints = [
-      '面板仍是最朴素的调试界面，快去补全属性。',
+      '面板已恢复至初始状态。',
       '检测到属性数据流入，面板开始泛起微光。',
       '属性完整度过半，系统外壳纹路逐渐显现。',
       '属性接近完整，面板特效即将全部激活。',
-      '属性已全部复写！完整版特效面板已激活——此刻，你才是真正的天选宿主。'
+      '属性已全部复写！完整版特效面板已激活——此刻，天选宿主归位。'
     ];
     // 静态提示文字已移除：完整度跨过新的档位时才以弹窗形式提示一次。
     if (lastPolishTier !== null && tier !== lastPolishTier) { toast(hints[tier]); }
@@ -1370,6 +1500,7 @@
     renderMainQuest();
     renderSideQuests();
     updateQuestBadge();
+    syncCustomSelects();
   }
 
   function previousVersionTag() {
