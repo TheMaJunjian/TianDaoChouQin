@@ -302,6 +302,45 @@ input:focus, select:focus {
 }
 .attr-plus:hover { border-color: var(--muted); color: var(--muted); }
 
+.skill-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+  overflow: hidden;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.skill-toggle:hover { border-color: var(--cyan); color: var(--cyan); }
+.skill-toggle-label { flex: 0 0 auto; color: var(--cyan); font-size: 18px; line-height: 1; }
+.attr-row .skill-toggle { flex: 0 0 auto; min-width: 52px; padding: 4px 8px; font-size: 11px; text-align: center; }
+.attr-summary-list {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: var(--green);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 4px 0;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attr-summary-list:hover { color: var(--cyan); }
+
 .attr-row .attr-label { white-space: nowrap; }
 .attr-summary {
   flex: 1;
@@ -409,12 +448,24 @@ input:focus, select:focus {
 }
 .skill-name, .ach-name { flex: 1 1 auto; min-width: 0; word-break: break-word; }
 .skill-name { color: var(--text); }
-.skill-lv { color: var(--gold); font-weight: bold; white-space: nowrap; flex: 0 0 auto; }
+.skill-head { display: grid; grid-template-columns: minmax(0, 1fr) auto auto 28px; }
+.skill-actions { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.skill-action { border: 1px solid var(--line); border-radius: 3px; background: transparent; color: var(--muted); padding: 3px 6px; font: inherit; font-size: 11px; cursor: pointer; }
+.skill-action:hover { color: var(--cyan); border-color: var(--cyan); }
+.skill-lv { color: var(--gold); font-weight: bold; white-space: nowrap; text-align: right; }
 .skill-meta { color: var(--muted); font-size: 11px; margin-top: 4px; }
+.skill-item.is-hidden .skill-meta { display: none; }
+
+.hidden-skills-block { margin-top: 14px; border-top: 1px dashed var(--line); padding-top: 10px; }
+.hidden-skills-title { display: flex; align-items: center; justify-content: space-between; }
+.hidden-skills-block h3 { margin: 0 0 8px; color: var(--muted); font-size: 12px; font-weight: normal; }
+.hidden-skills-title .skill-toggle { flex: 0 0 auto; min-width: 52px; padding: 4px 8px; font-size: 11px; text-align: center; }
+.hidden-skill-list { margin-top: 0; }
+.hidden-skill-item { border-color: var(--line); background: rgba(111, 142, 160, 0.06); }
 
 .ach-item .ach-name { color: var(--gold); }
 .ach-item .ach-pt { color: var(--green); white-space: nowrap; flex: 0 0 auto; }
-.ach-desc { color: var(--muted); font-size: 11px; margin-top: 4px; }
+.ach-desc { flex: 1 1 auto; min-width: 0; color: var(--muted); font-size: 11px; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 
 .quest-title { color: var(--cyan); font-size: 13px; }
 .quest-status { color: var(--muted); font-size: 11px; }
@@ -441,6 +492,15 @@ input:focus, select:focus {
 
 /* 技能条目上的置灰 [+]：与基础属性保持一致的锁定样式 */
 .skill-head .attr-plus { width: 22px; height: 22px; font-size: 12px; }
+.skill-head .attr-plus { justify-self: end; }
+
+.detail-modal-box { width: min(92vw, 480px); }
+.detail-modal-body { max-height: 50vh; overflow: auto; }
+.detail-row { display: flex; align-items: baseline; gap: 12px; border-bottom: 1px solid var(--line); padding: 8px 0; }
+.detail-row:last-child { border-bottom: 0; }
+.detail-row > span { min-width: 0; flex: 1; color: var(--text); }
+.detail-row > b { flex: 0 0 auto; color: var(--gold); white-space: nowrap; }
+.detail-row small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
 
 .empty { color: var(--muted); font-size: 12px; list-style: none; }
 

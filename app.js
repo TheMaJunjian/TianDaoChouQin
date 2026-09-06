@@ -60,6 +60,7 @@
         status: ''
       },
       skills: [],
+      hiddenSkills: [],
       achievements: [],
       points: { attribute: 0, contribution: 0, achievement: 0 },
       quests: {
@@ -77,19 +78,23 @@
   }
 
   var state = loadState();
+  var skillListCollapsed = false;
+  var hiddenSkillListCollapsed = false;
+  var achievementListCollapsed = false;
 
   var el = {};
   [
     'toastStack', 'userVersion', 'pAch', 'pContrib', 'pAttr', 'tabbar',
-    'polishFloat', 'polishFloatFill', 'polishFloatPercent', 'polishBlock',
-    'attrSkillSummary', 'attrAchSummary', 'skillCard', 'achCard',
+    'polishFloat', 'polishFloatLabel', 'polishFloatFill', 'polishFloatPercent', 'polishBlock',
+    'attrSkillSummary', 'attrAchSummary', 'skillListToggle', 'achListToggle', 'skillCard', 'achCard',
     'hostName', 'todayFilled', 'todayMissing', 'totalHours', 'skillCount', 'focusCategory',
     'nameModal', 'nameInput', 'nameConfirm', 'nameCancel',
+    'detailModal', 'detailTitle', 'detailBody', 'detailClose',
     'focusLabel', 'focusPercent', 'focusFill', 'focusHint',
     'attrWeight', 'attrEdu', 'attrTalent', 'attrProperty', 'attrStatus',
     'polishPercent', 'polishFill',
     'skillForm', 'skillName', 'skillMode', 'skillLevelWrap', 'skillLevel',
-    'skillHoursWrap', 'skillHours', 'skillList',
+    'skillHoursWrap', 'skillHours', 'skillList', 'hiddenSkillsBlock', 'hiddenSkillList', 'hiddenSkillToggle',
     'achList',
     'entryForm', 'entryDate', 'startTime', 'endTime', 'category', 'activity',
     'level', 'prevDay', 'nextDay', 'viewDate', 'timeline', 'coverageFill',
@@ -97,7 +102,7 @@
     'importBtn', 'importFile', 'resetAll', 'clearDay', 'catList',
     'mainQuestBody', 'sideQuestForm', 'sideTitle', 'sideDesc', 'sideRewardAttr',
     'sideRewardContrib', 'sideQuestList', 'noticeView', 'clearNotices',
-    'eggMask', 'eggCount', 'eggPause', 'eggBoost'
+    'eggMask', 'eggCount', 'eggClose', 'eggPause', 'eggBoost'
   ].forEach(function (id) {
     el[id] = document.getElementById(id);
   });
@@ -136,6 +141,7 @@
     safe(function () { merged.focus = typeof parsed.focus === 'string' ? parsed.focus : base.focus; });
     safe(function () { merged.host = Object.assign({}, base.host, (parsed.host && typeof parsed.host === 'object') ? parsed.host : {}); });
     safe(function () { merged.skills = Array.isArray(parsed.skills) ? parsed.skills : base.skills; });
+    safe(function () { merged.hiddenSkills = Array.isArray(parsed.hiddenSkills) ? parsed.hiddenSkills : base.hiddenSkills; });
     safe(function () { merged.achievements = Array.isArray(parsed.achievements) ? parsed.achievements : base.achievements; });
     safe(function () { merged.points = Object.assign({}, base.points, (parsed.points && typeof parsed.points === 'object') ? parsed.points : {}); });
     safe(function () {
@@ -590,14 +596,86 @@
       return;
     }
 
+    var hideId = target.getAttribute('data-hide-skill');
+    if (hideId) {
+      var hiddenIndex = state.hiddenSkills.indexOf(hideId);
+      if (hiddenIndex >= 0) {
+        state.hiddenSkills.splice(hiddenIndex, 1);
+      } else {
+        state.hiddenSkills.push(hideId);
+      }
+      persist();
+      refreshAll();
+      return;
+    }
+
     var id = target.getAttribute('data-del-skill');
     if (!id) { return; }
     var skill = state.skills.filter(function (s2) { return s2.id === id; })[0];
+    if (!skill || !window.confirm('确认删除技能【' + skill.name + '】？删除后将同时移除该技能的累计记录。')) { return; }
     state.skills = state.skills.filter(function (s2) { return s2.id !== id; });
+    state.hiddenSkills = state.hiddenSkills.filter(function (hiddenId) { return hiddenId !== id; });
     if (skill && normalize(skill.name) === normalize(state.focus)) { state.focus = ''; }
     persist();
     if (skill) { toast('技能【' + skill.name + '】记录已从面板抹除。'); }
     refreshAll();
+  });
+
+  el.hiddenSkillList.addEventListener('click', function (event) {
+    var target = event.target;
+    var showId = target.getAttribute && target.getAttribute('data-show-skill');
+    if (!showId) { return; }
+    state.hiddenSkills = state.hiddenSkills.filter(function (hiddenId) { return hiddenId !== showId; });
+    persist();
+    refreshAll();
+  });
+
+  el.hiddenSkillToggle.addEventListener('click', function () {
+    hiddenSkillListCollapsed = !hiddenSkillListCollapsed;
+    renderHiddenSkillToggle();
+  });
+
+  el.skillListToggle.addEventListener('click', function () {
+    skillListCollapsed = !skillListCollapsed;
+    renderSkillListToggle();
+  });
+
+  el.achListToggle.addEventListener('click', function () {
+    achievementListCollapsed = !achievementListCollapsed;
+    renderAchievementListToggle();
+  });
+
+  el.attrSkillSummary.addEventListener('click', function () {
+    var skills = visibleSkills();
+    openDetailModal('技能列表', skills.length
+      ? skills.map(function (s2) {
+        return '<div class="detail-row"><span>' + escapeHtml(s2.name) + '</span><b>' +
+          escapeHtml(levelForHours(effectiveHours(s2)).label) + '</b></div>';
+      }).join('')
+      : '<p class="hint">暂无可见技能。</p>');
+  });
+
+  el.attrAchSummary.addEventListener('click', function () {
+    openDetailModal('成就列表', state.achievements.length
+      ? state.achievements.map(function (a2) {
+        return '<div class="detail-row"><span>' + escapeHtml(a2.name) +
+          (a2.desc ? '<small>' + escapeHtml(a2.desc) + '</small>' : '') +
+          '</span><b>+' + a2.points + '</b></div>';
+      }).join('')
+      : '<p class="hint">暂无成就。</p>');
+  });
+
+  function openDetailModal(title, body) {
+    el.detailTitle.textContent = title;
+    el.detailBody.innerHTML = body;
+    el.detailModal.classList.remove('hidden');
+  }
+
+  function closeDetailModal() { el.detailModal.classList.add('hidden'); }
+
+  el.detailClose.addEventListener('click', closeDetailModal);
+  el.detailModal.addEventListener('click', function (event) {
+    if (event.target === el.detailModal) { closeDetailModal(); }
   });
 
   function sortedSkills() {
@@ -606,12 +684,19 @@
     });
   }
 
+  function visibleSkills() {
+    return sortedSkills().filter(function (s2) {
+      return state.hiddenSkills.indexOf(s2.id) < 0;
+    });
+  }
+
   function renderSkills() {
-    if (!state.skills.length) {
-      el.skillList.innerHTML = '<li class="empty">暂无技能记录，快去投入时间修炼一门手艺吧。</li>';
+    var skills = visibleSkills();
+    if (!skills.length) {
+      el.skillList.innerHTML = '<li class="empty">暂无可见技能记录。</li>';
       return;
     }
-    el.skillList.innerHTML = sortedSkills().map(function (s2) {
+    el.skillList.innerHTML = skills.map(function (s2) {
       var h = effectiveHours(s2);
       var lv = levelForHours(h);
       var next = SKILL_LEVELS[SKILL_LEVELS.indexOf(lv) + 1];
@@ -623,10 +708,13 @@
       return '<li class="skill-item' + (capped ? ' capped' : '') + '">' +
         '<div class="skill-head">' +
         '<span class="skill-name">' + escapeHtml(s2.name) + '</span>' +
-        '<span class="skill-lv">' + lv.label + '</span>' +
+        '<span class="skill-actions">' +
         (capped ? '<button type="button" class="del warn" data-capped-skill="' + s2.id + '" title="系统提示">[!]</button>' : '') +
+        '<button type="button" class="skill-action" data-hide-skill="' + s2.id + '" title="隐藏技能项">隐藏</button>' +
+        '<button type="button" class="del" data-del-skill="' + s2.id + '" title="删除技能">删除</button>' +
+        '</span>' +
+        '<span class="skill-lv">' + lv.label + '</span>' +
         '<button type="button" class="attr-plus" data-skill-plus="' + s2.id + '" aria-label="强化技能">+</button>' +
-        '<button type="button" class="del" data-del-skill="' + s2.id + '" title="删除技能">[x]</button>' +
         '</div>' +
         '<div class="skill-meta">累计 ' + h.toFixed(1) + ' 小时' +
         (progressText ? ' · ' + progressText : '') + '</div>' +
@@ -634,19 +722,63 @@
     }).join('');
   }
 
+  function renderHiddenSkills() {
+    var skills = sortedSkills().filter(function (s2) {
+      return state.hiddenSkills.indexOf(s2.id) >= 0;
+    });
+    el.hiddenSkillsBlock.classList.toggle('hidden', !skills.length);
+    if (!skills.length) { return; }
+    el.hiddenSkillList.innerHTML = skills.map(function (s2) {
+      var h = effectiveHours(s2);
+      return '<li class="skill-item hidden-skill-item">' +
+        '<div class="skill-head"><span class="skill-name">' + escapeHtml(s2.name) + '</span>' +
+        '<span class="skill-lv">' + levelForHours(h).label + '</span>' +
+        '<button type="button" class="skill-action" data-show-skill="' + s2.id + '">显示</button></div>' +
+        '<div class="skill-meta">累计 ' + h.toFixed(1) + ' 小时</div>' +
+        '</li>';
+    }).join('');
+    renderHiddenSkillToggle();
+  }
+
+  function renderHiddenSkillToggle() {
+    el.hiddenSkillList.classList.toggle('hidden', hiddenSkillListCollapsed);
+    el.hiddenSkillToggle.textContent = hiddenSkillListCollapsed ? '展开' : '折叠';
+    el.hiddenSkillToggle.setAttribute('aria-expanded', String(!hiddenSkillListCollapsed));
+    el.hiddenSkillToggle.setAttribute('aria-label', hiddenSkillListCollapsed ? '展开隐藏技能' : '折叠隐藏技能');
+    el.hiddenSkillToggle.title = hiddenSkillListCollapsed ? '展开隐藏技能' : '折叠隐藏技能';
+  }
+
+  function renderSkillListToggle() {
+    el.skillList.classList.toggle('hidden', skillListCollapsed);
+    el.skillListToggle.setAttribute('aria-expanded', String(!skillListCollapsed));
+    el.skillListToggle.textContent = skillListCollapsed ? '展开' : '折叠';
+    el.skillListToggle.setAttribute('aria-label', skillListCollapsed ? '展开技能项' : '折叠技能');
+    el.skillListToggle.title = skillListCollapsed ? '展开技能项' : '折叠技能';
+  }
+
+  function renderAchievementListToggle() {
+    el.achList.classList.toggle('hidden', achievementListCollapsed);
+    el.achListToggle.textContent = achievementListCollapsed ? '展开' : '折叠';
+    el.achListToggle.setAttribute('aria-expanded', String(!achievementListCollapsed));
+    el.achListToggle.setAttribute('aria-label', achievementListCollapsed ? '展开成就' : '折叠成就');
+    el.achListToggle.title = achievementListCollapsed ? '展开成就' : '折叠成就';
+  }
+
   /* ---------- 成就：只展示，不提供编辑区（支线任务完成即成就） ---------- */
   function renderAchievements() {
     if (!state.achievements.length) {
       el.achList.innerHTML = '<li class="empty">暂无成就，完成一条支线任务即可刻下第一枚成就。</li>';
+      renderAchievementListToggle();
       return;
     }
     el.achList.innerHTML = state.achievements.slice().map(function (a2) {
       return '<li class="ach-item">' +
         '<div class="ach-head"><span class="ach-name">🏆 ' + escapeHtml(a2.name) + '</span>' +
+        (a2.desc ? '<span class="ach-desc">' + escapeHtml(a2.desc) + '</span>' : '') +
         '<span class="ach-pt">+' + a2.points + '</span></div>' +
-        (a2.desc ? '<div class="ach-desc">' + escapeHtml(a2.desc) + '</div>' : '') +
         '</li>';
     }).join('');
+    renderAchievementListToggle();
   }
 
   /* ---------- 复写时间段 ---------- */
@@ -665,7 +797,7 @@
     }
 
     if (!date || !startRaw || !endRaw || !category || !activity) {
-      toast('输入不完整，检测功能丢失，需要宿主手动补全。', { level: 'WARN' });
+      toast('输入不完整，请补全日期、时间、技能和活动内容。', { level: 'WARN' });
       return;
     }
 
@@ -747,10 +879,10 @@
       navigator.clipboard.writeText(text).then(function () {
         toast('日志已复制到剪贴板。');
       }, function () {
-        toast('剪贴板权限缺失，需要宿主手动选中复制。', { level: 'WARN' });
+        toast('无法访问剪贴板，请手动选择日志内容复制。', { level: 'WARN' });
       });
     } else {
-      toast('剪贴板模块丢失，需要宿主手动选中复制。', { level: 'WARN' });
+      toast('当前环境不支持剪贴板，请手动选择日志内容复制。', { level: 'WARN' });
     }
   });
 
@@ -800,7 +932,7 @@
     if (!window.confirm('确认重置全部本地数据？此操作不可撤销，请先导出备份。')) { return; }
     state = defaultState();
     persist();
-    toast('系统已恢复出厂设置。检测模块丢失，一切需要宿主重新手动输入。');
+    toast('系统已恢复初始状态，所有数据需要重新输入。');
     fullRender();
   });
 
@@ -963,8 +1095,7 @@
     polishPercentValue = percent;
     el.polishPercent.textContent = percent + '%';
     el.polishFill.style.width = percent + '%';
-    el.polishFloatPercent.textContent = percent + '%';
-    el.polishFloatFill.style.width = percent + '%';
+    renderProgressFloat(percent);
     renderAttrSummaries();
     renderPlusVisibility();
 
@@ -990,9 +1121,13 @@
 
   function renderAttrSummaries() {
     // 技能不展示「几项」，具体技能由下方的技能列表逐条呈现。
-    el.attrSkillSummary.textContent = state.skills.length
-      ? sortedSkills().map(function (s2) { return s2.name; }).join('、')
+    var skills = visibleSkills();
+    el.attrSkillSummary.textContent = skills.length
+      ? skills.map(function (s2) { return s2.name; }).join('、')
       : '暂无';
+    el.skillListToggle.title = skills.length
+      ? '技能名称按等级从高到低排列，点击展开或折叠技能项'
+      : '暂无技能';
     el.attrAchSummary.textContent = state.achievements.length
       ? state.achievements.length + ' 项 · 成就点 ' + state.points.achievement
       : '暂无';
@@ -1006,16 +1141,26 @@
   function updatePolishFloat() {
     var attrActive = document.querySelector('.tab-panel[data-tab-panel="attr"]');
     var visiblePanel = attrActive && attrActive.classList.contains('active');
-    if (!isNarrowScreen() || !visiblePanel) {
-      el.polishFloat.classList.add('hidden');
+    if (polishPercentValue >= 100) {
+      renderTaskFloat();
+      el.polishFloat.classList.remove('at-top');
+      el.polishFloat.classList.add('at-bottom');
+      el.polishFloat.classList.remove('hidden');
       return;
     }
-    // 完整度 100% 后不再冻结悬停：该吸附条只是初次填写时的引导。
-    if (polishPercentValue >= 100) {
-      el.polishFloat.classList.add('hidden');
+    if (!visiblePanel) {
+      el.polishFloat.classList.remove('at-top');
+      el.polishFloat.classList.add('at-bottom');
+      el.polishFloat.classList.remove('hidden');
       return;
     }
     var rect = el.polishBlock.getBoundingClientRect();
+    if (!rect.width || !rect.height) {
+      el.polishFloat.classList.remove('at-bottom');
+      el.polishFloat.classList.add('at-top');
+      el.polishFloat.classList.remove('hidden');
+      return;
+    }
     var inView = rect.bottom > 0 && rect.top < window.innerHeight;
     if (inView) {
       el.polishFloat.classList.add('hidden');
@@ -1026,6 +1171,27 @@
     el.polishFloat.classList.toggle('at-top', atTop);
     el.polishFloat.classList.toggle('at-bottom', !atTop);
     el.polishFloat.classList.remove('hidden');
+  }
+
+  function renderProgressFloat(percent) {
+    el.polishFloatLabel.textContent = '面板完整度';
+    el.polishFloatPercent.textContent = percent + '%';
+    el.polishFloatFill.style.width = percent + '%';
+  }
+
+  function renderTaskFloat() {
+    var mainTotal = MAIN_QUEST_CLUES.length;
+    var mainCompleted = Math.min(state.quests.mainCompleted, mainTotal);
+    var sideTasks = state.quests.side;
+    var sideDone = sideTasks.filter(function (q) { return q.status === 'done'; }).length;
+    var useSide = mainCompleted >= mainTotal && sideTasks.length > 0;
+    var completed = useSide ? sideDone : mainCompleted;
+    var total = useSide ? sideTasks.length : mainTotal;
+    var label = useSide ? '支线任务' : '主线任务';
+    var percent = total ? Math.min(completed / total * 100, 100) : 0;
+    el.polishFloatLabel.textContent = label;
+    el.polishFloatPercent.textContent = completed + '/' + total;
+    el.polishFloatFill.style.width = percent + '%';
   }
 
   window.addEventListener('scroll', updatePolishFloat, { passive: true });
@@ -1053,7 +1219,7 @@
     if (state.quests.mainRevealed === 0) {
       state.quests.mainRevealed = 1;
       persist();
-      toast('获得主线任务：解锁系统面板全部功能，当前进度 0/' + MAIN_QUEST_CLUES.length + '。');
+      toast('获得主线任务：解锁系统面板全部功能，当前进度 0/TREE（' + MAIN_QUEST_CLUES.length + '）。');
     } else if (state.quests.lastSeenAppVersion !== APP_VERSION &&
       state.quests.mainRevealed < MAIN_QUEST_CLUES.length &&
       state.quests.mainCompleted >= state.quests.mainRevealed) {
@@ -1088,7 +1254,7 @@
       return;
     }
 
-    var html = '<div class="quest-progress">解锁系统面板全部功能 · 进度 ' + completed + '/' + total + '</div>' +
+    var html = '<div class="quest-progress">解锁系统面板全部功能 · 进度 ' + completed + '/TREE（' + total + '）</div>' +
       '<div class="progress-bar"><div class="progress-fill" style="width:' + (completed / total * 100) + '%"></div></div>';
 
     if (completed >= total) {
@@ -1139,13 +1305,14 @@
     persist();
     renderPoints();
     renderVersion();
+    updatePolishFloat();
+    renderMainQuest();
+    updateQuestBadge();
     toast('系统正在升级……');
     window.setTimeout(function () {
       toast('系统升级完成。');
       window.setTimeout(function () {
         toast('系统已经升级到第 ' + userVersionText() + ' 版，获得属性点 +5。');
-        renderMainQuest();
-        updateQuestBadge();
       }, 700);
     }, 700);
   }
@@ -1245,8 +1412,9 @@
     } else {
       el.noticeView.innerHTML = list.map(function (n) {
         var d = new Date(n.ts);
-        var time = pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
-        return '<div class="log-line"><span class="ts">[' + time + ']</span> <span class="msg">' +
+        var dateTime = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' +
+          pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+        return '<div class="log-line"><span class="ts">[' + dateTime + ']</span> <span class="msg">' +
           escapeHtml(n.text) + '</span>' + (n.count > 1 ? ' <span class="hint">(×' + n.count + ')</span>' : '') +
           '</div>';
       }).join('');
@@ -1304,6 +1472,11 @@
     if (eggTimer) { window.clearInterval(eggTimer); eggTimer = null; }
   }
 
+  el.eggClose.addEventListener('click', function () {
+    stopEggTimer();
+    el.eggMask.classList.add('hidden');
+  });
+
   el.eggPause.addEventListener('click', function () {
     stopEggTimer();
   });
@@ -1354,6 +1527,8 @@
     el.hostName.textContent = state.host.name;
     render();
     renderSkills();
+    renderHiddenSkills();
+    renderSkillListToggle();
     renderAchievements();
     renderPolish();
     renderPoints();

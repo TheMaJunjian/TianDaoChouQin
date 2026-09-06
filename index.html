@@ -12,7 +12,7 @@
 <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
 <div class="polish-float hidden" id="polishFloat">
-  <span class="polish-float-label">面板完整度</span>
+  <span class="polish-float-label" id="polishFloatLabel">面板完整度</span>
   <div class="progress-bar"><div class="progress-fill alt" id="polishFloatFill"></div></div>
   <span class="polish-float-pct" id="polishFloatPercent">0%</span>
 </div>
@@ -35,12 +35,11 @@
 
   <!-- ========== 属性 ========== -->
   <section class="tab-panel" id="tab-attr" data-tab-panel="attr">
-    <section class="card" id="baseAttrCard" data-hint="灰色 [+] 为属性强化功能，需消耗属性点 / 成就点 —— 目前仍处于功能缺失状态。">
+    <section class="card" id="baseAttrCard" data-hint="技能和成就列表支持折叠显示；灰色 [+] 表示尚未开放的强化功能。">
       <h2>基础属性</h2>
       <div class="attr-row">
         <span class="attr-label">宿主</span>
         <button type="button" class="attr-summary name-btn" id="hostName" title="点击修改称号">未命名修行者</button>
-        <button type="button" class="attr-plus" data-attr-plus="name" aria-label="强化称号">+</button>
       </div>
       <div class="attr-row">
         <span class="attr-label">体重</span>
@@ -69,13 +68,14 @@
       </div>
       <div class="attr-row attr-row-link">
         <span class="attr-label">技能</span>
-        <span class="attr-summary" id="attrSkillSummary">暂无</span>
-        <button type="button" class="attr-plus" data-attr-plus="skill" aria-label="强化技能">+</button>
+        <button type="button" class="attr-summary-list" id="attrSkillSummary" aria-haspopup="dialog">暂无</button>
+        <button type="button" class="skill-toggle" id="skillListToggle" aria-controls="skillList" aria-expanded="true" aria-label="折叠技能">折叠</button>
       </div>
       <ul class="skill-list featured" id="skillList"></ul>
       <div class="attr-row attr-row-link">
         <span class="attr-label">成就</span>
-        <span class="attr-summary" id="attrAchSummary">暂无</span>
+        <button type="button" class="attr-summary-list" id="attrAchSummary" aria-haspopup="dialog">暂无</button>
+        <button type="button" class="skill-toggle" id="achListToggle" aria-controls="achList" aria-expanded="true" aria-label="折叠成就">折叠</button>
         <button type="button" class="attr-plus" data-attr-plus="ach" aria-label="强化成就">+</button>
       </div>
       <div class="progress-block" id="polishBlock">
@@ -122,6 +122,13 @@
         <label id="skillHoursWrap" class="hidden"><span>投入小时</span><input type="number" id="skillHours" min="0" step="1"></label>
         <button type="submit" class="btn wide">复写 / 更新技能</button>
       </form>
+      <div class="hidden-skills-block hidden" id="hiddenSkillsBlock">
+        <div class="hidden-skills-title">
+          <h3>隐藏技能</h3>
+          <button type="button" class="skill-toggle" id="hiddenSkillToggle" aria-controls="hiddenSkillList" aria-expanded="true" aria-label="折叠隐藏技能">折叠</button>
+        </div>
+        <ul class="skill-list hidden-skill-list" id="hiddenSkillList"></ul>
+      </div>
     </section>
 
     <section class="card" id="achCard" data-hint="成就由支线任务结算而来：每完成一条支线任务，系统便为宿主刻下一枚成就。">
@@ -235,7 +242,6 @@
 </main>
 
 <footer class="panel-footer" data-hint="系统提醒：数据仅保存在本机浏览器，清除浏览器数据将导致修行记录丢失。">
-  <p class="hint">点击面板空白处，系统会给出该区域的提示。</p>
 </footer>
 
 <!-- ========== 自定义输入弹窗 ========== -->
@@ -251,6 +257,16 @@
   </div>
 </div>
 
+<div class="modal-mask hidden" id="detailModal">
+  <div class="modal-box detail-modal-box" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+    <h2 id="detailTitle"></h2>
+    <div class="detail-modal-body" id="detailBody"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn" id="detailClose">关闭</button>
+    </div>
+  </div>
+</div>
+
 <!-- ========== 异常检测彩蛋 ========== -->
 <div class="egg-mask hidden" id="eggMask">
   <div class="egg-box">
@@ -258,6 +274,7 @@
     <p>世界毁灭倒计时：<span id="eggCount">100</span></p>
     <p class="hint">（温馨提示：短时间内不要选择「加速」）</p>
     <div class="egg-actions">
+      <button type="button" class="btn ghost" id="eggClose">关闭</button>
       <button type="button" class="btn ghost" id="eggPause">时间停止</button>
       <button type="button" class="btn danger-solid" id="eggBoost">加速</button>
     </div>
