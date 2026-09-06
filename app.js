@@ -1302,11 +1302,18 @@
     // 主修方向即技能：进度直接沿用该技能已累计的小时，不会从零开始。
     var h = effectiveHours(skill);
     var percent = Math.min(h / GOAL_HOURS * 100, 100);
+    var currentLevel = levelForHours(h);
+    var currentLevelIndex = SKILL_LEVELS.indexOf(currentLevel);
+    var nextLevel = SKILL_LEVELS[currentLevelIndex + 1];
     el.focusFill.style.width = percent + '%';
     el.focusPercent.textContent = percent.toFixed(3) + '%';
-    el.focusHint.textContent = '技能「' + skill.name + '」当前等级 ' + levelForHours(h).label +
-      '，已累计 ' + h.toFixed(1) + ' h，距一万小时之境还差 ' +
-      Math.max(GOAL_HOURS - h, 0).toFixed(1) + ' h。';
+    el.focusHint.textContent = nextLevel
+      ? '技能「' + skill.name + '」当前等级 ' + currentLevel.label +
+        '，已累计 ' + h.toFixed(1) + ' h，距离「' + nextLevel.label + '」还差 ' +
+        Math.max(nextLevel.minHours - h, 0).toFixed(1) + ' h' +
+        (nextLevel.locked ? '（该阶段尚未解锁）' : '') + '。'
+      : '技能「' + skill.name + '」当前等级 ' + currentLevel.label +
+        '，已累计 ' + h.toFixed(1) + ' h，当前阶段已达上限。';
   }
 
   function renderCategories() {
