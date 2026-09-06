@@ -6,7 +6,7 @@
   'use strict';
 
   /* ---------- 常量 ---------- */
-  var APP_VERSION = '0.3'; // 开发者系统等级：本次更新即「主线任务」背后的真实版本迭代
+  var APP_VERSION = '0.2'; // 开发者系统等级：本次更新即「主线任务」背后的真实版本迭代
   var STORAGE_KEY = 'tiandao.state.v2';
   var LEGACY_ENTRIES_KEY = 'tiandao.entries.v1';
   var LEGACY_FOCUS_KEY = 'tiandao.focus.v1';
