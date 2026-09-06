@@ -6,7 +6,7 @@
   'use strict';
 
   /* ---------- 常量 ---------- */
-  var APP_VERSION = '0.2'; // 开发者系统等级：本次更新即「主线任务」背后的真实版本迭代
+  var APP_VERSION = '0.2'; // 开发者代码版本：用于识别是否有新增主线任务
   var STORAGE_KEY = 'tiandao.state.v2';
   var LEGACY_ENTRIES_KEY = 'tiandao.entries.v1';
   var LEGACY_FOCUS_KEY = 'tiandao.focus.v1';
@@ -1278,7 +1278,7 @@
 
     if (completed >= total) {
       html += '<p class="hint">当前已发布的主线任务线索已全部完成，系统等级 ' + userVersionText() +
-        '。等待开发者发布下一次系统更新（当前系统等级 ' + APP_VERSION + '）。</p>';
+        '。等待开发者发布下一次系统更新（当前开发版本 ' + APP_VERSION + '）。</p>';
     }
     el.mainQuestBody.innerHTML = html;
 
