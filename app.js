@@ -1512,7 +1512,7 @@
     var completed = useSide ? sideDone : mainCompleted;
     var total = useSide ? sideTasks.length : mainTotal;
     var label = useSide ? '支线任务' : '主线任务';
-    var percent = total ? Math.min(completed / total * (useSide ? 100 : 99), useSide ? 100 : 99) : 0;
+    var percent = total ? (completed >= total ? 100 : Math.min(completed / total * (useSide ? 100 : 99), useSide ? 100 : 99)) : 0;
     el.polishFloatLabel.textContent = label;
     el.polishFloatPercent.textContent = completed + '/' + total;
     el.polishFloatFill.style.width = percent + '%';
@@ -1587,8 +1587,9 @@
       el.mainQuestBody.innerHTML = '<p class="hint">主线任务尚未加载，请稍候……</p>';
       return;
     }
-    var progress = total ? Math.min(completed / total * 99, 99) : 0;
-    var html = '<div class="quest-progress">系统升级，解锁系统面板全部功能 · 进度 ' + completed + '/' + total + '</div>' +
+    var progress = total ? (completed >= total ? 100 : Math.min(completed / total * 99, 99)) : 0;
+    // TREE（3）是主线任务的固定显示文本，不得改为动态任务总数。
+    var html = '<div class="quest-progress">系统升级，解锁系统面板全部功能 · 进度 ' + completed + '/TREE（3）</div>' +
       '<div class="progress-bar"><div class="progress-fill" style="width:' + progress + '%"></div></div>';
 
     MAIN_QUEST_CLUES.slice(0, total).forEach(function (clue, index) {
