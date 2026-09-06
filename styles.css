@@ -133,16 +133,15 @@ body.polish-4 .card {
   box-shadow: 0 -2px 10px rgba(79, 227, 255, 0.25);
 }
 
-.badge {
-  display: inline-block;
-  min-width: 14px;
-  padding: 0 4px;
-  margin-left: 4px;
-  border-radius: 8px;
-  background: var(--red);
-  color: #1a0505;
-  font-size: 10px;
-  line-height: 16px;
+.tab-btn { white-space: nowrap; }
+
+/* 无红点与数字角标：仅高亮 1 秒 */
+.tab-btn.flash {
+  color: var(--gold);
+  border-color: var(--gold);
+  background: rgba(255, 212, 121, 0.16);
+  box-shadow: 0 0 14px rgba(255, 212, 121, 0.45);
+  transition: background 0.2s ease, box-shadow 0.2s ease;
 }
 
 .tab-panel {
@@ -303,6 +302,46 @@ input:focus, select:focus {
 }
 .attr-plus:hover { border-color: var(--muted); color: var(--muted); }
 
+.attr-row .attr-label { white-space: nowrap; }
+.attr-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--green);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attr-row-link .attr-plus { border-style: solid; border-color: var(--cyan); color: var(--cyan); }
+
+/* ---------- 手机端：面板完整度吸附条 ---------- */
+.polish-float {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(94vw, 560px);
+  padding: 6px 10px;
+  border: 1px solid var(--cyan);
+  border-radius: 4px;
+  background: rgba(6, 18, 27, 0.96);
+  box-shadow: 0 0 14px rgba(79, 227, 255, 0.3);
+}
+
+.polish-float.at-top { top: 8px; }
+.polish-float.at-bottom { bottom: 8px; }
+.polish-float .progress-bar { flex: 1; height: 10px; }
+.polish-float-label,
+.polish-float-pct {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.polish-float-pct { color: var(--cyan); }
+
 /* ---------- 技能 / 成就 ---------- */
 .skill-list, .ach-list, .quest-list { list-style: none; margin: 12px 0 0; padding: 0; }
 
@@ -310,21 +349,33 @@ input:focus, select:focus {
   position: relative;
   border: 1px solid var(--line);
   border-radius: 4px;
-  padding: 8px 28px 8px 10px;
+  padding: 8px 10px;
   margin-bottom: 8px;
   font-size: 13px;
 }
 
-.skill-item.locked { opacity: 0.6; border-style: dashed; }
+/* 技能列表着重显示 */
+.skill-list.featured .skill-item {
+  border-color: var(--cyan);
+  background: rgba(79, 227, 255, 0.06);
+  box-shadow: 0 0 10px rgba(79, 227, 255, 0.18);
+}
 
-.skill-head { display: flex; justify-content: space-between; }
+.skill-item.capped { border-style: dashed; border-color: var(--gold); }
+
+.skill-head, .ach-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.skill-name, .ach-name { flex: 1 1 auto; min-width: 0; word-break: break-word; }
 .skill-name { color: var(--text); }
-.skill-lv { color: var(--gold); font-weight: bold; }
+.skill-lv { color: var(--gold); font-weight: bold; white-space: nowrap; flex: 0 0 auto; }
 .skill-meta { color: var(--muted); font-size: 11px; margin-top: 4px; }
 
 .ach-item .ach-name { color: var(--gold); }
-.ach-item .ach-pt { float: right; color: var(--green); }
-.ach-desc { color: var(--muted); font-size: 11px; margin-top: 4px; clear: both; }
+.ach-item .ach-pt { color: var(--green); white-space: nowrap; flex: 0 0 auto; }
+.ach-desc { color: var(--muted); font-size: 11px; margin-top: 4px; }
 
 .quest-title { color: var(--cyan); font-size: 13px; }
 .quest-status { color: var(--muted); font-size: 11px; }
@@ -336,14 +387,14 @@ input:focus, select:focus {
 .quest-item.quest-done { opacity: 0.6; }
 
 .del {
-  position: absolute;
-  top: 6px;
-  right: 8px;
+  flex: 0 0 auto;
   background: none;
   border: none;
+  padding: 0 2px;
   color: var(--muted);
   cursor: pointer;
   font-family: inherit;
+  white-space: nowrap;
 }
 .del:hover { color: var(--red); }
 
@@ -436,10 +487,21 @@ input:focus, select:focus {
 
 .panel-footer { text-align: center; margin-top: 20px; padding: 0 16px; }
 
-@media (max-width: 520px) {
+@media (max-width: 720px) {
   .entry-form { grid-template-columns: 1fr; }
   .stat-grid { grid-template-columns: 1fr; }
   .tabbar { justify-content: flex-start; overflow-x: auto; flex-wrap: nowrap; }
+  .tab-btn { padding: 8px 12px; letter-spacing: 1px; }
+  /* 控件不重叠、文字不因宽度限制换行 */
+  .btn, .attr-label, .stat .label, .entry-form label > span, .timeline-axis span,
+  .progress-title span, .quest-status, .cat-list li span { white-space: nowrap; }
+  .date-nav { flex-wrap: wrap; }
+  .date-nav .btn { flex: 1 1 auto; }
+  .date-nav input { flex: 1 1 100%; }
+  .log-actions .btn { flex: 1 1 auto; }
+  .quest-actions .btn { flex: 1 1 auto; }
+  .cat-list li { gap: 8px; }
+  .cat-list li span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 
 .name-btn {
@@ -459,31 +521,45 @@ input:focus, select:focus {
 /* ---------- 弹出提示 toast ---------- */
 .toast-stack {
   position: fixed;
-  top: 12px;
+  top: 50%;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
   z-index: 50;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 8px;
   width: min(92vw, 420px);
   pointer-events: none;
 }
 
+/* 中间弹出 → 上移一段距离后悬停 → 虚化消失 */
 .toast {
+  width: 100%;
   background: rgba(6, 18, 27, 0.95);
   border: 1px solid var(--cyan);
   color: var(--gold);
   padding: 10px 14px;
   border-radius: 4px;
   font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
   box-shadow: 0 0 16px rgba(79, 227, 255, 0.35);
   opacity: 0;
-  transform: translateY(-8px);
-  transition: opacity 0.3s ease, transform 0.3s ease;
+  animation: toast-float 4.6s ease forwards;
 }
 
-.toast.show { opacity: 1; transform: translateY(0); }
+@keyframes toast-float {
+  0% { opacity: 0; transform: translateY(16px) scale(0.96); filter: blur(4px); }
+  10% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+  30% { opacity: 1; transform: translateY(-40px); filter: blur(0); }
+  75% { opacity: 1; transform: translateY(-48px); filter: blur(0); }
+  100% { opacity: 0; transform: translateY(-72px); filter: blur(8px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation-duration: 4.6s; animation-timing-function: linear; }
+}
 .toast-warn { border-color: var(--gold); color: var(--gold); }
 .toast-error { border-color: var(--red); color: var(--red); }
 
