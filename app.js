@@ -1667,6 +1667,14 @@
       return;
     }
 
+    var userAgent = navigator.userAgent || '';
+    var isMobileBrowser = /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent) ||
+      (/Macintosh/i.test(userAgent) && navigator.maxTouchPoints > 1);
+    if (isMobileBrowser) {
+      openBackupPage(json);
+      return;
+    }
+
     if (window.URL && URL.createObjectURL) {
       var url = URL.createObjectURL(blob);
       var link = document.createElement('a');
@@ -1681,6 +1689,10 @@
       return;
     }
 
+    openBackupPage(json);
+  }
+
+  function openBackupPage(json) {
     var dataUrl = 'data:application/json;charset=utf-8,' + encodeURIComponent(json);
     var fallbackWindow = window.open(dataUrl, '_blank');
     if (fallbackWindow) {
