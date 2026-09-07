@@ -2025,10 +2025,10 @@
       var actions = '';
       if (index === completed && completed < total) {
         actions = '<div class="quest-actions">' +
-          '<button type="button" class="btn ghost" id="questGuide">查看指引</button>' +
           (state.quests.mainAccepted
             ? '<button type="button" class="btn" id="questSubmit">提交任务</button>'
             : '<button type="button" class="btn" id="questAccept">接受任务</button>') +
+          '<button type="button" class="btn ghost" id="questGuide">查看指引</button>' +
           '</div>';
       }
       html += '<div class="quest-card quest-main-' + (index < completed ? 'done' : index === completed ? 'active' : 'locked') + '">' +
