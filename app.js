@@ -91,6 +91,7 @@
   }
 
   var state = loadState();
+  var persistedSnapshot = cloneState(state);
   var skillListCollapsed = false;
   var hiddenSkillListCollapsed = false;
   var hiddenAchievementListCollapsed = false;
@@ -386,12 +387,50 @@
     return merged;
   }
 
+  function cloneState(value) {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function mergeConcurrentState(latest) {
+    var merged = mergeDefaults(latest);
+    ['entries', 'skills', 'achievements', 'notifications'].forEach(function (key) {
+      var items = merged[key].concat(state[key]);
+      var seen = Object.create(null);
+      merged[key] = items.filter(function (item) {
+        var id = item && item.id ? String(item.id) : JSON.stringify(item);
+        if (seen[id]) { return false; }
+        seen[id] = true;
+        return true;
+      });
+    });
+    var sideItems = merged.quests.side.concat(state.quests.side);
+    var sideSeen = Object.create(null);
+    merged.quests.side = sideItems.filter(function (item) {
+      if (sideSeen[item.id]) { return false; }
+      sideSeen[item.id] = true;
+      return true;
+    });
+    ['hiddenSkills', 'hiddenAchievements'].forEach(function (key) {
+      merged[key] = merged[key].concat(state[key]).filter(function (item, index, list) {
+        return list.indexOf(item) === index;
+      });
+    });
+    return merged;
+  }
+
   var saveTimer = null;
   var sigTimer = null;
   var storageErrorShown = false;
-  function persist() {
+  function persist(forceReplace) {
     try {
+      if (!forceReplace) {
+        var latestRaw = window.localStorage.getItem(STORAGE_KEY);
+        if (latestRaw && latestRaw !== JSON.stringify(persistedSnapshot)) {
+          state = mergeConcurrentState(JSON.parse(latestRaw));
+        }
+      }
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      persistedSnapshot = cloneState(state);
       storageErrorShown = false;
     } catch (e) {
       if (!storageErrorShown) {
@@ -405,6 +444,25 @@
     if (sigTimer) { window.clearTimeout(sigTimer); }
     sigTimer = window.setTimeout(renderTamperSignature, 300);
   }
+
+  window.addEventListener('storage', function (event) {
+    if (event.key !== STORAGE_KEY) { return; }
+    try {
+      if (!event.newValue) {
+        state = defaultState();
+        persistedSnapshot = cloneState(state);
+        fullRender();
+        return;
+      }
+      var incoming = mergeDefaults(JSON.parse(event.newValue));
+      if (JSON.stringify(incoming) === JSON.stringify(state)) { return; }
+      state = incoming;
+      persistedSnapshot = cloneState(state);
+      fullRender();
+    } catch (e) {
+      console.error('[storage] SYNC_FAILED', e);
+    }
+  });
 
   /* 简单校验签名：用于检测宿主是否绕过面板直接改写 localStorage 数值。 */
   function computeSignature() {
@@ -734,7 +792,10 @@
 
   /* ---------- 点击空白区域弹出对应区域的提示 ---------- */
   function isInteractive(node) {
-    return !!(node.closest && node.closest('input, select, textarea, button, a, label, .skill-item, .ach-item, .modal-box, .egg-box, .toast'));
+    if (!node.closest) { return false; }
+    var holder = node.closest('[data-hint]');
+    if (holder && node !== holder) { return true; }
+    return !!node.closest('input, select, textarea, button, a, label, .skill-item, .ach-item, .quest-item, .quest-card, .slot, .timeline-ruler, .timeline-axis, .log-view, .log-line, .modal-box, .egg-box, .toast');
   }
 
   function zoneHintFor(clientY) {
@@ -1728,7 +1789,7 @@
         var confirmed = openConfirmModal('确认导入数据并覆盖当前系统数据？', function () {
           clearQuestUpgradeTimers();
           state = importedState;
-          persist();
+          persist(true);
           toast('宿主数据导入成功，面板已重新同步。', { level: 'SYSTEM' });
           fullRender();
         });
@@ -1746,7 +1807,7 @@
     reader.onabort = function () {
       toast('导入文件读取已取消，数据未变更。', { level: 'WARN' });
     };
-    reader.readAsText(file);
+    reader.readAsText(file, 'UTF-8');
     el.importFile.value = '';
   });
 
@@ -1754,7 +1815,7 @@
     openConfirmModal('确认重置全部本地数据？此操作不可撤销，请宿主先导出备份。', function () {
       clearQuestUpgradeTimers();
       state = defaultState();
-      persist();
+      persist(true);
       toast('系统已解绑，并恢复为初始状态。', { level: 'SYSTEM' });
       fullRender();
     });
@@ -1842,14 +1903,20 @@
   function updateTimelineZoomLabel() {
     var span = timelineZoom.end - timelineZoom.start;
     el.timelineAxis.innerHTML = [0, 1, 2, 3, 4].map(function (index) {
-      var mark = Math.round((timelineZoom.start + span * index / 4) / 60) * 60;
+      var mark = Math.round(timelineZoom.start + span * index / 4);
       return '<span>' + toClock(mark) + '</span>';
     }).join('');
     el.timelineStartCursor.style.left = (timelineZoom.start / DAY_MINUTES * 100) + '%';
     el.timelineEndCursor.style.left = (timelineZoom.end / DAY_MINUTES * 100) + '%';
-    el.timelineStartCursor.setAttribute('aria-valuenow', String(Math.floor(timelineZoom.start / 60)));
+    el.timelineStartCursor.setAttribute('aria-valuemin', '0');
+    el.timelineStartCursor.setAttribute('aria-valuemax', String(DAY_MINUTES));
+    el.timelineStartCursor.setAttribute('aria-valuestep', '1');
+    el.timelineStartCursor.setAttribute('aria-valuenow', String(timelineZoom.start));
     el.timelineStartCursor.setAttribute('aria-valuetext', toClock(timelineZoom.start));
-    el.timelineEndCursor.setAttribute('aria-valuenow', String(Math.ceil(timelineZoom.end / 60)));
+    el.timelineEndCursor.setAttribute('aria-valuemin', '0');
+    el.timelineEndCursor.setAttribute('aria-valuemax', String(DAY_MINUTES));
+    el.timelineEndCursor.setAttribute('aria-valuestep', '1');
+    el.timelineEndCursor.setAttribute('aria-valuenow', String(timelineZoom.end));
     el.timelineEndCursor.setAttribute('aria-valuetext', toClock(timelineZoom.end));
     el.timelineStartCursor.setAttribute('data-value', toClock(timelineZoom.start));
     el.timelineEndCursor.setAttribute('data-value', toClock(timelineZoom.end));
@@ -2383,6 +2450,7 @@
     syncMainQuestAvailability();
     renderMainQuest();
     renderSideQuests();
+    renderTaskFloat();
     updateQuestBadge();
     syncCustomSelects();
   }
@@ -2402,10 +2470,8 @@
       el.mainQuestBody.innerHTML = '<p class="hint">主线任务尚未加载，请宿主稍候……</p>';
       return;
     }
-    // 主线任务进度最多显示 99%，这是系统功能设定，即使全部完成也不显示满格。
-    // TREE（3）是主线任务的固定显示文本，不得改为动态任务总数。
-    var progress = total ? Math.min(completed / total * 99, 99) : 0;
-    var html = '<div class="quest-progress">系统升级，解锁系统面板全部功能 · 进度 ' + completed + '/TREE（3）</div>' +
+    var progress = total ? Math.min(completed / total * 100, 100) : 0;
+    var html = '<div class="quest-progress">系统升级，解锁系统面板全部功能 · 进度 ' + completed + '/' + total + '（' + progress.toFixed(0) + '%）</div>' +
       '<div class="progress-bar"><div class="progress-fill" style="width:' + progress + '%"></div></div>';
 
     MAIN_QUEST_CLUES.slice(0, total).forEach(function (clue, index) {
@@ -2464,12 +2530,8 @@
     renderMainQuest();
     updateQuestBadge();
     toast('系统正在升级……', { level: 'REWARD' });
-    questUpgradeTimers.push(window.setTimeout(function () {
-      toast('系统升级完成。', { level: 'REWARD' });
-      questUpgradeTimers.push(window.setTimeout(function () {
-        toast('系统等级已提升至 ' + userVersionText() + '，获得属性点 +5。', { level: 'REWARD' });
-      }, 700));
-    }, 700));
+    toast('系统升级完成。', { level: 'REWARD' });
+    toast('系统等级已提升至 ' + userVersionText() + '，获得属性点 +5。', { level: 'REWARD' });
   }
 
   el.sideQuestForm.addEventListener('submit', function (event) {
