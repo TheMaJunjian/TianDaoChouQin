@@ -14,8 +14,7 @@
   var GOAL_HOURS = 10000;
   var DAY_MINUTES = 1440;
   var TOAST_DURATION_MS = 4600;
-  var TOAST_CHAIN_DELAY_MS = 700;
-  var TOAST_MAX_VISIBLE = 5;
+  var TOAST_GAP_MS = 700;
 
   var SKILL_LEVELS = [
     { key: 'aware', label: '了解', minHours: 1, locked: false },
@@ -104,6 +103,9 @@
   var hiddenSideQuestListCollapsed = false;
   var achievementListCollapsed = false;
   var timelineZoom = { start: 0, end: DAY_MINUTES, anchor: null };
+  var toastQueue = [];
+  var toastTimer = null;
+  var toastNextStartAt = 0;
 
   var el = {};
   [
@@ -306,7 +308,10 @@
       merged.skills = Array.isArray(parsed.skills) ? parsed.skills.filter(function (item) {
         return item && typeof item === 'object' && typeof item.name === 'string' && Number.isFinite(Number(item.hours));
       }).map(function (item) {
-        return Object.assign({}, item, { hours: Number(item.hours) });
+        return Object.assign({}, item, {
+          id: typeof item.id === 'string' && item.id ? item.id : uid(),
+          hours: Number(item.hours)
+        });
       }) : base.skills;
     });
     safe(function () {
@@ -318,7 +323,10 @@
       merged.achievements = Array.isArray(parsed.achievements) ? parsed.achievements.filter(function (item) {
         return item && typeof item === 'object' && typeof item.name === 'string' && Number.isFinite(Number(item.points));
       }).map(function (item) {
-        return Object.assign({}, item, { points: Number(item.points) });
+        return Object.assign({}, item, {
+          id: typeof item.id === 'string' && item.id ? item.id : uid(),
+          points: Number(item.points)
+        });
       }) : base.achievements;
     });
     safe(function () {
@@ -337,6 +345,7 @@
           Number.isFinite(Number(item.rewardAttr)) && Number.isFinite(Number(item.rewardContrib));
       }).map(function (item) {
         return Object.assign({}, item, {
+          id: typeof item.id === 'string' && item.id ? item.id : uid(),
           // 奖励允许为负数，用于记录任务带来的点数扣减。
           rewardAttr: Math.floor(Number(item.rewardAttr)),
           rewardContrib: Math.floor(Number(item.rewardContrib)),
@@ -659,25 +668,7 @@
     text = String(text).indexOf('叮，') === 0 ? String(text) : '叮，' + text;
     text = text.replace(/([。！？；])(?=[^\n])/g, '$1\n');
     var level = notificationLevel(opts.level);
-
-    var card = document.createElement('div');
-    card.className = 'toast' + (level !== 'INFO' ? ' toast-' + level.toLowerCase() : '');
-    card.textContent = text;
-    el.toastStack.appendChild(card);
-    reflowToastSlots();
-    // 弹窗从屏幕中央出现，一路上移到可视区域顶部悬停，最后虚化消失（动画由 CSS 负责）。
-    function removeToast() {
-      if (!card.parentNode) { return; }
-      card.remove();
-      reflowToastSlots();
-    }
-    card.addEventListener('animationend', function (event) {
-      if (event.target === card && event.animationName === 'toast-float') { removeToast(); }
-    });
-    window.setTimeout(removeToast, TOAST_DURATION_MS);
-    var cards = el.toastStack.querySelectorAll('.toast');
-    if (cards.length > TOAST_MAX_VISIBLE) { cards[0].remove(); }
-    reflowToastSlots();
+    toastQueue.push({ text: text, level: level });
 
     state.notifications.push({ id: uid(), text: text, level: level, ts: Date.now(), count: 1 });
     if (state.notifications.length > 300) {
@@ -686,6 +677,36 @@
     }
     persist();
     renderNotifications();
+    showNextToast();
+  }
+
+  function showNextToast() {
+    if (toastTimer || !toastQueue.length) { return; }
+    var delay = Math.max(0, toastNextStartAt - Date.now());
+    toastTimer = window.setTimeout(function () {
+      toastTimer = null;
+      if (!toastQueue.length) { return; }
+      var item = toastQueue.shift();
+      toastNextStartAt = Date.now() + TOAST_GAP_MS;
+
+      var card = document.createElement('div');
+      card.className = 'toast' + (item.level !== 'INFO' ? ' toast-' + item.level.toLowerCase() : '');
+      card.textContent = item.text;
+      el.toastStack.appendChild(card);
+      reflowToastSlots();
+      var finished = false;
+      function removeToast() {
+        if (finished) { return; }
+        finished = true;
+        if (card.parentNode) { card.remove(); }
+        reflowToastSlots();
+      }
+      card.addEventListener('animationend', function (event) {
+        if (event.target === card && event.animationName === 'toast-float') { removeToast(); }
+      });
+      window.setTimeout(removeToast, TOAST_DURATION_MS);
+      showNextToast();
+    }, delay);
   }
 
   function reflowToastSlots() {
@@ -740,9 +761,7 @@
     var pointType = isSkillEnhancement ? '成就点' : '属性点';
     var moduleLabel = isSkillEnhancement ? '技能' : label;
     toast('强化目标：' + label + '。本次强化需要消耗 ' + cost + ' ' + pointType + '。', { level: 'INFO' });
-    window.setTimeout(function () {
-      toast('系统等级不足：' + moduleLabel + '强化模块尚未解锁。请完成主线任务以解锁对应强化模块。', { level: 'WARN' });
-    }, TOAST_CHAIN_DELAY_MS);
+    toast('系统等级不足：' + moduleLabel + '强化模块尚未解锁。请完成主线任务以解锁对应强化模块。', { level: 'WARN' });
   });
 
   /* 资源不足时不显示加号，避免把不可用功能伪装成可操作控件。 */
@@ -1218,13 +1237,13 @@
         '<div class="skill-head">' +
         '<span class="skill-name">' + escapeHtml(s2.name) + '</span>' +
         '<span class="skill-actions">' +
-        (capped ? '<button type="button" class="del warn" data-capped-skill="' + s2.id + '" title="系统提示">[!]</button>' : '') +
-        '<button type="button" class="del" data-hide-skill="' + s2.id + '" title="隐藏技能项">隐藏</button>' +
-        '<button type="button" class="del" data-del-skill="' + s2.id + '" title="删除技能">删除</button>' +
+        (capped ? '<button type="button" class="del warn" data-capped-skill="' + escapeHtml(s2.id) + '" title="系统提示">[!]</button>' : '') +
+        '<button type="button" class="del" data-hide-skill="' + escapeHtml(s2.id) + '" title="隐藏技能项">隐藏</button>' +
+        '<button type="button" class="del" data-del-skill="' + escapeHtml(s2.id) + '" title="删除技能">删除</button>' +
         '</span>' +
         '<span class="skill-lv">' + lv.label + '</span>' +
         (skillEnhancementInfo && !skillEnhancementInfo.next.locked && state.points.achievement >= skillEnhancementInfo.cost
-          ? '<button type="button" class="attr-plus" data-skill-plus="' + s2.id + '" data-enhance-label="' + escapeHtml(s2.name) + '（' + skillEnhancementInfo.current.label + ' → ' + skillEnhancementInfo.next.label + '）" data-enhance-cost="' + skillEnhancementInfo.cost + '" aria-label="强化技能" title="' + escapeHtml(s2.name) + '：' + skillEnhancementInfo.current.label + '→' + skillEnhancementInfo.next.label + '，需要 ' + skillEnhancementInfo.cost + ' 成就点">+</button>'
+          ? '<button type="button" class="attr-plus" data-skill-plus="' + escapeHtml(s2.id) + '" data-enhance-label="' + escapeHtml(s2.name) + '（' + skillEnhancementInfo.current.label + ' → ' + skillEnhancementInfo.next.label + '）" data-enhance-cost="' + skillEnhancementInfo.cost + '" aria-label="强化技能" title="' + escapeHtml(s2.name) + '：' + skillEnhancementInfo.current.label + '→' + skillEnhancementInfo.next.label + '，需要 ' + skillEnhancementInfo.cost + ' 成就点">+</button>'
           : '') +
         '</div>' +
         '<div class="skill-meta">累计 ' + h.toFixed(1) + ' 小时' +
@@ -1243,7 +1262,7 @@
       var h = effectiveHours(s2);
       return '<li class="skill-item hidden-skill-item">' +
         '<div class="skill-head"><span class="skill-name">' + escapeHtml(s2.name) + '</span>' +
-        '<button type="button" class="del" data-show-skill="' + s2.id + '">显示</button>' +
+        '<button type="button" class="del" data-show-skill="' + escapeHtml(s2.id) + '">显示</button>' +
         '<span class="skill-lv">' + levelForHours(h).label + '</span></div>' +
         '<div class="skill-meta">累计 ' + h.toFixed(1) + ' 小时</div>' +
         '</li>';
@@ -1346,8 +1365,11 @@
       el.activity.value = '';
       applyEntryDefaults();
 
-      toast((rewrite ? '冲突时间段已更正并写入：' : '时间段记录成功：') + startDate + ' ' + toClock(start) + '-' + endDate + ' ' + toClock(end) + ' ' + activity +
-        '（+' + hours(endStamp - startStamp) + ' h）。', { level: 'TRAIN' });
+      var rangeLabel = startDate === endDate
+        ? startDate + ' ' + toClock(start) + '-' + toClock(end)
+        : startDate + ' ' + toClock(start) + '至' + endDate + ' ' + toClock(end);
+      toast((rewrite ? '已更正：' : '已记录：') + rangeLabel + '\n技能：' + (category || '未指定') +
+        ' · +' + hours(endStamp - startStamp) + ' h', { level: 'TRAIN' });
 
       var skill = skillByName(category);
       if (skill) {
@@ -1378,6 +1400,31 @@
     if (el.viewDate.value) { setViewDate(el.viewDate.value); }
   });
 
+  function removeEntrySlice(entryId, dateStr) {
+    var dayStart = dateTimeStamp(dateStr, 0);
+    var dayEnd = dayStart + DAY_MINUTES;
+    var retained = [];
+    state.entries.forEach(function (entry) {
+      if (entry.id !== entryId) {
+        retained.push(entry);
+        return;
+      }
+      var entryStart = entryStartStamp(entry);
+      var entryEnd = entryEndStamp(entry);
+      if (entryEnd <= dayStart || entryStart >= dayEnd) {
+        retained.push(entry);
+        return;
+      }
+      if (entryStart < dayStart) {
+        retained.push(entryWithRange(entry, entryStart, dayStart, entry.id));
+      }
+      if (entryEnd > dayEnd) {
+        retained.push(entryWithRange(entry, dayEnd, entryEnd, entryStart < dayStart ? uid() : entry.id));
+      }
+    });
+    state.entries = retained;
+  }
+
   function setViewDate(dateStr) {
     state.viewDate = dateStr;
     timelineZoom = { start: 0, end: DAY_MINUTES, anchor: null };
@@ -1390,10 +1437,10 @@
   el.logView.addEventListener('click', function (event) {
     var id = event.target.getAttribute && event.target.getAttribute('data-del');
     if (!id) { return; }
-    var entry = state.entries.filter(function (e) { return e.id === id; })[0];
+    var entry = byDate(state.viewDate).filter(function (e) { return e.id === id; })[0];
     if (!entry) { return; }
-    openConfirmModal('确认删除 ' + toClock(entry.start) + '-' + toClock(entry.end) + ' 的日志记录？', function () {
-      state.entries = state.entries.filter(function (e) { return e.id !== id; });
+    openConfirmModal('确认删除 ' + state.viewDate + ' ' + toClock(entry.start) + '-' + toClock(entry.end) + ' 的日志记录？', function () {
+      removeEntrySlice(id, state.viewDate);
       persist();
       toast('该段记录已从时间线抹除。', { level: 'TRAIN' });
       refreshAll();
@@ -1442,18 +1489,68 @@
   });
 
   /* ---------- 数据导入 / 导出 ---------- */
-  el.exportData.addEventListener('click', function () {
-    var blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = 'tiandaochouqin-' + todayStr() + '.json';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    toast('修行数据已导出备份。', { level: 'SYSTEM' });
-  });
+  function exportDataBackup() {
+    var filename = 'tiandaochouqin-' + todayStr() + '.json';
+    var json = JSON.stringify(state, null, 2);
+    var blob;
+    try {
+      blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+    } catch (e) {
+      console.error('[export] FAILED_TO_CREATE_BLOB', e);
+      toast('当前浏览器无法生成备份文件。', { level: 'ERROR' });
+      return;
+    }
+
+    if (navigator.share && navigator.canShare && window.File) {
+      try {
+        var sharedFile = new File([blob], filename, { type: 'application/json' });
+        if (navigator.canShare({ files: [sharedFile] })) {
+          navigator.share({ title: '天道酬勤数据备份', files: [sharedFile] }).then(function () {
+            toast('修行数据已导出备份。', { level: 'SYSTEM' });
+          }).catch(function (error) {
+            if (error && error.name !== 'AbortError') {
+              downloadBlobFallback(blob, filename, json);
+            }
+          });
+          return;
+        }
+      } catch (e) { /* fall through to the download APIs below */ }
+    }
+
+    downloadBlobFallback(blob, filename, json);
+  }
+
+  function downloadBlobFallback(blob, filename, json) {
+    if (navigator.msSaveOrOpenBlob) {
+      navigator.msSaveOrOpenBlob(blob, filename);
+      toast('修行数据已导出备份。', { level: 'SYSTEM' });
+      return;
+    }
+
+    if (window.URL && URL.createObjectURL) {
+      var url = URL.createObjectURL(blob);
+      var link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.rel = 'noopener';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      toast('修行数据已导出备份。', { level: 'SYSTEM' });
+      return;
+    }
+
+    var dataUrl = 'data:application/json;charset=utf-8,' + encodeURIComponent(json);
+    var fallbackWindow = window.open(dataUrl, '_blank');
+    if (fallbackWindow) {
+      toast('备份已打开，请长按页面内容保存或复制 JSON。', { level: 'WARN' });
+    } else {
+      toast('浏览器阻止了备份页面，请允许打开新页面后重试。', { level: 'ERROR' });
+    }
+  }
+
+  el.exportData.addEventListener('click', exportDataBackup);
 
   el.importBtn.addEventListener('click', function () { el.importFile.click(); });
   el.importFile.addEventListener('change', function () {
@@ -1468,13 +1565,16 @@
           throw new Error('导入数据必须是对象。');
         }
         var importedState = mergeDefaults(parsed);
-        openConfirmModal('确认导入数据并覆盖当前面板数据？', function () {
+        var confirmed = openConfirmModal('确认导入数据并覆盖当前面板数据？', function () {
           clearQuestUpgradeTimers();
           state = importedState;
           persist();
           toast('宿主数据导入成功，面板已重新同步。', { level: 'SYSTEM' });
           fullRender();
         });
+        if (!confirmed) {
+          toast('当前有待确认操作，导入未执行。', { level: 'WARN' });
+        }
       } catch (e) {
         state = previousState;
         toast('导入文件格式异常，数据未变更。', { level: 'ERROR' });
@@ -1895,6 +1995,10 @@
   function updatePolishFloat() {
     var attrActive = document.querySelector('.tab-panel[data-tab-panel="attr"]');
     var visiblePanel = attrActive && attrActive.classList.contains('active');
+    if (!isNarrowScreen()) {
+      el.polishFloat.classList.add('hidden');
+      return;
+    }
     if (polishPercentValue >= 100) {
       el.polishFloat.classList.add('hidden');
       return;
@@ -2234,12 +2338,12 @@
       var actions = '';
       var reward = '奖励：属性点 +' + q.rewardAttr + ' ／ 贡献点 +' + q.rewardContrib;
       if (q.status === 'open') {
-        actions = '<button type="button" class="btn ghost" data-accept="' + q.id + '">接受任务</button>';
+        actions = '<button type="button" class="btn ghost" data-accept="' + escapeHtml(q.id) + '">接受任务</button>';
       } else if (q.status === 'accepted') {
-        actions = '<button type="button" class="btn" data-submit="' + q.id + '">提交任务</button>';
+        actions = '<button type="button" class="btn" data-submit="' + escapeHtml(q.id) + '">提交任务</button>';
       }
-      actions += '<button type="button" class="btn ghost" data-' + (isHidden ? 'show' : 'hide') + '-quest="' + q.id + '">' + (isHidden ? '显示任务' : '隐藏任务') + '</button>';
-      actions += '<button type="button" class="btn ghost danger" data-del-quest="' + q.id + '">删除任务</button>';
+      actions += '<button type="button" class="btn ghost" data-' + (isHidden ? 'show' : 'hide') + '-quest="' + escapeHtml(q.id) + '">' + (isHidden ? '显示任务' : '隐藏任务') + '</button>';
+      actions += '<button type="button" class="btn ghost danger" data-del-quest="' + escapeHtml(q.id) + '">删除任务</button>';
       var rewardClass = q.status === 'done' ? '' : ' quest-reward-pending';
       return '<li class="quest-item quest-' + q.status + (isHidden ? ' quest-hidden' : '') + '">' +
         '<div class="quest-title quest-title-row"><span>' + escapeHtml(q.title) + ' <span class="quest-status">[' + statusLabel + ']</span></span>' +
