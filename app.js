@@ -8,6 +8,7 @@
   /* ---------- 常量 ---------- */
   var APP_VERSION = '0.2'; // 开发者代码版本：用于识别是否有新增主线任务
   var STORAGE_KEY = 'tiandao.state.v2';
+  var STORAGE_BACKUP_KEY = 'tiandao.state.v2.backup';
   var LEGACY_ENTRIES_KEY = 'tiandao.entries.v1';
   var LEGACY_FOCUS_KEY = 'tiandao.focus.v1';
   var LEGACY_NAME_KEY = 'tiandao.host.v1';
@@ -257,6 +258,11 @@
       }
     } catch (e) { /* fall through to legacy / default */ }
 
+    try {
+      var backupRaw = window.localStorage.getItem(STORAGE_BACKUP_KEY);
+      if (backupRaw) { return mergeDefaults(JSON.parse(backupRaw)); }
+    } catch (e) { /* fall through to legacy / default */ }
+
     // 兼容旧版本（v1）数据，做一次性迁移
     var fresh = defaultState();
     try {
@@ -469,14 +475,21 @@
   var sigTimer = null;
   var storageErrorShown = false;
   function persist(forceReplace) {
+    var serialized;
     try {
       if (!forceReplace) {
         var latestRaw = window.localStorage.getItem(STORAGE_KEY);
         if (latestRaw && latestRaw !== JSON.stringify(persistedSnapshot)) {
-          state = mergeConcurrentState(JSON.parse(latestRaw));
+          try {
+            state = mergeConcurrentState(JSON.parse(latestRaw));
+          } catch (e) {
+            console.error('[storage] INVALID_PRIMARY', e);
+          }
         }
       }
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      serialized = JSON.stringify(state);
+      window.localStorage.setItem(STORAGE_KEY, serialized);
+      window.localStorage.setItem(STORAGE_BACKUP_KEY, serialized);
       persistedSnapshot = cloneState(state);
       storageErrorShown = false;
     } catch (e) {
@@ -510,6 +523,18 @@
       console.error('[storage] SYNC_FAILED', e);
     }
   });
+
+  function flushState() { persist(); }
+  window.addEventListener('pagehide', flushState);
+  window.addEventListener('beforeunload', flushState);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden') { flushState(); }
+  });
+
+  function requestPersistentStorage() {
+    if (!navigator.storage || !navigator.storage.persist) { return; }
+    navigator.storage.persist().catch(function () { /* browser may require a user gesture */ });
+  }
 
   /* 简单校验签名：用于检测宿主是否绕过面板直接改写 localStorage 数值。 */
   function computeSignature() {
@@ -2926,6 +2951,7 @@
   /* ---------- 初始化 ---------- */
   function init() {
     fillSkillLevelSelect();
+    requestPersistentStorage();
     checkTamperOnBoot();
     syncMainQuestAvailability();
     setActiveTab('attr');
