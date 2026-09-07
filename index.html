@@ -221,15 +221,22 @@
     <section class="card" data-hint="支线任务完成后即刻转化为成就，并结算属性点与贡献点。">
       <h2>已发布支线任务</h2>
       <ul class="quest-list" id="sideQuestList"></ul>
+      <div class="hidden-quests-block hidden" id="hiddenSideQuestsBlock">
+        <div class="hidden-quests-title">
+          <h3>隐藏支线任务</h3>
+          <button type="button" class="skill-toggle" id="hiddenSideQuestToggle" aria-controls="hiddenSideQuestList" aria-expanded="true" aria-label="折叠隐藏支线任务">折叠</button>
+        </div>
+        <ul class="quest-list hidden-side-quest-list" id="hiddenSideQuestList"></ul>
+      </div>
     </section>
 
-    <section class="card" data-hint="支线任务由宿主自行发布、自行接受、自行提交，一切全凭宿主本心。">
+    <section class="card" data-hint="支线任务由宿主自行发布、自行接受、自行提交。一切全凭宿主本心。">
       <h2>发布支线任务</h2>
       <form id="sideQuestForm" class="entry-form" autocomplete="off" novalidate>
         <label class="wide"><span>任务名称</span><input type="text" id="sideTitle" placeholder="修行" required></label>
-        <label class="wide"><span>任务描述</span><input type="text" id="sideDesc" placeholder="阅读《道藏》第一卷"></label>
-        <label><span>奖励属性点</span><input type="number" id="sideRewardAttr" min="0" max="20" value="1"></label>
-        <label><span>奖励贡献点</span><input type="number" id="sideRewardContrib" min="0" max="20" value="1"></label>
+        <label class="wide"><span>任务描述</span><textarea id="sideDesc" rows="3" placeholder="阅读《道藏》第一卷"></textarea></label>
+        <label><span>奖励属性点</span><input type="number" id="sideRewardAttr" step="1" value="1"></label>
+        <label><span>奖励贡献点</span><input type="number" id="sideRewardContrib" step="1" value="1"></label>
         <button type="submit" class="btn wide">发布支线任务</button>
       </form>
     </section>

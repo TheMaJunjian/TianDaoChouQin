@@ -14,10 +14,11 @@
   var GOAL_HOURS = 10000;
   var DAY_MINUTES = 1440;
   var TOAST_DURATION_MS = 4600;
+  var TOAST_CHAIN_DELAY_MS = 700;
   var TOAST_MAX_VISIBLE = 5;
 
   var SKILL_LEVELS = [
-    { key: 'aware', label: '了解', minHours: 0, locked: false },
+    { key: 'aware', label: '了解', minHours: 1, locked: false },
     { key: 'beginner', label: '入门', minHours: 20, locked: false },
     { key: 'familiar', label: '熟悉', minHours: 300, locked: false },
     { key: 'proficient', label: '掌握', minHours: 1000, locked: false },
@@ -26,6 +27,23 @@
     { key: 'perfection', label: '圆满', minHours: 100000, locked: true },
     { key: 'supernatural', label: '神通', minHours: 1000000, locked: true }
   ];
+
+  var ATTRIBUTE_ENHANCEMENTS = {
+    weight: { label: '体重', cost: 1 },
+    status: { label: '状态', cost: 10 },
+    property: { label: '财产', cost: 100 },
+    edu: { label: '修为', cost: 10000 },
+    talent: { label: '天赋', cost: 100000 }
+  };
+  var SKILL_ENHANCEMENT_COSTS = {
+    beginner: 10,
+    familiar: 50,
+    proficient: 200,
+    mastery: 1000,
+    grandmaster: 5000,
+    perfection: 20000,
+    supernatural: 100000
+  };
 
   var MAIN_QUEST_CLUES = [
     '向幕后黑手提供两万五千亿资金',
@@ -83,6 +101,7 @@
   var state = loadState();
   var skillListCollapsed = false;
   var hiddenSkillListCollapsed = false;
+  var hiddenSideQuestListCollapsed = false;
   var achievementListCollapsed = false;
   var timelineZoom = { start: 0, end: DAY_MINUTES, anchor: null };
 
@@ -106,7 +125,7 @@
     'coverageHint', 'logDateLabel', 'logView', 'copyLog', 'exportData',
     'importBtn', 'importFile', 'resetAll', 'clearDay', 'catList',
     'mainQuestBody', 'sideQuestForm', 'sideTitle', 'sideDesc', 'sideRewardAttr',
-    'sideRewardContrib', 'sideQuestList', 'noticeView', 'clearNotices',
+    'sideRewardContrib', 'sideQuestList', 'hiddenSideQuestsBlock', 'hiddenSideQuestToggle', 'hiddenSideQuestList', 'noticeView', 'clearNotices',
     'eggMask', 'eggCount', 'eggClose', 'eggPause', 'eggBoost'
   ].forEach(function (id) {
     el[id] = document.getElementById(id);
@@ -318,8 +337,10 @@
           Number.isFinite(Number(item.rewardAttr)) && Number.isFinite(Number(item.rewardContrib));
       }).map(function (item) {
         return Object.assign({}, item, {
-          rewardAttr: Number(item.rewardAttr),
-          rewardContrib: Number(item.rewardContrib)
+          // 奖励允许为负数，用于记录任务带来的点数扣减。
+          rewardAttr: Math.floor(Number(item.rewardAttr)),
+          rewardContrib: Math.floor(Number(item.rewardContrib)),
+          hidden: item.hidden === true
         });
       }) : [];
       var mainTotal = MAIN_QUEST_CLUES.length;
@@ -698,35 +719,44 @@
     });
   }
 
-  /* ---------- 属性点强化：始终锁定，仅作为「未来可期」的占位 ---------- */
-  var PLUS_HINTS = {
-    name: '称号强化需要消耗属性点，当前系统等级不足，尚未解锁。',
-    skill: '技能强化需要消耗成就点，当前系统等级不足，尚未解锁。',
-    ach: '成就由支线任务结算产生，成就点强化功能尚未解锁。'
-  };
+  /* ---------- 强化模块：成本已配置，实际强化效果仍待开放 ---------- */
+  function attributeEnhancement(key) {
+    return ATTRIBUTE_ENHANCEMENTS[key] || null;
+  }
+
+  function skillEnhancement(skill) {
+    var current = levelForHours(effectiveHours(skill));
+    var next = SKILL_LEVELS[SKILL_LEVELS.indexOf(current) + 1];
+    if (!next) { return null; }
+    return { current: current, next: next, cost: SKILL_ENHANCEMENT_COSTS[next.key] };
+  }
 
   document.addEventListener('click', function (event) {
     var btn = event.target.closest && event.target.closest('.attr-plus');
     if (!btn) { return; }
-    var key = btn.getAttribute('data-attr-plus') || '';
-    if (key === 'skill' || key === 'ach' || btn.hasAttribute('data-skill-plus')) {
-      toast(PLUS_HINTS[key] || PLUS_HINTS.skill, { level: 'WARN' });
-      return;
-    }
-    toast(PLUS_HINTS[key] || '系统等级不足，当前功能尚未解锁。请完成主线任务以解锁属性强化模块。', { level: 'WARN' });
+    var label = btn.getAttribute('data-enhance-label') || '该项';
+    var cost = btn.getAttribute('data-enhance-cost') || '未知';
+    var isSkillEnhancement = btn.hasAttribute('data-skill-plus');
+    var pointType = isSkillEnhancement ? '成就点' : '属性点';
+    var moduleLabel = isSkillEnhancement ? '技能' : label;
+    toast('强化目标：' + label + '。本次强化需要消耗 ' + cost + ' ' + pointType + '。', { level: 'INFO' });
+    window.setTimeout(function () {
+      toast('系统等级不足：' + moduleLabel + '强化模块尚未解锁。请完成主线任务以解锁对应强化模块。', { level: 'WARN' });
+    }, TOAST_CHAIN_DELAY_MS);
   });
 
-  /* 没有属性点 / 成就点时，连置灰的 [+] 都不显示。 */
+  /* 资源不足时不显示加号，避免把不可用功能伪装成可操作控件。 */
   function renderPlusVisibility() {
-    var hasAttr = state.points.attribute > 0;
-    var hasAch = state.points.achievement > 0;
-    document.querySelectorAll('.attr-plus').forEach(function (btn) {
+    document.querySelectorAll('[data-attr-plus]').forEach(function (btn) {
       var key = btn.getAttribute('data-attr-plus');
-      var show = (key === 'skill' || key === 'ach') ? hasAch : hasAttr;
+      var enhancement = attributeEnhancement(key);
+      var show = !!enhancement && state.points.attribute >= enhancement.cost;
       btn.classList.toggle('hidden', !show);
-    });
-    document.querySelectorAll('[data-skill-plus]').forEach(function (btn) {
-      btn.classList.toggle('hidden', !hasAch);
+      if (enhancement) {
+        btn.setAttribute('data-enhance-label', enhancement.label);
+        btn.setAttribute('data-enhance-cost', String(enhancement.cost));
+        btn.title = enhancement.label + '强化需要 ' + enhancement.cost + ' 属性点';
+      }
     });
   }
 
@@ -1118,6 +1148,28 @@
       : '<p class="hint">暂无成就。</p>');
   });
 
+  el.achList.addEventListener('click', function (event) {
+    var target = event.target.closest('.ach-item[data-achievement-detail]');
+    if (!target) { return; }
+    openAchievementDetail(target.getAttribute('data-achievement-detail'));
+  });
+
+  el.achList.addEventListener('keydown', function (event) {
+    var target = event.target.closest('.ach-item[data-achievement-detail]');
+    if (!target || (event.key !== 'Enter' && event.key !== ' ')) { return; }
+    event.preventDefault();
+    openAchievementDetail(target.getAttribute('data-achievement-detail'));
+  });
+
+  function openAchievementDetail(achievementId) {
+    var achievement = state.achievements.filter(function (a2) { return a2.id === achievementId; })[0];
+    if (!achievement) { return; }
+    openDetailModal('成就详情',
+      '<div class="detail-row"><span>任务名称</span><b>' + escapeHtml(achievement.name) + '</b></div>' +
+      '<div class="detail-row"><span>任务描述</span><b>' + escapeHtml(achievement.desc || '暂无描述。') + '</b></div>' +
+      '<div class="detail-row"><span>成就点</span><b>+' + achievement.points + '</b></div>');
+  }
+
   function openDetailModal(title, body) {
     el.detailTitle.textContent = title;
     el.detailBody.innerHTML = body;
@@ -1156,6 +1208,7 @@
       var h = effectiveHours(s2);
       var lv = levelForHours(h);
       var next = SKILL_LEVELS[SKILL_LEVELS.indexOf(lv) + 1];
+      var skillEnhancementInfo = skillEnhancement(s2);
       var capped = exceedsSystemLimit(h);
       // 受系统等级限制时不直接铺开文字，改为点击 [!] 后弹出提示窗。
       var progressText = capped
@@ -1170,7 +1223,9 @@
         '<button type="button" class="del" data-del-skill="' + s2.id + '" title="删除技能">删除</button>' +
         '</span>' +
         '<span class="skill-lv">' + lv.label + '</span>' +
-        '<button type="button" class="attr-plus" data-skill-plus="' + s2.id + '" aria-label="强化技能">+</button>' +
+        (skillEnhancementInfo && !skillEnhancementInfo.next.locked && state.points.achievement >= skillEnhancementInfo.cost
+          ? '<button type="button" class="attr-plus" data-skill-plus="' + s2.id + '" data-enhance-label="' + escapeHtml(s2.name) + '（' + skillEnhancementInfo.current.label + ' → ' + skillEnhancementInfo.next.label + '）" data-enhance-cost="' + skillEnhancementInfo.cost + '" aria-label="强化技能" title="' + escapeHtml(s2.name) + '：' + skillEnhancementInfo.current.label + '→' + skillEnhancementInfo.next.label + '，需要 ' + skillEnhancementInfo.cost + ' 成就点">+</button>'
+          : '') +
         '</div>' +
         '<div class="skill-meta">累计 ' + h.toFixed(1) + ' 小时' +
         (progressText ? ' · ' + progressText : '') + '</div>' +
@@ -1228,7 +1283,8 @@
       return;
     }
     el.achList.innerHTML = state.achievements.slice().map(function (a2) {
-      return '<li class="ach-item">' +
+      var achievementId = escapeHtml(a2.id);
+      return '<li class="ach-item" data-achievement-detail="' + achievementId + '" tabindex="0" role="button" aria-label="查看成就：' + escapeHtml(a2.name) + '">' +
         '<div class="ach-head"><span class="ach-name">' + escapeHtml(a2.name) + '</span>' +
         (a2.desc ? '<span class="ach-desc">' + escapeHtml(a2.desc) + '</span>' : '') +
         '<span class="ach-pt">+' + a2.points + '</span></div>' +
@@ -2037,8 +2093,9 @@
       return;
     }
     var desc = el.sideDesc.value.trim();
-    var rewardAttr = Math.max(0, Math.min(20, Number(el.sideRewardAttr.value) || 0));
-    var rewardContrib = Math.max(0, Math.min(20, Number(el.sideRewardContrib.value) || 0));
+    // 奖励允许为负数，用于记录任务带来的点数扣减。
+    var rewardAttr = Math.floor(Number(el.sideRewardAttr.value) || 0);
+    var rewardContrib = Math.floor(Number(el.sideRewardContrib.value) || 0);
     state.quests.side.push({
       id: uid(), title: title, desc: desc,
       rewardAttr: rewardAttr, rewardContrib: rewardContrib,
@@ -2056,7 +2113,7 @@
   el.sideQuestList.addEventListener('click', function (event) {
     var target = event.target;
     var id = target.getAttribute && (
-      target.getAttribute('data-accept') || target.getAttribute('data-submit') || target.getAttribute('data-del-quest')
+      target.getAttribute('data-accept') || target.getAttribute('data-submit') || target.getAttribute('data-del-quest') || target.getAttribute('data-hide-quest')
     );
     if (!id) { return; }
     var quest = state.quests.side.filter(function (q) { return q.id === id; })[0];
@@ -2066,12 +2123,15 @@
       quest.status = 'accepted';
       persist();
       toast('已接受支线任务【' + quest.title + '】。', { level: 'SYSTEM' });
-    } else if (target.hasAttribute('data-submit')) {
+    } else if (target.hasAttribute('data-submit') && quest.status === 'accepted') {
       quest.status = 'done';
       state.points.attribute += quest.rewardAttr;
       state.points.contribution += quest.rewardContrib;
       // 支线任务完成即成就：直接结算为一枚成就与对应成就点。
-      var achPoints = Math.max(1, quest.rewardAttr + quest.rewardContrib);
+      var achPoints = quest.rewardAttr + quest.rewardContrib;
+      var attrDelta = quest.rewardAttr > 0 ? '+' + quest.rewardAttr : String(quest.rewardAttr);
+      var contribDelta = quest.rewardContrib > 0 ? '+' + quest.rewardContrib : String(quest.rewardContrib);
+      var achievementDelta = achPoints > 0 ? '+' + achPoints : String(achPoints);
       state.achievements.push({
         id: uid(),
         name: quest.title,
@@ -2081,9 +2141,56 @@
       });
       state.points.achievement += achPoints;
       persist();
-      toast('支线任务【' + quest.title + '】已完成，获得属性点 +' + quest.rewardAttr +
-        '，贡献点 +' + quest.rewardContrib + '。', { level: 'REWARD' });
-      toast('该支线任务已记入成就簿【' + quest.title + '】，获得成就点 +' + achPoints + '。', { level: 'REWARD' });
+      toast('支线任务【' + quest.title + '】已完成，属性点 ' + attrDelta +
+        '，贡献点 ' + contribDelta + '。', { level: 'REWARD' });
+      toast('该支线任务已记入成就簿【' + quest.title + '】，成就点 ' + achievementDelta + '。', { level: 'REWARD' });
+    } else if (target.hasAttribute('data-del-quest')) {
+      openConfirmModal('确认删除支线任务【' + quest.title + '】？已获得的奖励和成就不会撤销。', function () {
+        state.quests.side = state.quests.side.filter(function (q) { return q.id !== id; });
+        persist();
+        toast('支线任务【' + quest.title + '】已删除。', { level: 'SYSTEM' });
+        refreshAll();
+      });
+      return;
+    } else if (target.hasAttribute('data-hide-quest')) {
+      quest.hidden = true;
+      persist();
+      toast('支线任务【' + quest.title + '】已隐藏。', { level: 'SYSTEM' });
+    }
+    refreshAll();
+  });
+
+  el.hiddenSideQuestList.addEventListener('click', function (event) {
+    var target = event.target;
+    var id = target.getAttribute && (
+      target.getAttribute('data-accept') || target.getAttribute('data-submit') || target.getAttribute('data-del-quest') || target.getAttribute('data-show-quest')
+    );
+    if (!id) { return; }
+    var quest = state.quests.side.filter(function (q) { return q.id === id; })[0];
+    if (!quest) { return; }
+    if (target.hasAttribute('data-show-quest')) {
+      quest.hidden = false;
+      persist();
+      toast('支线任务【' + quest.title + '】已重新显示。', { level: 'SYSTEM' });
+      refreshAll();
+      return;
+    }
+    if (target.hasAttribute('data-accept')) {
+      quest.status = 'accepted';
+      persist();
+      toast('已接受支线任务【' + quest.title + '】。', { level: 'SYSTEM' });
+    } else if (target.hasAttribute('data-submit') && quest.status === 'accepted') {
+      quest.status = 'done';
+      state.points.attribute += quest.rewardAttr;
+      state.points.contribution += quest.rewardContrib;
+      var achPoints = quest.rewardAttr + quest.rewardContrib;
+      state.achievements.push({
+        id: uid(), name: quest.title, points: achPoints,
+        desc: quest.desc || '完成支线任务结算', questId: quest.id
+      });
+      state.points.achievement += achPoints;
+      persist();
+      toast('支线任务【' + quest.title + '】已完成。', { level: 'REWARD' });
     } else if (target.hasAttribute('data-del-quest')) {
       openConfirmModal('确认删除支线任务【' + quest.title + '】？已获得的奖励和成就不会撤销。', function () {
         state.quests.side = state.quests.side.filter(function (q) { return q.id !== id; });
@@ -2096,12 +2203,33 @@
     refreshAll();
   });
 
+  el.hiddenSideQuestToggle.addEventListener('click', function () {
+    hiddenSideQuestListCollapsed = !hiddenSideQuestListCollapsed;
+    renderHiddenSideQuestToggle();
+  });
+
   function renderSideQuests() {
-    if (!state.quests.side.length) {
+    var visibleQuests = state.quests.side.filter(function (q) { return q.hidden !== true; });
+    var hiddenQuests = state.quests.side.filter(function (q) { return q.hidden === true; });
+    if (!visibleQuests.length) {
       el.sideQuestList.innerHTML = '<li class="empty">暂无支线任务，快给自己安排一个吧。</li>';
-      return;
+    } else {
+      el.sideQuestList.innerHTML = visibleQuests.map(function (q) {
+        return renderSideQuestItem(q, false);
+      }).join('');
     }
-    el.sideQuestList.innerHTML = state.quests.side.slice().map(function (q) {
+    el.hiddenSideQuestsBlock.classList.toggle('hidden', !hiddenQuests.length);
+    if (hiddenQuests.length) {
+      el.hiddenSideQuestList.innerHTML = hiddenQuests.map(function (q) {
+        return renderSideQuestItem(q, true);
+      }).join('');
+      renderHiddenSideQuestToggle();
+    } else {
+      el.hiddenSideQuestList.innerHTML = '';
+    }
+  }
+
+  function renderSideQuestItem(q, isHidden) {
       var statusLabel = { open: '未接受', accepted: '进行中', done: '已完成' }[q.status];
       var actions = '';
       var reward = '奖励：属性点 +' + q.rewardAttr + ' ／ 贡献点 +' + q.rewardContrib;
@@ -2110,14 +2238,22 @@
       } else if (q.status === 'accepted') {
         actions = '<button type="button" class="btn" data-submit="' + q.id + '">提交任务</button>';
       }
+      actions += '<button type="button" class="btn ghost" data-' + (isHidden ? 'show' : 'hide') + '-quest="' + q.id + '">' + (isHidden ? '显示任务' : '隐藏任务') + '</button>';
       actions += '<button type="button" class="btn ghost danger" data-del-quest="' + q.id + '">删除任务</button>';
       var rewardClass = q.status === 'done' ? '' : ' quest-reward-pending';
-      return '<li class="quest-item quest-' + q.status + '">' +
+      return '<li class="quest-item quest-' + q.status + (isHidden ? ' quest-hidden' : '') + '">' +
         '<div class="quest-title quest-title-row"><span>' + escapeHtml(q.title) + ' <span class="quest-status">[' + statusLabel + ']</span></span>' +
         '<span class="quest-reward quest-reward-inline' + rewardClass + '">' + reward + '</span></div>' +
         (q.desc ? '<div class="quest-desc">' + escapeHtml(q.desc) + '</div>' : '') +
         '<div class="quest-actions">' + actions + '</div></li>';
-    }).join('');
+  }
+
+  function renderHiddenSideQuestToggle() {
+    el.hiddenSideQuestList.classList.toggle('hidden', hiddenSideQuestListCollapsed);
+    el.hiddenSideQuestToggle.textContent = hiddenSideQuestListCollapsed ? '展开' : '折叠';
+    el.hiddenSideQuestToggle.setAttribute('aria-expanded', String(!hiddenSideQuestListCollapsed));
+    el.hiddenSideQuestToggle.setAttribute('aria-label', hiddenSideQuestListCollapsed ? '展开隐藏支线任务' : '折叠隐藏支线任务');
+    el.hiddenSideQuestToggle.title = hiddenSideQuestListCollapsed ? '展开隐藏支线任务' : '折叠隐藏支线任务';
   }
 
   function updateQuestBadge() {
