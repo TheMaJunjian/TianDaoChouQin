@@ -597,7 +597,7 @@
     el.startDate.value = start.date;
     el.startTime.value = toClock(start.minutes);
     el.endDate.value = end.date;
-    el.endTime.value = end.minutes > start.minutes || end.date !== start.date ? toClock(end.minutes) : '';
+    el.endTime.value = '';
   }
 
   function entriesOverlapping(startStamp, endStamp) {
@@ -775,7 +775,7 @@
     var pointType = isSkillEnhancement ? '成就点' : '属性点';
     var moduleLabel = isSkillEnhancement ? '技能' : label;
     toast('强化目标：' + label + '。本次强化需要消耗 ' + cost + ' ' + pointType + '。', { level: 'INFO' });
-    toast('系统等级不足：' + moduleLabel + '强化模块尚未解锁。请完成主线任务以解锁对应强化模块。', { level: 'WARN' });
+    toast('系统等级不足：' + moduleLabel + '强化模块尚未解锁。请宿主完成主线任务以解锁对应强化模块。', { level: 'WARN' });
     if (isSkillEnhancement && hasCompletedPublishedMainQuests()) {
       toast('检测到宿主已完成全部主线任务，系统正在寻找新的线索……', { level: 'WARN' });
     }
@@ -860,7 +860,7 @@
 
   function openConfirmModal(message, onConfirm, acceptLabel) {
     if (pendingConfirm) {
-      toast('请先完成当前确认操作。', { level: 'WARN' });
+      toast('请宿主先完成当前确认操作。', { level: 'WARN' });
       return false;
     }
     pendingConfirm = onConfirm;
@@ -1071,7 +1071,7 @@
     event.preventDefault();
     var name = el.skillName.value.trim();
     if (!name) {
-      toast('请先填写技能名称。', { level: 'WARN' });
+      toast('请宿主先填写技能名称。', { level: 'WARN' });
       el.skillName.focus();
       return;
     }
@@ -1471,21 +1471,25 @@
     var activity = el.activity.value.trim();
 
     if (!startDate || !startRaw || !activity) {
-      toast('输入不完整，请补全开始日期、开始时间和作为。', { level: 'WARN' });
+      toast('输入不完整，请宿主补全开始日期、开始时间和作为。', { level: 'WARN' });
       return;
     }
 
     var start = toMinutes(startRaw);
     var startStamp = dateTimeStamp(startDate, start);
     if (!endRaw) {
-      var latest = stampParts(Math.max(currentStamp(), startStamp + 1));
-      endDate = latest.date;
-      endRaw = toClock(latest.minutes);
+      if (endDate !== todayStr()) {
+        toast('结束时间为空，请宿主补全结束时间。', { level: 'WARN' });
+        return;
+      }
+      var now = new Date();
+      endDate = todayStr();
+      endRaw = toClock(now.getHours() * 60 + now.getMinutes());
       el.endDate.value = endDate;
       el.endTime.value = endRaw;
     }
     if (!endDate) {
-      toast('输入不完整，请补全结束日期。', { level: 'WARN' });
+      toast('输入不完整，请宿主补全结束日期。', { level: 'WARN' });
       return;
     }
     var end = toMinutes(endRaw);
@@ -1614,10 +1618,10 @@
       navigator.clipboard.writeText(text).then(function () {
         toast('日志已复制到剪贴板。');
       }, function () {
-        toast('无法访问剪贴板，请手动选择日志内容复制。', { level: 'WARN' });
+        toast('无法访问剪贴板，请宿主手动选择日志内容复制。', { level: 'WARN' });
       });
     } else {
-      toast('当前环境不支持剪贴板，请手动选择日志内容复制。', { level: 'WARN' });
+      toast('当前环境不支持剪贴板，请宿主手动选择日志内容复制。', { level: 'WARN' });
     }
   });
 
@@ -1688,7 +1692,7 @@
 
   function copyBackupJson() {
     function copied() { toast('系统数据已复制到剪贴板。', { level: 'SYSTEM' }); }
-    function failed() { toast('复制失败，请在弹窗中手动选择系统数据。', { level: 'WARN' }); }
+    function failed() { toast('复制失败，请宿主在弹窗中手动选择系统数据。', { level: 'WARN' }); }
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(backupCopyText).then(copied, failed);
       return;
@@ -1747,7 +1751,7 @@
   });
 
   el.resetAll.addEventListener('click', function () {
-    openConfirmModal('确认重置全部本地数据？此操作不可撤销，请先导出备份。', function () {
+    openConfirmModal('确认重置全部本地数据？此操作不可撤销，请宿主先导出备份。', function () {
       clearQuestUpgradeTimers();
       state = defaultState();
       persist();
@@ -2151,8 +2155,8 @@
       el.focusFill.style.width = '0%';
       el.focusPercent.textContent = '0.000%';
       el.focusHint.textContent = state.skills.length
-        ? '未设定主修方向，请从已有技能中选择一项，进度将直接沿用该技能的累计小时。'
-        : '尚无技能可供选择，请先复写技能，再指定主修方向。';
+        ? '未设定主修方向，请宿主从已有技能中选择一项，进度将直接沿用该技能的累计小时。'
+        : '尚无技能可供选择，请宿主先复写技能，再指定主修方向。';
       return;
     }
     // 主修方向即技能：进度直接沿用该技能已累计的小时，不会从零开始。
@@ -2395,7 +2399,7 @@
     var total = availableMainQuestTotal();
     var completed = state.quests.mainCompleted;
     if (!total) {
-      el.mainQuestBody.innerHTML = '<p class="hint">主线任务尚未加载，请稍候……</p>';
+      el.mainQuestBody.innerHTML = '<p class="hint">主线任务尚未加载，请宿主稍候……</p>';
       return;
     }
     // 主线任务进度最多显示 99%，这是系统功能设定，即使全部完成也不显示满格。
@@ -2472,7 +2476,7 @@
     event.preventDefault();
     var title = el.sideTitle.value.trim();
     if (!title) {
-      toast('请先填写任务名称。', { level: 'WARN' });
+      toast('请宿主先填写任务名称。', { level: 'WARN' });
       el.sideTitle.focus();
       return;
     }
