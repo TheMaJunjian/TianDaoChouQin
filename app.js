@@ -1646,7 +1646,7 @@
         var sharedFile = new File([blob], filename, { type: 'application/json' });
         if (navigator.canShare({ files: [sharedFile] })) {
           navigator.share({ title: '天道酬勤数据备份', files: [sharedFile] }).then(function () {
-            toast('修行数据已导出备份。', { level: 'SYSTEM' });
+            toast('系统已将备份交给分享模块。', { level: 'SYSTEM' });
           }).catch(function (error) {
             if (error && error.name !== 'AbortError') {
               downloadBlobFallback(blob, filename, json);
@@ -1663,7 +1663,7 @@
   function downloadBlobFallback(blob, filename, json) {
     if (navigator.msSaveOrOpenBlob) {
       navigator.msSaveOrOpenBlob(blob, filename);
-      toast('修行数据已导出备份。', { level: 'SYSTEM' });
+      toast('系统已生成备份文件，下载已开始。', { level: 'SYSTEM' });
       return;
     }
 
@@ -1685,7 +1685,7 @@
       link.click();
       document.body.removeChild(link);
       window.setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
-      toast('修行数据已导出备份。', { level: 'SYSTEM' });
+      toast('系统已生成备份文件，下载已开始。', { level: 'SYSTEM' });
       return;
     }
 
@@ -1696,7 +1696,7 @@
     var dataUrl = 'data:application/json;charset=utf-8,' + encodeURIComponent(json);
     var fallbackWindow = window.open(dataUrl, '_blank');
     if (fallbackWindow) {
-      toast('备份已打开，请长按页面内容保存或复制 JSON。', { level: 'WARN' });
+      toast('备份数据已展开，请宿主长按保存或复制 JSON。', { level: 'WARN' });
     } else {
       toast('浏览器阻止了备份页面，请允许打开新页面后重试。', { level: 'ERROR' });
     }
