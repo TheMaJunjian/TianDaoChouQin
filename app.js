@@ -12,19 +12,20 @@
   var LEGACY_FOCUS_KEY = 'tiandao.focus.v1';
   var LEGACY_NAME_KEY = 'tiandao.host.v1';
   var GOAL_HOURS = 10000;
+  var MAX_MANUAL_SKILL_HOURS = 50000;
   var DAY_MINUTES = 1440;
   var TOAST_DURATION_MS = 4600;
   var TOAST_GAP_MS = 700;
 
   var SKILL_LEVELS = [
-    { key: 'aware', label: '了解', minHours: 1, locked: false },
-    { key: 'beginner', label: '入门', minHours: 20, locked: false },
-    { key: 'familiar', label: '熟悉', minHours: 300, locked: false },
-    { key: 'proficient', label: '掌握', minHours: 1000, locked: false },
-    { key: 'mastery', label: '精通', minHours: 5000, locked: false },
-    { key: 'grandmaster', label: '宗师', minHours: 10000, locked: true },
-    { key: 'perfection', label: '圆满', minHours: 100000, locked: true },
-    { key: 'supernatural', label: '神通', minHours: 1000000, locked: true }
+    { key: 'aware', label: '了解', minHours: 20, locked: false },
+    { key: 'beginner', label: '入门', minHours: 300, locked: false },
+    { key: 'familiar', label: '熟悉', minHours: 1000, locked: false },
+    { key: 'proficient', label: '掌握', minHours: 5000, locked: false },
+    { key: 'mastery', label: '精通', minHours: 10000, locked: false },
+    { key: 'grandmaster', label: '宗师', minHours: 100000, locked: true },
+    { key: 'perfection', label: '圆满', minHours: 2000000, locked: true },
+    { key: 'supernatural', label: '神通', minHours: 10000000, locked: true }
   ];
 
   var ATTRIBUTE_ENHANCEMENTS = {
@@ -34,16 +35,6 @@
     edu: { label: '修为', cost: 10000 },
     talent: { label: '天赋', cost: 100000 }
   };
-  var SKILL_ENHANCEMENT_COSTS = {
-    beginner: 10,
-    familiar: 50,
-    proficient: 200,
-    mastery: 1000,
-    grandmaster: 5000,
-    perfection: 20000,
-    supernatural: 100000
-  };
-
   var MAIN_QUEST_CLUES = [
     '向幕后黑手提供两万五千亿资金',
     '注册成为「公论」与会者，并获得五十万贡献点',
@@ -104,6 +95,8 @@
   var hiddenSideQuestListCollapsed = false;
   var achievementListCollapsed = false;
   var timelineZoom = { start: 0, end: DAY_MINUTES, anchor: null };
+  var renderedTimelineBlanks = [];
+  var pendingBlankRange = null;
   var toastQueue = [];
   var toastTimer = null;
   var toastNextStartAt = 0;
@@ -116,7 +109,7 @@
     'hostName', 'todayFilled', 'todayMissing', 'totalHours', 'skillCount', 'focusCategory',
     'nameModal', 'nameInput', 'nameConfirm', 'nameCancel',
     'confirmModal', 'confirmMessage', 'confirmCancel', 'confirmAccept',
-    'detailModal', 'detailTitle', 'detailBody', 'detailClose',
+    'detailModal', 'detailTitle', 'detailBody', 'detailClose', 'detailFillBlank',
     'focusLabel', 'focusPercent', 'focusFill', 'focusHint',
     'attrWeight', 'attrEdu', 'attrTalent', 'attrProperty', 'attrStatus',
     'polishPercent', 'polishFill',
@@ -299,6 +292,7 @@
           endDate: endDate,
           start: start,
           end: end,
+          createdAt: typeof item.createdAt === 'string' && Number.isFinite(Date.parse(item.createdAt)) ? item.createdAt : '',
           level: ['INFO', 'TRAIN', 'WARN', 'ERROR'].indexOf(item.level) >= 0 ? item.level : 'INFO'
         });
       }).filter(function (item) { return item !== null; }) : base.entries;
@@ -310,9 +304,10 @@
       merged.skills = Array.isArray(parsed.skills) ? parsed.skills.filter(function (item) {
         return item && typeof item === 'object' && typeof item.name === 'string' && Number.isFinite(Number(item.hours));
       }).map(function (item) {
+        var hoursValue = Number(item.hours);
         return Object.assign({}, item, {
           id: typeof item.id === 'string' && item.id ? item.id : uid(),
-          hours: Number(item.hours)
+          hours: Math.max(0, Math.min(MAX_MANUAL_SKILL_HOURS, hoursValue))
         });
       }) : base.skills;
     });
@@ -458,6 +453,13 @@
 
   function toClock(minutes) {
     return pad(Math.floor(minutes / 60)) + ':' + pad(minutes % 60);
+  }
+
+  function formatCreatedAt(value) {
+    if (!value || !Number.isFinite(Date.parse(value))) { return '未知'; }
+    var date = new Date(value);
+    return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + ' ' +
+      pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds());
   }
 
   function hours(minutes) { return (minutes / 60).toFixed(1); }
@@ -751,7 +753,7 @@
     var current = levelForHours(effectiveHours(skill));
     var next = SKILL_LEVELS[SKILL_LEVELS.indexOf(current) + 1];
     if (!next) { return null; }
-    return { current: current, next: next, cost: SKILL_ENHANCEMENT_COSTS[next.key] };
+    return { current: current, next: next, cost: next.minHours };
   }
 
   document.addEventListener('click', function (event) {
@@ -764,6 +766,9 @@
     var moduleLabel = isSkillEnhancement ? '技能' : label;
     toast('强化目标：' + label + '。本次强化需要消耗 ' + cost + ' ' + pointType + '。', { level: 'INFO' });
     toast('系统等级不足：' + moduleLabel + '强化模块尚未解锁。请完成主线任务以解锁对应强化模块。', { level: 'WARN' });
+    if (isSkillEnhancement && hasCompletedPublishedMainQuests()) {
+      toast('检测到宿主已完成全部主线任务，系统正在寻找新的线索……', { level: 'WARN' });
+    }
   });
 
   /* 资源不足时不显示加号，避免把不可用功能伪装成可操作控件。 */
@@ -1068,7 +1073,15 @@
       var levelDef = SKILL_LEVELS.filter(function (l) { return l.key === levelKey; })[0];
       hoursValue = levelDef ? levelDef.minHours : 0;
     } else {
-      hoursValue = Math.max(0, Number(el.skillHours.value) || 0);
+      hoursValue = Number(el.skillHours.value);
+      if (!Number.isFinite(hoursValue) || hoursValue < 0 || hoursValue > MAX_MANUAL_SKILL_HOURS) {
+        if (hoursValue > MAX_MANUAL_SKILL_HOURS) {
+          el.skillHours.value = '0';
+        }
+        toast('宿主技能超过当前系统等级限制，该技能等级尚未解锁', { level: 'WARN' });
+        el.skillHours.focus();
+        return;
+      }
     }
 
     var existing = skillByName(name);
@@ -1207,6 +1220,7 @@
   function openDetailModal(title, body) {
     el.detailTitle.textContent = title;
     el.detailBody.innerHTML = body;
+    el.detailFillBlank.classList.add('hidden');
     el.detailModal.classList.remove('hidden');
   }
 
@@ -1218,6 +1232,23 @@
   });
   el.detailModal.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') { closeDetailModal(); }
+  });
+
+  el.detailFillBlank.addEventListener('click', function () {
+    if (!pendingBlankRange) { return; }
+    var start = stampParts(pendingBlankRange.start);
+    var end = stampParts(pendingBlankRange.end);
+    el.startDate.value = start.date;
+    el.startTime.value = toClock(start.minutes);
+    el.endDate.value = end.date;
+    el.endTime.value = toClock(end.minutes);
+    state.viewDate = start.date;
+    el.viewDate.value = start.date;
+    persist();
+    pendingBlankRange = null;
+    closeDetailModal();
+    setActiveTab('entry');
+    window.setTimeout(function () { el.activity.focus(); }, 30);
   });
 
   function sortedSkills() {
@@ -1375,6 +1406,7 @@
       end: end,
       category: category,
       activity: activity,
+      createdAt: new Date().toISOString(),
       level: el.level.value
     };
     var conflicts = entriesOverlapping(startStamp, endStamp);
@@ -1660,9 +1692,10 @@
         time: toClock(e.start) + ':00',
         level: e.level,
         message: toClock(e.start) + '-' + toClock(e.end) + ' [' + e.category + '] ' +
-          e.activity + '（' + hours(e.end - e.start) + ' h）',
+          e.activity + '（' + hours(e.end - e.start) + ' h；复写时间：' + formatCreatedAt(e.createdAt) + '）',
         category: e.category,
         activity: e.activity,
+        createdAt: e.createdAt,
         id: e.id
       });
       cursor = Math.max(cursor, e.end);
@@ -1726,10 +1759,87 @@
     renderTimeline(byDate(state.viewDate));
   }
 
+  function timelineBlankSegments(dateStr) {
+    var todayIndex = dateIndex(todayStr());
+    var targetIndex = dateIndex(dateStr);
+    if (targetIndex > todayIndex) { return []; }
+
+    var dayStart = dateTimeStamp(dateStr, 0);
+    var dayEnd = dayStart + DAY_MINUTES;
+    var limit = targetIndex === todayIndex ? dateTimeStamp(dateStr, nowMinutes()) : dayEnd;
+    if (limit <= dayStart) { return []; }
+
+    var intervals = state.entries.map(function (entry) {
+      return { start: entryStartStamp(entry), end: entryEndStamp(entry) };
+    }).sort(function (a, b) { return a.start - b.start; });
+    var merged = [];
+    intervals.forEach(function (interval) {
+      var last = merged[merged.length - 1];
+      if (last && interval.start <= last.end) {
+        last.end = Math.max(last.end, interval.end);
+      } else {
+        merged.push({ start: interval.start, end: interval.end });
+      }
+    });
+
+    var gaps = [];
+    function addGap(start, end) {
+      var cappedEnd = targetIndex === todayIndex ? Math.min(end, limit) : end;
+      if (cappedEnd <= start || cappedEnd <= dayStart || start >= limit) { return; }
+      var chunkStart = start;
+      while (chunkStart < cappedEnd) {
+        var chunkEnd = Math.min(chunkStart + DAY_MINUTES, cappedEnd);
+        var visibleStart = Math.max(chunkStart, dayStart);
+        var visibleEnd = Math.min(chunkEnd, limit);
+        if (visibleEnd > visibleStart) {
+          gaps.push({
+            start: chunkStart,
+            end: chunkEnd,
+            visibleStart: visibleStart,
+            visibleEnd: visibleEnd
+          });
+        }
+        chunkStart = chunkEnd;
+      }
+    }
+
+    if (!merged.length) {
+      addGap(dayStart, limit);
+    } else {
+      if (merged[0].start > dayStart) { addGap(dayStart, merged[0].start); }
+      for (var i = 1; i < merged.length; i++) {
+        if (merged[i].start > merged[i - 1].end) {
+          addGap(merged[i - 1].end, merged[i].start);
+        }
+      }
+      addGap(merged[merged.length - 1].end, limit);
+    }
+    return gaps;
+  }
+
   function renderTimeline(list) {
     el.timeline.innerHTML = '';
     var viewStart = timelineZoom.start;
     var viewSpan = timelineZoomRange();
+    var dayStart = dateTimeStamp(state.viewDate, 0);
+    renderedTimelineBlanks = timelineBlankSegments(state.viewDate);
+    renderedTimelineBlanks.forEach(function (blank, index) {
+      var visibleStart = Math.max(blank.visibleStart - dayStart, viewStart);
+      var visibleEnd = Math.min(blank.visibleEnd - dayStart, timelineZoom.end);
+      if (visibleEnd <= visibleStart) { return; }
+      var blankStart = stampParts(blank.start);
+      var blankEnd = stampParts(blank.end);
+      var blankSlot = document.createElement('div');
+      blankSlot.className = 'slot blank';
+      blankSlot.setAttribute('role', 'button');
+      blankSlot.setAttribute('tabindex', '0');
+      blankSlot.setAttribute('data-blank-index', String(index));
+      blankSlot.setAttribute('aria-label', '空白 ' + blankStart.date + ' ' + toClock(blankStart.minutes) + ' 至 ' + blankEnd.date + ' ' + toClock(blankEnd.minutes));
+      blankSlot.style.left = ((visibleStart - viewStart) / viewSpan * 100) + '%';
+      blankSlot.style.width = ((visibleEnd - visibleStart) / viewSpan * 100) + '%';
+      blankSlot.setAttribute('data-tooltip', '未复写 · ' + blankStart.date + ' ' + toClock(blankStart.minutes) + '-' + blankEnd.date + ' ' + toClock(blankEnd.minutes));
+      el.timeline.appendChild(blankSlot);
+    });
     list.forEach(function (e) {
       var visibleStart = Math.max(e.start, viewStart);
       var visibleEnd = Math.min(e.end, timelineZoom.end);
@@ -1770,12 +1880,35 @@
     return state.entries.filter(function (entry) { return entry.id === id; })[0] || null;
   }
 
+  function timelineBlankFromTarget(target) {
+    var index = target && target.getAttribute && target.getAttribute('data-blank-index');
+    return index === null ? null : renderedTimelineBlanks[Number(index)] || null;
+  }
+
+  function showTimelineBlank(blank) {
+    var start = stampParts(blank.start);
+    var end = stampParts(blank.end);
+    pendingBlankRange = blank;
+    openDetailModal('空白时间段',
+      '<div class="timeline-detail-time">开始：' + escapeHtml(start.date) + ' ' + toClock(start.minutes) + '<br>结束：' + escapeHtml(end.date) + ' ' + toClock(end.minutes) + '</div>' +
+      '<div class="detail-row"><span>状态</span><b>尚未复写</b></div>' +
+      '<div class="detail-row"><span>持续时间</span><b>' + hours(blank.end - blank.start) + ' h</b></div>');
+    el.detailFillBlank.classList.remove('hidden');
+  }
+
   el.timeline.addEventListener('click', function (event) {
     var entry = timelineEntryFromTarget(event.target);
     if (entry) {
       var displayEntry = byDate(state.viewDate).filter(function (item) { return item.id === entry.id; })[0] || entry;
       timelineZoom.anchor = (displayEntry.start + displayEntry.end) / 2;
       showTimelineEntry(entry);
+      return;
+    }
+    var blank = timelineBlankFromTarget(event.target);
+    if (blank) {
+      var dayStart = dateTimeStamp(state.viewDate, 0);
+      timelineZoom.anchor = ((blank.visibleStart - dayStart) + (blank.visibleEnd - dayStart)) / 2;
+      showTimelineBlank(blank);
     }
   });
 
@@ -1787,14 +1920,27 @@
       var displayEntry = byDate(state.viewDate).filter(function (item) { return item.id === entry.id; })[0] || entry;
       timelineZoom.anchor = (displayEntry.start + displayEntry.end) / 2;
       showTimelineEntry(entry);
+      return;
+    }
+    var blank = timelineBlankFromTarget(event.target);
+    if (blank) {
+      event.preventDefault();
+      var dayStart = dateTimeStamp(state.viewDate, 0);
+      timelineZoom.anchor = ((blank.visibleStart - dayStart) + (blank.visibleEnd - dayStart)) / 2;
+      showTimelineBlank(blank);
     }
   });
 
   el.timeline.addEventListener('pointerover', function (event) {
     var entry = timelineEntryFromTarget(event.target);
-    if (!entry) { return; }
-    var displayEntry = byDate(state.viewDate).filter(function (item) { return item.id === entry.id; })[0] || entry;
-    timelineZoom.anchor = (displayEntry.start + displayEntry.end) / 2;
+    var blank = timelineBlankFromTarget(event.target);
+    if (entry) {
+      var displayEntry = byDate(state.viewDate).filter(function (item) { return item.id === entry.id; })[0] || entry;
+      timelineZoom.anchor = (displayEntry.start + displayEntry.end) / 2;
+    } else if (blank) {
+      var dayStart = dateTimeStamp(state.viewDate, 0);
+      timelineZoom.anchor = ((blank.visibleStart - dayStart) + (blank.visibleEnd - dayStart)) / 2;
+    }
   });
 
   el.timeline.addEventListener('pointermove', function (event) {
@@ -1880,7 +2026,8 @@
           '<div class="log-entry-head"><span class="ts">[' + l.time + ']</span> ' +
           '<span class="lv-' + l.level + '">[' + l.level + ']</span> ' +
           '<span class="msg">[' + escapeHtml(l.category || '无') + ']</span></div>' +
-          '<div class="msg log-entry-activity">' + escapeHtml(l.activity) + '</div></div>' +
+          '<div class="msg log-entry-activity">' + escapeHtml(l.activity) +
+          '<span class="log-entry-created-at">（复写时间：' + escapeHtml(formatCreatedAt(l.createdAt)) + '）</span></div></div>' +
           '<button class="del" data-del="' + l.id + '" title="删除该时间段">[x]</button></div>';
       }
       return '<div class="log-line"><span class="ts">[' + l.time + ']</span> ' +
@@ -2100,16 +2247,18 @@
     return Math.min(Math.max(Number(state.quests.mainRevealed) || 0, 0), MAIN_QUEST_CLUES.length);
   }
 
+  function hasCompletedPublishedMainQuests() {
+    var total = availableMainQuestTotal();
+    return total > 0 && state.quests.mainCompleted >= total;
+  }
+
   function syncMainQuestAvailability() {
     var total = MAIN_QUEST_CLUES.length;
     var versionChanged = state.quests.lastSeenAppVersion !== APP_VERSION;
-    if (!versionChanged) { return; }
     var hasNewQuests = total > state.quests.mainRevealed;
+    if (!versionChanged && !hasNewQuests) { return; }
     if (hasNewQuests) {
       state.quests.mainRevealed = total;
-    }
-    if (hasNewQuests && state.quests.mainCompleted < total) {
-      state.quests.mainAccepted = false;
     }
     state.quests.lastSeenAppVersion = APP_VERSION;
     persist();

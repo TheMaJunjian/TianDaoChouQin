@@ -125,7 +125,7 @@
         <label id="skillLevelWrap"><span>等级</span>
           <select id="skillLevel"></select>
         </label>
-        <label id="skillHoursWrap" class="hidden"><span>投入小时</span><input type="number" id="skillHours" min="0" step="1"></label>
+        <label id="skillHoursWrap" class="hidden"><span>投入小时</span><input type="number" id="skillHours" min="0" max="50000" step="1"></label>
         <button type="submit" class="btn wide">复写 / 更新技能</button>
       </form>
       <div class="hidden-skills-block hidden" id="hiddenSkillsBlock">
@@ -288,6 +288,7 @@
     <div class="detail-modal-body" id="detailBody"></div>
     <div class="modal-actions">
       <button type="button" class="btn" id="detailClose">关闭</button>
+      <button type="button" class="btn hidden" id="detailFillBlank">跳转到复写并补充</button>
     </div>
   </div>
 </div>

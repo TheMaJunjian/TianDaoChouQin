@@ -839,6 +839,12 @@ input:focus, select:focus {
 .slot.WARN { background: #b7883a; }
 .slot.ERROR { background: #a9463f; }
 
+.slot.blank {
+  background: repeating-linear-gradient(135deg, rgba(213, 224, 229, 0.2) 0 5px, rgba(213, 224, 229, 0.06) 5px 10px);
+  border: 1px dashed rgba(213, 224, 229, 0.5);
+  opacity: 0.7;
+}
+
 .timeline-axis {
   display: flex;
   justify-content: space-between;
@@ -874,6 +880,13 @@ input:focus, select:focus {
 .log-entry-content { min-width: 0; flex: 1 1 auto; }
 .log-entry-head { min-width: 0; }
 .log-entry-activity { margin-top: 2px; white-space: pre-wrap; }
+.log-entry-created-at {
+  display: block;
+  color: var(--muted);
+  background: #030a10;
+  font-size: 11px;
+  line-height: 1.5;
+}
 .notice-line { border-left: 3px solid var(--line); padding-left: 8px; }
 .notice-info { border-left-color: var(--cyan); }
 .notice-train { border-left-color: var(--green); }
