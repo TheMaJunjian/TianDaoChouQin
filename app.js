@@ -734,7 +734,7 @@
 
   /* ---------- 点击空白区域弹出对应区域的提示 ---------- */
   function isInteractive(node) {
-    return !!(node.closest && node.closest('input, select, textarea, button, a, label, .modal-box, .egg-box, .toast'));
+    return !!(node.closest && node.closest('input, select, textarea, button, a, label, .skill-item, .ach-item, .modal-box, .egg-box, .toast'));
   }
 
   function zoneHintFor(clientY) {
