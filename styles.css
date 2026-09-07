@@ -597,10 +597,9 @@ input:focus, select:focus {
   gap: 8px;
 }
 .skill-name { flex: 1 1 auto; min-width: 0; word-break: break-word; }
-.ach-head { gap: 12px; }
+.ach-head { display: grid; grid-template-columns: minmax(0, 10em) minmax(0, 1fr) auto; gap: 12px; }
 .ach-name {
-  flex: 0 0 10em;
-  min-width: 10em;
+  min-width: 0;
   overflow-wrap: anywhere;
   line-height: 1.4;
 }
@@ -635,6 +634,7 @@ input:focus, select:focus {
 }
 .ach-item .ach-pt { color: var(--green); white-space: nowrap; flex: 0 0 auto; }
 .ach-desc { flex: 1 1 auto; min-width: 0; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hidden-achievement-item { border-color: var(--line); background: rgba(111, 142, 160, 0.06); }
 
 .quest-title { color: var(--cyan); font-size: 13px; }
 .quest-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -682,7 +682,12 @@ input:focus, select:focus {
 .detail-row:last-child { border-bottom: 0; }
 .detail-row > span { min-width: 0; color: var(--text); }
 .detail-row > b { min-width: 0; color: var(--gold); white-space: pre-wrap; overflow-wrap: anywhere; text-align: right; }
-.detail-row small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+.detail-row-description { grid-template-columns: 1fr; gap: 4px; }
+.detail-row-description > b { text-align: left; }
+.achievement-summary-row { grid-template-columns: minmax(0, 1fr) auto; }
+.achievement-summary-row > span { min-width: 0; overflow-wrap: anywhere; }
+.achievement-summary-row > b { white-space: nowrap; }
+.detail-row small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; white-space: pre-wrap; }
 
 .empty { color: var(--muted); font-size: 12px; list-style: none; }
 

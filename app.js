@@ -74,6 +74,7 @@
       skills: [],
       hiddenSkills: [],
       achievements: [],
+      hiddenAchievements: [],
       points: { attribute: 0, contribution: 0, achievement: 0 },
       quests: {
         mainRevealed: 0,   // 已解锁的主线线索数
@@ -92,6 +93,7 @@
   var state = loadState();
   var skillListCollapsed = false;
   var hiddenSkillListCollapsed = false;
+  var hiddenAchievementListCollapsed = false;
   var hiddenSideQuestListCollapsed = false;
   var achievementListCollapsed = false;
   var timelineZoom = { start: 0, end: DAY_MINUTES, anchor: null };
@@ -109,13 +111,13 @@
     'hostName', 'todayFilled', 'todayMissing', 'totalHours', 'skillCount', 'focusCategory',
     'nameModal', 'nameInput', 'nameConfirm', 'nameCancel',
     'confirmModal', 'confirmMessage', 'confirmCancel', 'confirmAccept',
-    'detailModal', 'detailTitle', 'detailBody', 'detailClose', 'detailFillBlank',
+    'detailModal', 'detailTitle', 'detailBody', 'detailClose', 'detailFillBlank', 'detailAchievementToggle',
     'focusLabel', 'focusPercent', 'focusFill', 'focusHint',
     'attrWeight', 'attrEdu', 'attrTalent', 'attrProperty', 'attrStatus',
     'polishPercent', 'polishFill',
     'skillForm', 'skillName', 'skillMode', 'skillLevelWrap', 'skillLevel',
     'skillHoursWrap', 'skillHours', 'skillList', 'hiddenSkillsBlock', 'hiddenSkillList', 'hiddenSkillToggle',
-    'achList',
+    'achList', 'hiddenAchievementsBlock', 'hiddenAchievementList', 'hiddenAchievementToggle',
     'entryForm', 'startDate', 'startTime', 'endDate', 'endTime', 'category', 'activity',
     'level', 'prevDay', 'nextDay', 'viewDate', 'timeline', 'timelineRuler', 'timelineStartCursor', 'timelineEndCursor', 'timelineAxis', 'coverageFill',
     'coverageHint', 'logDateLabel', 'logView', 'copyLog', 'exportData',
@@ -325,6 +327,11 @@
           points: Number(item.points)
         });
       }) : base.achievements;
+    });
+    safe(function () {
+      merged.hiddenAchievements = Array.isArray(parsed.hiddenAchievements)
+        ? parsed.hiddenAchievements.filter(function (item) { return typeof item === 'string'; })
+        : base.hiddenAchievements;
     });
     safe(function () {
       var parsedPoints = parsed.points && typeof parsed.points === 'object' ? parsed.points : {};
@@ -985,7 +992,6 @@
       el.attrWeight.focus();
     });
   });
-
   /* ---------- 技能 ---------- */
   var MAX_UNLOCKED_LEVEL = SKILL_LEVELS.filter(function (l) { return !l.locked; }).slice(-1)[0];
   var FIRST_LOCKED_LEVEL = SKILL_LEVELS.filter(function (l) { return l.locked; })[0];
@@ -1186,9 +1192,10 @@
   });
 
   el.attrAchSummary.addEventListener('click', function () {
-    openDetailModal('成就列表', state.achievements.length
-      ? state.achievements.map(function (a2) {
-        return '<div class="detail-row"><span>' + escapeHtml(a2.name) +
+    var achievements = visibleAchievements();
+    openDetailModal('成就列表', achievements.length
+      ? achievements.map(function (a2) {
+        return '<div class="detail-row achievement-summary-row"><span>' + escapeHtml(a2.name) +
           (a2.desc ? '<small>' + escapeHtml(a2.desc) + '</small>' : '') +
           '</span><b>+' + a2.points + '</b></div>';
       }).join('')
@@ -1208,19 +1215,44 @@
     openAchievementDetail(target.getAttribute('data-achievement-detail'));
   });
 
+  el.hiddenAchievementList.addEventListener('click', function (event) {
+    var target = event.target.closest('.ach-item[data-achievement-detail]');
+    if (!target) { return; }
+    openAchievementDetail(target.getAttribute('data-achievement-detail'));
+  });
+
+  el.hiddenAchievementList.addEventListener('keydown', function (event) {
+    var target = event.target.closest('.ach-item[data-achievement-detail]');
+    if (!target || (event.key !== 'Enter' && event.key !== ' ')) { return; }
+    event.preventDefault();
+    openAchievementDetail(target.getAttribute('data-achievement-detail'));
+  });
+
+  el.hiddenAchievementToggle.addEventListener('click', function () {
+    hiddenAchievementListCollapsed = !hiddenAchievementListCollapsed;
+    renderHiddenAchievementToggle();
+  });
+
   function openAchievementDetail(achievementId) {
     var achievement = state.achievements.filter(function (a2) { return a2.id === achievementId; })[0];
     if (!achievement) { return; }
+    var isHidden = state.hiddenAchievements.indexOf(achievementId) >= 0;
     openDetailModal('成就详情',
       '<div class="detail-row"><span>任务名称</span><b>' + escapeHtml(achievement.name) + '</b></div>' +
-      '<div class="detail-row"><span>任务描述</span><b>' + escapeHtml(achievement.desc || '暂无描述。') + '</b></div>' +
+      '<div class="detail-row detail-row-description"><span>任务描述</span><b>' + escapeHtml(achievement.desc || '暂无描述。') + '</b></div>' +
       '<div class="detail-row"><span>成就点</span><b>+' + achievement.points + '</b></div>');
+    el.detailAchievementToggle.textContent = isHidden ? '显示' : '隐藏';
+    el.detailAchievementToggle.setAttribute('data-achievement-' + (isHidden ? 'show' : 'hide'), achievementId);
+    el.detailAchievementToggle.classList.remove('hidden');
   }
 
   function openDetailModal(title, body) {
     el.detailTitle.textContent = title;
     el.detailBody.innerHTML = body;
     el.detailFillBlank.classList.add('hidden');
+    el.detailAchievementToggle.classList.add('hidden');
+    el.detailAchievementToggle.removeAttribute('data-achievement-hide');
+    el.detailAchievementToggle.removeAttribute('data-achievement-show');
     el.detailModal.classList.remove('hidden');
   }
 
@@ -1232,6 +1264,25 @@
   });
   el.detailModal.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') { closeDetailModal(); }
+  });
+
+  el.detailAchievementToggle.addEventListener('click', function (event) {
+    var target = event.currentTarget;
+    var hideId = target.getAttribute && target.getAttribute('data-achievement-hide');
+    var showId = target.getAttribute && target.getAttribute('data-achievement-show');
+    var achievementId = hideId || showId;
+    if (!achievementId) { return; }
+    if (hideId && state.hiddenAchievements.indexOf(achievementId) < 0) {
+      state.hiddenAchievements.push(achievementId);
+    }
+    if (showId) {
+      state.hiddenAchievements = state.hiddenAchievements.filter(function (hiddenId) {
+        return hiddenId !== achievementId;
+      });
+    }
+    persist();
+    closeDetailModal();
+    refreshAll();
   });
 
   el.detailFillBlank.addEventListener('click', function () {
@@ -1340,14 +1391,45 @@
     el.achListToggle.title = achievementListCollapsed ? '展开成就' : '折叠成就';
   }
 
-  /* ---------- 成就：只展示，不提供编辑区（支线任务完成即成就） ---------- */
+  function visibleAchievements() {
+    return state.achievements.filter(function (a2) {
+      return state.hiddenAchievements.indexOf(a2.id) < 0;
+    });
+  }
+
+  function renderHiddenAchievementToggle() {
+    el.hiddenAchievementList.classList.toggle('hidden', hiddenAchievementListCollapsed);
+    el.hiddenAchievementToggle.textContent = hiddenAchievementListCollapsed ? '展开' : '折叠';
+    el.hiddenAchievementToggle.setAttribute('aria-expanded', String(!hiddenAchievementListCollapsed));
+    el.hiddenAchievementToggle.setAttribute('aria-label', hiddenAchievementListCollapsed ? '展开隐藏成就' : '折叠隐藏成就');
+    el.hiddenAchievementToggle.title = hiddenAchievementListCollapsed ? '展开隐藏成就' : '折叠隐藏成就';
+  }
+
+  function renderHiddenAchievements() {
+    var achievements = state.achievements.filter(function (a2) {
+      return state.hiddenAchievements.indexOf(a2.id) >= 0;
+    });
+    el.hiddenAchievementsBlock.classList.toggle('hidden', !achievements.length);
+    if (!achievements.length) { return; }
+    el.hiddenAchievementList.innerHTML = achievements.map(function (a2) {
+      return '<li class="ach-item hidden-achievement-item" data-achievement-detail="' + escapeHtml(a2.id) + '" tabindex="0" role="button" aria-label="查看隐藏成就：' + escapeHtml(a2.name) + '">' +
+        '<div class="ach-head"><span class="ach-name">' + escapeHtml(a2.name) + '</span>' +
+        (a2.desc ? '<span class="ach-desc">' + escapeHtml(a2.desc) + '</span>' : '') +
+        '<span class="ach-pt">+' + a2.points + '</span></div>' +
+        '</li>';
+    }).join('');
+    renderHiddenAchievementToggle();
+  }
+
+  /* ---------- 成就：支线任务完成即成就，可在详情中隐藏 ---------- */
   function renderAchievements() {
-    if (!state.achievements.length) {
+    var achievements = visibleAchievements();
+    if (!achievements.length) {
       el.achList.innerHTML = '<li class="empty">暂无成就，完成一条支线任务即可刻下第一枚成就。</li>';
       renderAchievementListToggle();
       return;
     }
-    el.achList.innerHTML = state.achievements.slice().map(function (a2) {
+    el.achList.innerHTML = achievements.map(function (a2) {
       var achievementId = escapeHtml(a2.id);
       return '<li class="ach-item" data-achievement-detail="' + achievementId + '" tabindex="0" role="button" aria-label="查看成就：' + escapeHtml(a2.name) + '">' +
         '<div class="ach-head"><span class="ach-name">' + escapeHtml(a2.name) + '</span>' +
@@ -2149,14 +2231,15 @@
   function renderAttrSummaries() {
     // 技能不展示「几项」，具体技能由下方的技能列表逐条呈现。
     var skills = visibleSkills();
+    var achievements = visibleAchievements();
     el.attrSkillSummary.textContent = skills.length
       ? skills.map(function (s2) { return s2.name; }).join('、')
       : '暂无';
     el.skillListToggle.title = skills.length
       ? '技能名称按等级从高到低排列，点击展开或折叠技能项'
       : '暂无技能';
-    el.attrAchSummary.textContent = state.achievements.length
-      ? state.achievements.length + ' 项 · 成就点 ' + state.points.achievement
+    el.attrAchSummary.textContent = achievements.length
+      ? achievements.length + ' 项 · 成就点 ' + state.points.achievement
       : '暂无';
   }
 
@@ -2682,6 +2765,7 @@
     renderHiddenSkills();
     renderSkillListToggle();
     renderAchievements();
+    renderHiddenAchievements();
     renderPolish();
     renderPoints();
     renderVersion();

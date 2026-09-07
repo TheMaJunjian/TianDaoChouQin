@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>天道酬勤 · 系统面板</title>
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=20260907-1">
 </head>
 <body>
 <div class="scanline"></div>
@@ -84,6 +84,13 @@
         <button type="button" class="skill-toggle" id="achListToggle" aria-controls="achList" aria-expanded="true" aria-label="折叠成就">折叠</button>
       </div>
       <ul class="ach-list featured" id="achList"></ul>
+      <div class="hidden-skills-block hidden" id="hiddenAchievementsBlock">
+        <div class="hidden-skills-title">
+          <h3>隐藏成就</h3>
+          <button type="button" class="skill-toggle" id="hiddenAchievementToggle" aria-controls="hiddenAchievementList" aria-expanded="true" aria-label="折叠隐藏成就">折叠</button>
+        </div>
+        <ul class="ach-list hidden-achievement-list" id="hiddenAchievementList"></ul>
+      </div>
       <div class="progress-block" id="polishBlock">
         <div class="progress-title"><span>宿主信息完整度</span><span id="polishPercent">0%</span></div>
         <div class="progress-bar"><div class="progress-fill alt" id="polishFill"></div></div>
@@ -287,6 +294,7 @@
     <h2 id="detailTitle"></h2>
     <div class="detail-modal-body" id="detailBody"></div>
     <div class="modal-actions">
+      <button type="button" class="btn ghost hidden" id="detailAchievementToggle">隐藏</button>
       <button type="button" class="btn" id="detailClose">关闭</button>
       <button type="button" class="btn hidden" id="detailFillBlank">跳转到复写并补充</button>
     </div>
@@ -307,6 +315,6 @@
   </div>
 </div>
 
-<script src="app.js"></script>
+<script src="app.js?v=20260907-3"></script>
 </body>
 </html>
