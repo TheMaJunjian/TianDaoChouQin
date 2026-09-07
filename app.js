@@ -391,30 +391,77 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  function statesEqual(left, right) {
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+
+  function mergeChangedArray(latest, current, baseline) {
+    var result = latest.slice();
+    var latestById = Object.create(null);
+    result.forEach(function (item) { latestById[String(item.id)] = item; });
+    var baselineById = Object.create(null);
+    baseline.forEach(function (item) { baselineById[String(item.id)] = item; });
+    var currentById = Object.create(null);
+    current.forEach(function (item) { currentById[String(item.id)] = item; });
+
+    baseline.forEach(function (item) {
+      var id = String(item.id);
+      if (!currentById[id]) {
+        result = result.filter(function (candidate) { return String(candidate.id) !== id; });
+        delete latestById[id];
+      } else if (!statesEqual(currentById[id], item)) {
+        result = result.filter(function (candidate) { return String(candidate.id) !== id; });
+        result.push(currentById[id]);
+        latestById[id] = currentById[id];
+      }
+    });
+    current.forEach(function (item) {
+      var id = String(item.id);
+      if (!baselineById[id] && !latestById[id]) { result.push(item); }
+    });
+    return result;
+  }
+
+  function mergeChangedSet(latest, current, baseline) {
+    var result = latest.slice();
+    baseline.forEach(function (item) {
+      if (current.indexOf(item) < 0) {
+        result = result.filter(function (candidate) { return candidate !== item; });
+      }
+    });
+    current.forEach(function (item) {
+      if (baseline.indexOf(item) < 0 && result.indexOf(item) < 0) { result.push(item); }
+    });
+    return result;
+  }
+
   function mergeConcurrentState(latest) {
     var merged = mergeDefaults(latest);
+    var baseline = persistedSnapshot;
     ['entries', 'skills', 'achievements', 'notifications'].forEach(function (key) {
-      var items = merged[key].concat(state[key]);
-      var seen = Object.create(null);
-      merged[key] = items.filter(function (item) {
-        var id = item && item.id ? String(item.id) : JSON.stringify(item);
-        if (seen[id]) { return false; }
-        seen[id] = true;
-        return true;
-      });
+      merged[key] = mergeChangedArray(merged[key], state[key], baseline[key]);
     });
-    var sideItems = merged.quests.side.concat(state.quests.side);
-    var sideSeen = Object.create(null);
-    merged.quests.side = sideItems.filter(function (item) {
-      if (sideSeen[item.id]) { return false; }
-      sideSeen[item.id] = true;
-      return true;
-    });
+    merged.quests.side = mergeChangedArray(merged.quests.side, state.quests.side, baseline.quests.side);
     ['hiddenSkills', 'hiddenAchievements'].forEach(function (key) {
-      merged[key] = merged[key].concat(state[key]).filter(function (item, index, list) {
-        return list.indexOf(item) === index;
-      });
+      merged[key] = mergeChangedSet(merged[key], state[key], baseline[key]);
     });
+    Object.keys(state.host).forEach(function (key) {
+      if (!statesEqual(state.host[key], baseline.host[key])) { merged.host[key] = state.host[key]; }
+    });
+    ['focus', 'entryCategory', 'viewDate'].forEach(function (key) {
+      if (!statesEqual(state[key], baseline[key])) { merged[key] = state[key]; }
+    });
+    Object.keys(state.points).forEach(function (key) {
+      if (!statesEqual(state.points[key], baseline.points[key])) { merged.points[key] = state.points[key]; }
+    });
+    ['mainRevealed', 'mainCompleted', 'mainAccepted', 'lastSeenAppVersion'].forEach(function (key) {
+      if (!statesEqual(state.quests[key], baseline.quests[key])) {
+        merged.quests[key] = state.quests[key];
+      }
+    });
+    if (!statesEqual(state.noticeSeenCount, baseline.noticeSeenCount)) {
+      merged.noticeSeenCount = state.noticeSeenCount;
+    }
     return merged;
   }
 
@@ -2041,7 +2088,7 @@
     var dateText = startText === endText
       ? '日期：' + escapeHtml(startText)
       : '开始：' + escapeHtml(startText) + '　结束：' + escapeHtml(endText);
-    openDetailModal(toClock(entry.start) + '-' + toClock(entry.end),
+    openDetailModal(toClock(startParts.minutes) + '-' + toClock(endParts.minutes),
       '<div class="timeline-detail-time">' + dateText + '</div>' +
       '<div class="detail-row"><span>技能</span><b>' + escapeHtml(entry.category || '无') + '</b></div>' +
       '<div class="detail-row"><span>作为</span><b>' + escapeHtml(entry.activity) + '</b></div>' +
