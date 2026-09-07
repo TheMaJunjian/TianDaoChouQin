@@ -246,7 +246,7 @@
       if (legacyFocus) { fresh.focus = JSON.parse(legacyFocus); }
       if (legacyHost) { fresh.host.name = JSON.parse(legacyHost); }
     } catch (e) { /* ignore malformed legacy data */ }
-    return fresh;
+    return mergeDefaults(fresh);
   }
 
   function mergeDefaults(parsed) {
@@ -271,6 +271,7 @@
           return null;
         }
         return Object.assign({}, item, {
+          id: typeof item.id === 'string' && item.id ? item.id : uid(),
           date: startDate,
           startDate: startDate,
           endDate: endDate,
@@ -635,6 +636,7 @@
   function toast(text, opts) {
     opts = opts || {};
     text = String(text).indexOf('叮，') === 0 ? String(text) : '叮，' + text;
+    text = text.replace(/([。！？；])(?=[^\n])/g, '$1\n');
     var level = notificationLevel(opts.level);
 
     var card = document.createElement('div');
@@ -849,16 +851,17 @@
   /* ---------- 复写表单中的「技能」下拉：与技能数据联动 ---------- */
   function renderCategoryOptions() {
     var prev = el.category.value;
+    var options = '<option value="">不指定技能（无专注技能进展）</option>';
     if (!state.skills.length) {
-      el.category.innerHTML = '<option value="">暂无技能</option>';
+      el.category.innerHTML = options;
       return;
     }
-    el.category.innerHTML = state.skills.map(function (s2) {
+    el.category.innerHTML = options + state.skills.map(function (s2) {
       var lv = levelForHours(effectiveHours(s2));
       return '<option value="' + escapeHtml(s2.name) + '">' + escapeHtml(s2.name) + ' · ' + lv.label + '</option>';
     }).join('');
     var keep = state.skills.filter(function (s2) { return s2.name === prev; })[0];
-    el.category.value = keep ? prev : state.skills[0].name;
+    el.category.value = keep ? prev : '';
   }
 
   /* ---------- 基础属性 ---------- */
@@ -965,7 +968,7 @@
   function entryHoursFor(name) {
     var key = normalize(name);
     var minutes = state.entries.reduce(function (sum, e) {
-      return normalize(e.category) === key ? sum + (e.end - e.start) : sum;
+      return normalize(e.category) === key ? sum + entryDuration(e) : sum;
     }, 0);
     return minutes / 60;
   }
@@ -1245,13 +1248,8 @@
     var category = el.category.value.trim();
     var activity = el.activity.value.trim();
 
-    if (!state.skills.length) {
-      toast('尚未复写任何技能，无法归类本段时间。请先在「复写技能」中添加技能。', { level: 'WARN' });
-      return;
-    }
-
-    if (!startDate || !endDate || !startRaw || !endRaw || !category || !activity) {
-      toast('输入不完整，请补全开始日期、开始时间、结束日期、结束时间、技能和活动内容。', { level: 'WARN' });
+    if (!startDate || !endDate || !startRaw || !endRaw || !activity) {
+      toast('输入不完整，请补全开始日期、开始时间、结束日期、结束时间和作为。', { level: 'WARN' });
       return;
     }
 
@@ -1481,6 +1479,8 @@
         level: e.level,
         message: toClock(e.start) + '-' + toClock(e.end) + ' [' + e.category + '] ' +
           e.activity + '（' + hours(e.end - e.start) + ' h）',
+        category: e.category,
+        activity: e.activity,
         id: e.id
       });
       cursor = Math.max(cursor, e.end);
@@ -1567,12 +1567,19 @@
   }
 
   function showTimelineEntry(entry) {
-    openDetailModal(toClock(entry.start) + '-' + toClock(entry.end) + ' · ' + entry.category,
-      '<div class="timeline-detail-time">' + escapeHtml(state.viewDate + ' ' + toClock(entry.start) + '-' + toClock(entry.end)) + '</div>' +
-      '<div class="detail-row"><span>技能</span><b>' + escapeHtml(entry.category) + '</b></div>' +
-      '<div class="detail-row"><span>活动</span><b>' + escapeHtml(entry.activity) + '</b></div>' +
+    var startParts = stampParts(entryStartStamp(entry));
+    var endParts = stampParts(entryEndStamp(entry));
+    var startText = startParts.date;
+    var endText = endParts.date;
+    var dateText = startText === endText
+      ? '日期：' + escapeHtml(startText)
+      : '开始：' + escapeHtml(startText) + '　结束：' + escapeHtml(endText);
+    openDetailModal(toClock(entry.start) + '-' + toClock(entry.end),
+      '<div class="timeline-detail-time">' + dateText + '</div>' +
+      '<div class="detail-row"><span>技能</span><b>' + escapeHtml(entry.category || '无') + '</b></div>' +
+      '<div class="detail-row"><span>作为</span><b>' + escapeHtml(entry.activity) + '</b></div>' +
       '<div class="detail-row"><span>记录等级</span><b>' + escapeHtml(entry.level || 'INFO') + '</b></div>' +
-      '<div class="detail-row"><span>投入时间</span><b>' + hours(entry.end - entry.start) + ' h</b></div>');
+      '<div class="detail-row"><span>投入时间</span><b>' + hours(entryDuration(entry)) + ' h</b></div>');
   }
 
   function timelineEntryFromTarget(target) {
@@ -1586,7 +1593,7 @@
     if (entry) {
       var displayEntry = byDate(state.viewDate).filter(function (item) { return item.id === entry.id; })[0] || entry;
       timelineZoom.anchor = (displayEntry.start + displayEntry.end) / 2;
-      showTimelineEntry(displayEntry);
+      showTimelineEntry(entry);
     }
   });
 
@@ -1597,7 +1604,7 @@
       event.preventDefault();
       var displayEntry = byDate(state.viewDate).filter(function (item) { return item.id === entry.id; })[0] || entry;
       timelineZoom.anchor = (displayEntry.start + displayEntry.end) / 2;
-      showTimelineEntry(displayEntry);
+      showTimelineEntry(entry);
     }
   });
 
@@ -1686,6 +1693,14 @@
   function renderLog(dateStr) {
     el.logDateLabel.textContent = dateStr;
     el.logView.innerHTML = buildLogLines(dateStr).map(function (l) {
+      if (l.id) {
+        return '<div class="log-line log-entry"><div class="log-entry-content">' +
+          '<div class="log-entry-head"><span class="ts">[' + l.time + ']</span> ' +
+          '<span class="lv-' + l.level + '">[' + l.level + ']</span> ' +
+          '<span class="msg">[' + escapeHtml(l.category || '无') + ']</span></div>' +
+          '<div class="msg log-entry-activity">' + escapeHtml(l.activity) + '</div></div>' +
+          '<button class="del" data-del="' + l.id + '" title="删除该时间段">[x]</button></div>';
+      }
       return '<div class="log-line"><span class="ts">[' + l.time + ']</span> ' +
         '<span class="lv-' + l.level + '">[' + l.level + ']</span> ' +
         '<span class="msg">' + escapeHtml(l.message) + '</span>' +
@@ -1718,8 +1733,7 @@
     el.focusHint.textContent = nextLevel
       ? '技能「' + skill.name + '」当前等级 ' + currentLevel.label +
         '，已累计 ' + h.toFixed(1) + ' h，距离「' + nextLevel.label + '」还差 ' +
-        Math.max(nextLevel.minHours - h, 0).toFixed(1) + ' h' +
-        (nextLevel.locked ? '（该阶段尚未解锁）' : '') + '。'
+        Math.max(nextLevel.minHours - h, 0).toFixed(1) + ' h。'
       : '技能「' + skill.name + '」当前等级 ' + currentLevel.label +
         '，已累计 ' + h.toFixed(1) + ' h，当前阶段已达上限。';
   }
@@ -1732,11 +1746,25 @@
     }
     var map = Object.create(null);
     state.skills.forEach(function (s2) {
-      map[normalize(s2.name)] = { name: s2.name, hours: effectiveHours(s2), known: true };
+      map['skill:' + normalize(s2.name)] = { name: s2.name, hours: effectiveHours(s2), known: true };
     });
     state.entries.forEach(function (e) {
-      var key = normalize(e.category);
-      if (!map[key]) { map[key] = { name: String(e.category).trim(), hours: 0, known: false }; }
+      var category = String(e.category || '').trim();
+      var key;
+      if (category) {
+        key = 'skill:' + normalize(category);
+        if (!map[key]) { map[key] = { name: category, hours: 0, known: false }; }
+      } else {
+        var level = notificationLevel(e.level || 'INFO');
+        var levelLabel = {
+          INFO: '常规',
+          TRAIN: '修行',
+          WARN: '消耗',
+          ERROR: '虚度'
+        }[level] || level;
+        key = 'level:' + level;
+        if (!map[key]) { map[key] = { name: levelLabel, hours: 0, known: false }; }
+      }
       if (!map[key].known) { map[key].hours += entryDuration(e) / 60; }
     });
     var rows = Object.keys(map).sort(function (x, y) { return map[y].hours - map[x].hours; });
@@ -1748,7 +1776,7 @@
     }).join('');
   }
 
-  /* ---------- 面板华丽度 ---------- */
+  /* ---------- 宿主信息完整度 ---------- */
   function renderPolish() {
     var checks = [
       state.host.name && state.host.name !== '未命名修行者',
@@ -1803,7 +1831,7 @@
       : '暂无';
   }
 
-  /* ---------- 手机端：面板完整度进度条吸附显示 ---------- */
+  /* ---------- 手机端：宿主信息完整度进度条吸附显示 ---------- */
   function isNarrowScreen() {
     return window.matchMedia && window.matchMedia('(max-width: 720px)').matches;
   }
@@ -1841,7 +1869,7 @@
   }
 
   function renderProgressFloat(percent) {
-    el.polishFloatLabel.textContent = '面板完整度';
+    el.polishFloatLabel.textContent = '宿主信息完整度';
     el.polishFloatPercent.textContent = percent + '%';
     el.polishFloatFill.style.width = percent + '%';
   }

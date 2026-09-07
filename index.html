@@ -12,7 +12,7 @@
 <div class="toast-stack" id="toastStack" aria-live="polite"></div>
 
 <div class="polish-float hidden" id="polishFloat">
-  <span class="polish-float-label" id="polishFloatLabel">面板完整度</span>
+  <span class="polish-float-label" id="polishFloatLabel">宿主信息完整度</span>
   <div class="progress-bar"><div class="progress-fill alt" id="polishFloatFill"></div></div>
   <span class="polish-float-pct" id="polishFloatPercent">0%</span>
 </div>
@@ -44,7 +44,7 @@
       <div class="attr-row">
         <span class="attr-label">体重</span>
         <div class="attr-number-control">
-          <input type="number" id="attrWeight" placeholder="例如：65" min="0" step="0.1">
+          <input type="number" id="attrWeight" placeholder="" min="0" step="0.1">
           <div class="number-stepper" aria-label="调整体重">
             <button type="button" class="number-stepper-btn" data-weight-step="1" aria-label="增加体重">+</button>
             <button type="button" class="number-stepper-btn" data-weight-step="-1" aria-label="减少体重">−</button>
@@ -53,23 +53,23 @@
         <button type="button" class="attr-plus" data-attr-plus="weight" aria-label="强化体重">+</button>
       </div>
       <div class="attr-row">
-        <span class="attr-label">学历</span>
-        <input type="text" id="attrEdu" placeholder="例如：本科">
+        <span class="attr-label">修为</span>
+        <input type="text" id="attrEdu" placeholder="">
         <button type="button" class="attr-plus" data-attr-plus="edu" aria-label="强化学历">+</button>
       </div>
       <div class="attr-row">
         <span class="attr-label">天赋</span>
-        <input type="text" id="attrTalent" placeholder="例如：专注、记忆力强">
+        <input type="text" id="attrTalent" placeholder="">
         <button type="button" class="attr-plus" data-attr-plus="talent" aria-label="强化天赋">+</button>
       </div>
       <div class="attr-row">
         <span class="attr-label">财产</span>
-        <input type="text" id="attrProperty" placeholder="例如：现金 8000 元">
+        <input type="text" id="attrProperty" placeholder="">
         <button type="button" class="attr-plus" data-attr-plus="property" aria-label="强化财产">+</button>
       </div>
       <div class="attr-row">
         <span class="attr-label">状态</span>
-        <input type="text" id="attrStatus" placeholder="例如：健康，略疲惫">
+        <input type="text" id="attrStatus" placeholder="">
         <button type="button" class="attr-plus" data-attr-plus="status" aria-label="强化状态">+</button>
       </div>
       <div class="attr-row attr-row-link">
@@ -85,7 +85,7 @@
       </div>
       <ul class="ach-list featured" id="achList"></ul>
       <div class="progress-block" id="polishBlock">
-        <div class="progress-title"><span>面板完整度</span><span id="polishPercent">0%</span></div>
+        <div class="progress-title"><span>宿主信息完整度</span><span id="polishPercent">0%</span></div>
         <div class="progress-bar"><div class="progress-fill alt" id="polishFill"></div></div>
       </div>
     </section>
@@ -115,7 +115,7 @@
     <section class="card" id="skillCard" data-hint="技能记录宿主的修行积累，每一次投入都会沉淀为可见进度。">
       <h2>复写技能</h2>
       <form id="skillForm" class="entry-form" autocomplete="off" novalidate>
-        <label class="wide"><span>技能名称</span><input type="text" id="skillName" placeholder="例如：剑术、炼丹" required></label>
+        <label class="wide"><span>技能名称</span><input type="text" id="skillName" placeholder="" required></label>
         <label><span>复写方式</span>
           <select id="skillMode">
             <option value="level">按等级复写</option>
@@ -149,9 +149,9 @@
         <label><span>结束日期</span><input type="date" id="endDate" required></label>
         <label><span>结束时间</span><input type="time" id="endTime" required></label>
         <label><span>技能</span>
-          <select id="category" required></select>
+          <select id="category"></select>
         </label>
-        <label class="wide"><span>做了什么</span><input type="text" id="activity" placeholder="例如：完成今日修行" required></label>
+        <label class="wide"><span>作为</span><textarea id="activity" rows="2" placeholder="今日修行" required></textarea></label>
         <label class="wide"><span>日志等级</span>
           <select id="level">
             <option value="INFO">INFO · 常规</option>
@@ -206,7 +206,7 @@
     </section>
 
     <section class="card" data-hint="技能统计汇总宿主全部复写记录，投入的小时会直接抬升对应技能等级。">
-      <h2>技能统计（全部记录）</h2>
+      <h2>技能 / 日志等级统计（全部记录）</h2>
       <ul class="cat-list" id="catList"></ul>
     </section>
   </section>
@@ -226,8 +226,8 @@
     <section class="card" data-hint="支线任务由宿主自行发布、自行接受、自行提交，一切全凭宿主本心。">
       <h2>发布支线任务</h2>
       <form id="sideQuestForm" class="entry-form" autocomplete="off" novalidate>
-        <label class="wide"><span>任务名称</span><input type="text" id="sideTitle" placeholder="例如：晨读" required></label>
-        <label class="wide"><span>任务描述</span><input type="text" id="sideDesc" placeholder="例如：阅读《道藏》第一卷"></label>
+        <label class="wide"><span>任务名称</span><input type="text" id="sideTitle" placeholder="修行" required></label>
+        <label class="wide"><span>任务描述</span><input type="text" id="sideDesc" placeholder="阅读《道藏》第一卷"></label>
         <label><span>奖励属性点</span><input type="number" id="sideRewardAttr" min="0" max="20" value="1"></label>
         <label><span>奖励贡献点</span><input type="number" id="sideRewardContrib" min="0" max="20" value="1"></label>
         <button type="submit" class="btn wide">发布支线任务</button>

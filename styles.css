@@ -204,7 +204,7 @@ label.inline, .entry-form label {
   margin-bottom: 10px;
 }
 
-input, select {
+input, select, textarea {
   background: #06121b;
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -214,6 +214,19 @@ input, select {
   font-size: 13px;
   width: 100%;
 }
+
+textarea {
+  min-height: 58px;
+  line-height: 1.5;
+  resize: vertical;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) rgba(28, 59, 77, 0.28);
+}
+
+textarea::-webkit-scrollbar { width: 8px; }
+textarea::-webkit-scrollbar-track { background: rgba(28, 59, 77, 0.28); border-radius: 4px; }
+textarea::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+textarea::-webkit-scrollbar-thumb:hover { background: var(--cyan); }
 
 .custom-select { position: relative; width: 100%; }
 .custom-select-native {
@@ -529,7 +542,7 @@ input:focus, select:focus {
 .modal-box input { margin-top: 10px; }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
 
-/* ---------- 手机端：面板完整度吸附条 ---------- */
+/* ---------- 手机端：宿主信息完整度吸附条 ---------- */
 .polish-float {
   position: fixed;
   left: 50%;
@@ -633,12 +646,21 @@ input:focus, select:focus {
 .skill-head .attr-plus { width: 22px; height: 22px; font-size: 12px; }
 .skill-head .attr-plus { justify-self: end; }
 
-.detail-modal-box { width: min(92vw, 480px); }
-.detail-modal-body { max-height: 50vh; overflow: auto; }
-.detail-row { display: flex; align-items: baseline; gap: 12px; border-bottom: 1px solid var(--line); padding: 8px 0; }
+.detail-modal-box { width: min(94vw, 620px); }
+.detail-modal-body {
+  max-height: 58vh;
+  overflow: auto;
+  padding-right: 14px;
+  scrollbar-gutter: stable;
+}
+.detail-modal-body::-webkit-scrollbar { width: 8px; }
+.detail-modal-body::-webkit-scrollbar-track { background: rgba(28, 59, 77, 0.28); border-radius: 4px; }
+.detail-modal-body::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+.detail-modal-body::-webkit-scrollbar-thumb:hover { background: var(--cyan); }
+.detail-row { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: start; gap: 12px; border-bottom: 1px solid var(--line); padding: 8px 0; }
 .detail-row:last-child { border-bottom: 0; }
-.detail-row > span { min-width: 0; flex: 1; color: var(--text); }
-.detail-row > b { flex: 0 0 auto; color: var(--gold); white-space: nowrap; }
+.detail-row > span { min-width: 0; color: var(--text); }
+.detail-row > b { min-width: 0; color: var(--gold); white-space: pre-wrap; overflow-wrap: anywhere; text-align: right; }
 .detail-row small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
 
 .empty { color: var(--muted); font-size: 12px; list-style: none; }
@@ -787,6 +809,8 @@ input:focus, select:focus {
   margin-bottom: 8px;
   color: var(--cyan);
   font-size: 12px;
+  line-height: 1.6;
+  white-space: normal;
 }
 
 .slot.INFO { background: #2f7fa5; }
@@ -825,6 +849,10 @@ input:focus, select:focus {
 .log-line .lv-SYSTEM { color: #b98bff; }
 .log-line .lv-REWARD { color: var(--gold); }
 .log-line .msg { color: var(--text); }
+.log-entry { display: flex; align-items: flex-start; gap: 12px; }
+.log-entry-content { min-width: 0; flex: 1 1 auto; }
+.log-entry-head { min-width: 0; }
+.log-entry-activity { margin-top: 2px; white-space: pre-wrap; }
 .notice-line { border-left: 3px solid var(--line); padding-left: 8px; }
 .notice-info { border-left-color: var(--cyan); }
 .notice-train { border-left-color: var(--green); }
@@ -839,8 +867,9 @@ input:focus, select:focus {
 .notice-reward .msg { color: var(--gold); }
 
 .log-line .del {
-  position: static;
-  margin-left: 4px;
+  flex: 0 0 auto;
+  margin: 0;
+  align-self: flex-start;
 }
 
 .log-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
@@ -917,6 +946,7 @@ input:focus, select:focus {
   border-radius: 4px;
   font-size: 13px;
   line-height: 1.6;
+  white-space: pre-line;
   text-align: center;
   box-shadow: 0 0 16px rgba(79, 227, 255, 0.35);
   opacity: 0;
