@@ -102,6 +102,8 @@
   var toastQueue = [];
   var toastTimer = null;
   var toastNextStartAt = 0;
+  var backupDownloadUrl = null;
+  var backupCopyText = '';
 
   var el = {};
   [
@@ -112,6 +114,7 @@
     'nameModal', 'nameInput', 'nameConfirm', 'nameCancel',
     'confirmModal', 'confirmMessage', 'confirmCancel', 'confirmAccept',
     'detailModal', 'detailTitle', 'detailBody', 'detailClose', 'detailFillBlank', 'detailAchievementToggle',
+    'detailCopyBackup', 'detailDownloadBackup',
     'focusLabel', 'focusPercent', 'focusFill', 'focusHint',
     'attrWeight', 'attrEdu', 'attrTalent', 'attrProperty', 'attrStatus',
     'polishPercent', 'polishFill',
@@ -1249,6 +1252,10 @@
   function openDetailModal(title, body) {
     el.detailTitle.textContent = title;
     el.detailBody.innerHTML = body;
+    el.detailCopyBackup.classList.add('hidden');
+    el.detailDownloadBackup.classList.add('hidden');
+    el.detailDownloadBackup.removeAttribute('href');
+    el.detailDownloadBackup.removeAttribute('download');
     el.detailFillBlank.classList.add('hidden');
     el.detailAchievementToggle.classList.add('hidden');
     el.detailAchievementToggle.removeAttribute('data-achievement-hide');
@@ -1256,9 +1263,20 @@
     el.detailModal.classList.remove('hidden');
   }
 
-  function closeDetailModal() { el.detailModal.classList.add('hidden'); }
+  function closeDetailModal() {
+    el.detailModal.classList.add('hidden');
+    if (backupDownloadUrl) {
+      URL.revokeObjectURL(backupDownloadUrl);
+      backupDownloadUrl = null;
+    }
+    backupCopyText = '';
+  }
 
   el.detailClose.addEventListener('click', closeDetailModal);
+  el.detailCopyBackup.addEventListener('click', copyBackupJson);
+  el.detailDownloadBackup.addEventListener('click', function () {
+    toast('系统已触发数据下载。', { level: 'SYSTEM' });
+  });
   el.detailModal.addEventListener('click', function (event) {
     if (event.target === el.detailModal) { closeDetailModal(); }
   });
@@ -1632,74 +1650,50 @@
   function exportDataBackup() {
     var filename = 'tiandaochouqin-' + todayStr() + '.json';
     var json = JSON.stringify(state, null, 2);
-    var blob;
     try {
-      blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+      showExportModal(filename, json, new Blob([json], { type: 'application/json;charset=utf-8' }));
     } catch (e) {
       console.error('[export] FAILED_TO_CREATE_BLOB', e);
       toast('当前浏览器无法生成备份文件。', { level: 'ERROR' });
       return;
     }
-
-    if (navigator.share && navigator.canShare && window.File) {
-      try {
-        var sharedFile = new File([blob], filename, { type: 'application/json' });
-        if (navigator.canShare({ files: [sharedFile] })) {
-          navigator.share({ title: '天道酬勤数据备份', files: [sharedFile] }).then(function () {
-            toast('系统已将备份交给分享模块。', { level: 'SYSTEM' });
-          }).catch(function (error) {
-            if (error && error.name !== 'AbortError') {
-              downloadBlobFallback(blob, filename, json);
-            }
-          });
-          return;
-        }
-      } catch (e) { /* fall through to the download APIs below */ }
-    }
-
-    downloadBlobFallback(blob, filename, json);
   }
 
-  function downloadBlobFallback(blob, filename, json) {
-    if (navigator.msSaveOrOpenBlob) {
-      navigator.msSaveOrOpenBlob(blob, filename);
-      toast('系统已生成备份文件，下载已开始。', { level: 'SYSTEM' });
-      return;
+  function showExportModal(filename, json, blob) {
+    if (backupDownloadUrl) {
+      URL.revokeObjectURL(backupDownloadUrl);
+      backupDownloadUrl = null;
     }
-
-    var userAgent = navigator.userAgent || '';
-    var isMobileBrowser = /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent) ||
-      (/Macintosh/i.test(userAgent) && navigator.maxTouchPoints > 1);
-    if (isMobileBrowser) {
-      openBackupPage(json);
-      return;
-    }
-
+    backupCopyText = json;
+    openDetailModal('系统数据', '<p class="hint backup-hint">系统已显示运行数据。宿主可复制内容，或直接下载。</p>' +
+      '<pre class="backup-json">' + escapeHtml(json) + '</pre>');
+    el.detailCopyBackup.classList.remove('hidden');
     if (window.URL && URL.createObjectURL) {
-      var url = URL.createObjectURL(blob);
-      var link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      link.rel = 'noopener';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
-      toast('系统已生成备份文件，下载已开始。', { level: 'SYSTEM' });
-      return;
+      backupDownloadUrl = URL.createObjectURL(blob);
+      el.detailDownloadBackup.href = backupDownloadUrl;
+      el.detailDownloadBackup.download = filename;
+      el.detailDownloadBackup.classList.remove('hidden');
     }
-
-    openBackupPage(json);
   }
 
-  function openBackupPage(json) {
-    var dataUrl = 'data:application/json;charset=utf-8,' + encodeURIComponent(json);
-    var fallbackWindow = window.open(dataUrl, '_blank');
-    if (fallbackWindow) {
-      toast('备份数据已展开，请宿主长按保存或复制 JSON。', { level: 'WARN' });
-    } else {
-      toast('浏览器阻止了备份页面，请允许打开新页面后重试。', { level: 'ERROR' });
+  function copyBackupJson() {
+    function copied() { toast('系统数据已复制到剪贴板。', { level: 'SYSTEM' }); }
+    function failed() { toast('复制失败，请在弹窗中手动选择 JSON。', { level: 'WARN' }); }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(backupCopyText).then(copied, failed);
+      return;
     }
+    var textarea = document.createElement('textarea');
+    textarea.value = backupCopyText;
+    textarea.setAttribute('readonly', 'readonly');
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    var copiedByCommand = false;
+    try { copiedByCommand = document.execCommand('copy'); } catch (e) { copiedByCommand = false; }
+    document.body.removeChild(textarea);
+    if (copiedByCommand) { copied(); } else { failed(); }
   }
 
   el.exportData.addEventListener('click', exportDataBackup);
@@ -1717,7 +1711,7 @@
           throw new Error('导入数据必须是对象。');
         }
         var importedState = mergeDefaults(parsed);
-        var confirmed = openConfirmModal('确认导入数据并覆盖当前面板数据？', function () {
+        var confirmed = openConfirmModal('确认导入数据并覆盖当前系统数据？', function () {
           clearQuestUpgradeTimers();
           state = importedState;
           persist();

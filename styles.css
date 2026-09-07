@@ -356,6 +356,7 @@ input:focus, select:focus {
 }
 
 .btn:hover { background: #17546f; }
+#detailDownloadBackup { text-decoration: none; }
 .btn.ghost { background: transparent; border-color: var(--line); color: var(--muted); }
 .btn.ghost:hover { color: var(--cyan); border-color: var(--cyan); }
 .btn.danger:hover { color: var(--red); border-color: var(--red); }
@@ -674,6 +675,18 @@ input:focus, select:focus {
   padding-right: 14px;
   scrollbar-gutter: stable;
 }
+.backup-json {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: rgba(8, 20, 30, 0.72);
+  color: var(--text);
+  font: 12px/1.55 Consolas, "Courier New", monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.backup-hint { margin-bottom: 12px; }
 .detail-modal-body::-webkit-scrollbar { width: 8px; }
 .detail-modal-body::-webkit-scrollbar-track { background: rgba(28, 59, 77, 0.28); border-radius: 4px; }
 .detail-modal-body::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
@@ -964,7 +977,7 @@ input:focus, select:focus {
   top: 12px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 50;
+  z-index: 110;
   height: calc(100vh - 24px);
   width: min(92vw, 420px);
   pointer-events: none;
