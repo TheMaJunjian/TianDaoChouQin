@@ -69,6 +69,7 @@
   function defaultState() {
     return {
       entries: [],
+      entryCategory: '',
       focus: '',
       host: {
         name: '未命名修行者',
@@ -302,6 +303,7 @@
         });
       }).filter(function (item) { return item !== null; }) : base.entries;
     });
+    safe(function () { merged.entryCategory = typeof parsed.entryCategory === 'string' ? parsed.entryCategory : base.entryCategory; });
     safe(function () { merged.focus = typeof parsed.focus === 'string' ? parsed.focus : base.focus; });
     safe(function () { merged.host = Object.assign({}, base.host, (parsed.host && typeof parsed.host === 'object') ? parsed.host : {}); });
     safe(function () {
@@ -899,10 +901,14 @@
 
   /* ---------- 复写表单中的「技能」下拉：与技能数据联动 ---------- */
   function renderCategoryOptions() {
-    var prev = el.category.value;
+    var prev = state.entryCategory || el.category.value;
     var options = '<option value="">不指定技能（无专注技能进展）</option>';
     if (!state.skills.length) {
       el.category.innerHTML = options;
+      if (state.entryCategory) {
+        state.entryCategory = '';
+        persist();
+      }
       return;
     }
     el.category.innerHTML = options + state.skills.map(function (s2) {
@@ -911,7 +917,16 @@
     }).join('');
     var keep = state.skills.filter(function (s2) { return s2.name === prev; })[0];
     el.category.value = keep ? prev : '';
+    if (state.entryCategory !== el.category.value) {
+      state.entryCategory = el.category.value;
+      persist();
+    }
   }
+
+  el.category.addEventListener('change', function () {
+    state.entryCategory = el.category.value;
+    persist();
+  });
 
   /* ---------- 基础属性 ---------- */
   function normalizeWeight(value) {
@@ -1323,14 +1338,25 @@
     var category = el.category.value.trim();
     var activity = el.activity.value.trim();
 
-    if (!startDate || !endDate || !startRaw || !endRaw || !activity) {
-      toast('输入不完整，请补全开始日期、开始时间、结束日期、结束时间和作为。', { level: 'WARN' });
+    if (!startDate || !startRaw || !activity) {
+      toast('输入不完整，请补全开始日期、开始时间和作为。', { level: 'WARN' });
       return;
     }
 
     var start = toMinutes(startRaw);
-    var end = toMinutes(endRaw);
     var startStamp = dateTimeStamp(startDate, start);
+    if (!endRaw) {
+      var latest = stampParts(Math.max(currentStamp(), startStamp + 1));
+      endDate = latest.date;
+      endRaw = toClock(latest.minutes);
+      el.endDate.value = endDate;
+      el.endTime.value = endRaw;
+    }
+    if (!endDate) {
+      toast('输入不完整，请补全结束日期。', { level: 'WARN' });
+      return;
+    }
+    var end = toMinutes(endRaw);
     var endStamp = dateTimeStamp(endDate, end);
 
     if (endStamp <= startStamp) {
