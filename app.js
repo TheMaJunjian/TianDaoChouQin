@@ -127,8 +127,8 @@
     'level', 'prevDay', 'nextDay', 'viewDate', 'timeline', 'timelineRuler', 'timelineStartCursor', 'timelineEndCursor', 'timelineAxis', 'coverageFill',
     'coverageHint', 'logDateLabel', 'logView', 'copyLog', 'exportData',
     'importBtn', 'importFile', 'resetAll', 'clearDay', 'catList',
-    'mainQuestBody', 'sideQuestForm', 'sideTitle', 'sideDesc', 'sideRewardAttr',
-    'sideRewardContrib', 'sideQuestList', 'hiddenSideQuestsBlock', 'hiddenSideQuestToggle', 'hiddenSideQuestList', 'noticeView', 'clearNotices',
+    'mainQuestBody', 'sideQuestForm', 'sideTitle', 'sideDesc', 'sideRewardAttr', 'sideRewardAchievement',
+    'sideQuestList', 'hiddenSideQuestsBlock', 'hiddenSideQuestToggle', 'hiddenSideQuestList', 'noticeView', 'clearNotices',
     'eggMask', 'eggCount', 'eggClose', 'eggPause', 'eggBoost'
   ].forEach(function (id) {
     el[id] = document.getElementById(id);
@@ -356,13 +356,14 @@
       merged.quests.side = Array.isArray(merged.quests.side) ? merged.quests.side.filter(function (item) {
         return item && typeof item === 'object' && typeof item.title === 'string' &&
           ['open', 'accepted', 'done'].indexOf(item.status) >= 0 &&
-          Number.isFinite(Number(item.rewardAttr)) && Number.isFinite(Number(item.rewardContrib));
+          Number.isFinite(Number(item.rewardAttr)) &&
+          Number.isFinite(Number(item.rewardAchievement !== undefined ? item.rewardAchievement : item.rewardContrib));
       }).map(function (item) {
         return Object.assign({}, item, {
           id: typeof item.id === 'string' && item.id ? item.id : uid(),
           // 奖励允许为负数，用于记录任务带来的点数扣减。
           rewardAttr: Math.floor(Number(item.rewardAttr)),
-          rewardContrib: Math.floor(Number(item.rewardContrib)),
+          rewardAchievement: Math.floor(Number(item.rewardAchievement !== undefined ? item.rewardAchievement : item.rewardContrib)),
           hidden: item.hidden === true
         });
       }) : [];
@@ -539,7 +540,7 @@
   /* 简单校验签名：用于检测宿主是否绕过面板直接改写 localStorage 数值。 */
   function computeSignature() {
     var sideRewardSum = state.quests.side.reduce(function (sum, q) {
-      return sum + (q.status === 'done' ? q.rewardAttr + q.rewardContrib : 0);
+      return sum + (q.status === 'done' ? q.rewardAttr + q.rewardAchievement : 0);
     }, 0);
     var achPointSum = state.achievements.reduce(function (sum, a) { return sum + a.points; }, 0);
     var skillHourSum = state.skills.reduce(function (sum, s) { return sum + s.hours; }, 0);
@@ -2617,17 +2618,17 @@
     var desc = el.sideDesc.value.trim();
     // 奖励允许为负数，用于记录任务带来的点数扣减。
     var rewardAttr = Math.floor(Number(el.sideRewardAttr.value) || 0);
-    var rewardContrib = Math.floor(Number(el.sideRewardContrib.value) || 0);
+    var rewardAchievement = Math.floor(Number(el.sideRewardAchievement.value) || 0);
     state.quests.side.push({
       id: uid(), title: title, desc: desc,
-      rewardAttr: rewardAttr, rewardContrib: rewardContrib,
+      rewardAttr: rewardAttr, rewardAchievement: rewardAchievement,
       status: 'open'
     });
     persist();
     toast('宿主已发布支线任务【' + title + '】。', { level: 'SYSTEM' });
     el.sideQuestForm.reset();
     el.sideRewardAttr.value = 1;
-    el.sideRewardContrib.value = 1;
+    el.sideRewardAchievement.value = 1;
     // 发布后立即刷新「已发布支线任务」，不需要切换标签页。
     refreshAll();
   });
@@ -2648,12 +2649,14 @@
     } else if (target.hasAttribute('data-submit') && quest.status === 'accepted') {
       quest.status = 'done';
       state.points.attribute += quest.rewardAttr;
-      state.points.contribution += quest.rewardContrib;
+      var contributionReward = quest.rewardAttr + quest.rewardAchievement;
+      state.points.contribution += contributionReward;
+      state.points.achievement += quest.rewardAchievement;
       // 支线任务完成即成就：直接结算为一枚成就与对应成就点。
-      var achPoints = quest.rewardAttr + quest.rewardContrib;
+      var achPoints = quest.rewardAchievement;
       var attrDelta = quest.rewardAttr > 0 ? '+' + quest.rewardAttr : String(quest.rewardAttr);
-      var contribDelta = quest.rewardContrib > 0 ? '+' + quest.rewardContrib : String(quest.rewardContrib);
-      var achievementDelta = achPoints > 0 ? '+' + achPoints : String(achPoints);
+      var achievementDelta = quest.rewardAchievement > 0 ? '+' + quest.rewardAchievement : String(quest.rewardAchievement);
+      var contributionDelta = contributionReward > 0 ? '+' + contributionReward : String(contributionReward);
       state.achievements.push({
         id: uid(),
         name: quest.title,
@@ -2661,10 +2664,9 @@
         desc: quest.desc || '完成支线任务结算',
         questId: quest.id
       });
-      state.points.achievement += achPoints;
       persist();
       toast('支线任务【' + quest.title + '】已完成，属性点 ' + attrDelta +
-        '，贡献点 ' + contribDelta + '。', { level: 'REWARD' });
+        '，成就点 ' + achievementDelta + '，贡献点 ' + contributionDelta + '。', { level: 'REWARD' });
       toast('该支线任务已记入成就簿【' + quest.title + '】，成就点 ' + achievementDelta + '。', { level: 'REWARD' });
     } else if (target.hasAttribute('data-del-quest')) {
       openConfirmModal('确认删除支线任务【' + quest.title + '】？已获得的奖励和成就不会撤销。', function () {
@@ -2704,15 +2706,17 @@
     } else if (target.hasAttribute('data-submit') && quest.status === 'accepted') {
       quest.status = 'done';
       state.points.attribute += quest.rewardAttr;
-      state.points.contribution += quest.rewardContrib;
-      var achPoints = quest.rewardAttr + quest.rewardContrib;
+      var contributionReward = quest.rewardAttr + quest.rewardAchievement;
+      state.points.contribution += contributionReward;
+      state.points.achievement += quest.rewardAchievement;
+      var achPoints = quest.rewardAchievement;
       state.achievements.push({
         id: uid(), name: quest.title, points: achPoints,
         desc: quest.desc || '完成支线任务结算', questId: quest.id
       });
-      state.points.achievement += achPoints;
       persist();
-      toast('支线任务【' + quest.title + '】已完成。', { level: 'REWARD' });
+      toast('支线任务【' + quest.title + '】已完成，属性点 +' + quest.rewardAttr +
+        '，成就点 +' + quest.rewardAchievement + '，贡献点 +' + contributionReward + '。', { level: 'REWARD' });
     } else if (target.hasAttribute('data-del-quest')) {
       openConfirmModal('确认删除支线任务【' + quest.title + '】？已获得的奖励和成就不会撤销。', function () {
         state.quests.side = state.quests.side.filter(function (q) { return q.id !== id; });
@@ -2754,7 +2758,8 @@
   function renderSideQuestItem(q, isHidden) {
       var statusLabel = { open: '未接受', accepted: '进行中', done: '已完成' }[q.status];
       var actions = '';
-      var reward = '奖励：属性点 +' + q.rewardAttr + ' ／ 贡献点 +' + q.rewardContrib;
+      var reward = '奖励：属性点 +' + q.rewardAttr + ' ／ 成就点 +' + q.rewardAchievement +
+        ' ／ 贡献点 +' + (q.rewardAttr + q.rewardAchievement);
       if (q.status === 'open') {
         actions = '<button type="button" class="btn ghost" data-accept="' + escapeHtml(q.id) + '">接受任务</button>';
       } else if (q.status === 'accepted') {
