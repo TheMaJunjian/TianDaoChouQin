@@ -1261,6 +1261,7 @@
     el.detailAchievementToggle.removeAttribute('data-achievement-hide');
     el.detailAchievementToggle.removeAttribute('data-achievement-show');
     el.detailModal.classList.remove('hidden');
+    el.detailClose.focus();
   }
 
   function closeDetailModal() {
@@ -1647,6 +1648,15 @@
   });
 
   /* ---------- 数据导入 / 导出 ---------- */
+  function isImportableState(parsed) {
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
+      Array.isArray(parsed.entries) && parsed.host && typeof parsed.host === 'object' &&
+      !Array.isArray(parsed.host) && Array.isArray(parsed.skills) &&
+      parsed.points && typeof parsed.points === 'object' && !Array.isArray(parsed.points) &&
+      parsed.quests && typeof parsed.quests === 'object' && !Array.isArray(parsed.quests) &&
+      Array.isArray(parsed.notifications);
+  }
+
   function exportDataBackup() {
     var filename = 'tiandaochouqin-' + todayStr() + '.json';
     var json = JSON.stringify(state, null, 2);
@@ -1678,7 +1688,7 @@
 
   function copyBackupJson() {
     function copied() { toast('系统数据已复制到剪贴板。', { level: 'SYSTEM' }); }
-    function failed() { toast('复制失败，请在弹窗中手动选择 JSON。', { level: 'WARN' }); }
+    function failed() { toast('复制失败，请在弹窗中手动选择系统数据。', { level: 'WARN' }); }
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(backupCopyText).then(copied, failed);
       return;
@@ -1707,8 +1717,8 @@
       var previousState = state;
       try {
         var parsed = JSON.parse(String(reader.result));
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          throw new Error('导入数据必须是对象。');
+        if (!isImportableState(parsed)) {
+          throw new Error('导入数据不是有效的系统数据。');
         }
         var importedState = mergeDefaults(parsed);
         var confirmed = openConfirmModal('确认导入数据并覆盖当前系统数据？', function () {
@@ -1725,6 +1735,12 @@
         state = previousState;
         toast('导入文件格式异常，数据未变更。', { level: 'ERROR' });
       }
+    };
+    reader.onerror = function () {
+      toast('导入文件读取失败，数据未变更。', { level: 'ERROR' });
+    };
+    reader.onabort = function () {
+      toast('导入文件读取已取消，数据未变更。', { level: 'WARN' });
     };
     reader.readAsText(file);
     el.importFile.value = '';
