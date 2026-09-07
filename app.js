@@ -86,6 +86,14 @@
       },
       notifications: [],
       noticeSeenCount: 0,
+      ui: {
+        skillListCollapsed: false,
+        hiddenSkillListCollapsed: false,
+        hiddenAchievementListCollapsed: false,
+        hiddenSideQuestListCollapsed: false,
+        achievementListCollapsed: false,
+        logScrollTop: 0
+      },
       viewDate: todayStr(),
       firstRun: true
     };
@@ -106,6 +114,29 @@
   var toastNextStartAt = 0;
   var backupDownloadUrl = null;
   var backupCopyText = '';
+
+  function syncCollapseState() {
+    var ui = state.ui || {};
+    skillListCollapsed = ui.skillListCollapsed === true;
+    hiddenSkillListCollapsed = ui.hiddenSkillListCollapsed === true;
+    hiddenAchievementListCollapsed = ui.hiddenAchievementListCollapsed === true;
+    hiddenSideQuestListCollapsed = ui.hiddenSideQuestListCollapsed === true;
+    achievementListCollapsed = ui.achievementListCollapsed === true;
+  }
+
+  function persistCollapseState() {
+    state.ui = {
+      skillListCollapsed: skillListCollapsed,
+      hiddenSkillListCollapsed: hiddenSkillListCollapsed,
+      hiddenAchievementListCollapsed: hiddenAchievementListCollapsed,
+      hiddenSideQuestListCollapsed: hiddenSideQuestListCollapsed,
+      achievementListCollapsed: achievementListCollapsed,
+      logScrollTop: state.ui.logScrollTop
+    };
+    persist();
+  }
+
+  syncCollapseState();
 
   var el = {};
   [
@@ -389,6 +420,15 @@
         ? Math.max(0, Math.min(seenCount, merged.notifications.length))
         : 0;
     });
+    safe(function () {
+      var parsedUi = parsed.ui && typeof parsed.ui === 'object' ? parsed.ui : {};
+      ['skillListCollapsed', 'hiddenSkillListCollapsed', 'hiddenAchievementListCollapsed',
+        'hiddenSideQuestListCollapsed', 'achievementListCollapsed'].forEach(function (key) {
+        merged.ui[key] = parsedUi[key] === true;
+      });
+      var logScrollTop = Number(parsedUi.logScrollTop);
+      merged.ui.logScrollTop = Number.isFinite(logScrollTop) ? Math.max(0, logScrollTop) : base.ui.logScrollTop;
+    });
     safe(function () { merged.viewDate = typeof parsed.viewDate === 'string' ? parsed.viewDate : todayStr(); });
     merged.firstRun = false;
     return merged;
@@ -469,6 +509,9 @@
     if (!statesEqual(state.noticeSeenCount, baseline.noticeSeenCount)) {
       merged.noticeSeenCount = state.noticeSeenCount;
     }
+    Object.keys(state.ui).forEach(function (key) {
+      if (!statesEqual(state.ui[key], baseline.ui[key])) { merged.ui[key] = state.ui[key]; }
+    });
     return merged;
   }
 
@@ -512,6 +555,7 @@
       if (!event.newValue) {
         state = defaultState();
         persistedSnapshot = cloneState(state);
+        syncCollapseState();
         fullRender();
         return;
       }
@@ -944,6 +988,7 @@
     document.querySelectorAll('.tab-panel').forEach(function (p) {
       p.classList.toggle('active', p.getAttribute('data-tab-panel') === tab);
     });
+    if (tab === 'timeline') { el.logView.scrollTop = state.ui.logScrollTop; }
     updatePolishFloat();
     if (tab === 'quest') { onOpenQuestTab(); }
     if (tab === 'notice') {
@@ -1306,16 +1351,19 @@
   el.hiddenSkillToggle.addEventListener('click', function () {
     hiddenSkillListCollapsed = !hiddenSkillListCollapsed;
     renderHiddenSkillToggle();
+    persistCollapseState();
   });
 
   el.skillListToggle.addEventListener('click', function () {
     skillListCollapsed = !skillListCollapsed;
     renderSkillListToggle();
+    persistCollapseState();
   });
 
   el.achListToggle.addEventListener('click', function () {
     achievementListCollapsed = !achievementListCollapsed;
     renderAchievementListToggle();
+    persistCollapseState();
   });
 
   el.attrSkillSummary.addEventListener('click', function () {
@@ -1368,6 +1416,7 @@
   el.hiddenAchievementToggle.addEventListener('click', function () {
     hiddenAchievementListCollapsed = !hiddenAchievementListCollapsed;
     renderHiddenAchievementToggle();
+    persistCollapseState();
   });
 
   function openAchievementDetail(achievementId) {
@@ -1862,6 +1911,7 @@
         var confirmed = openConfirmModal('确认导入数据并覆盖当前系统数据？', function () {
           clearQuestUpgradeTimers();
           state = importedState;
+          syncCollapseState();
           persist(true);
           toast('宿主数据导入成功，面板已重新同步。', { level: 'SYSTEM' });
           fullRender();
@@ -1888,6 +1938,7 @@
     openConfirmModal('确认重置全部本地数据？此操作不可撤销，请宿主先导出备份。', function () {
       clearQuestUpgradeTimers();
       state = defaultState();
+      syncCollapseState();
       persist(true);
       toast('系统已解绑，并恢复为初始状态。', { level: 'SYSTEM' });
       fullRender();
@@ -2284,7 +2335,18 @@
         (l.id ? ' <button class="del" data-del="' + l.id + '" title="删除该时间段">[x]</button>' : '') +
         '</div>';
     }).join('');
+    el.logView.scrollTop = state.ui.logScrollTop;
   }
+
+  el.logView.addEventListener('scroll', function () {
+    if (!el.logView.clientHeight) { return; }
+    state.ui.logScrollTop = Math.max(0, el.logView.scrollTop);
+    if (saveTimer) { window.clearTimeout(saveTimer); }
+    saveTimer = window.setTimeout(function () {
+      saveTimer = null;
+      persist();
+    }, 150);
+  }, { passive: true });
 
   function renderFocus() {
     renderFocusOptions();
@@ -2732,6 +2794,7 @@
   el.hiddenSideQuestToggle.addEventListener('click', function () {
     hiddenSideQuestListCollapsed = !hiddenSideQuestListCollapsed;
     renderHiddenSideQuestToggle();
+    persistCollapseState();
   });
 
   function renderSideQuests() {
