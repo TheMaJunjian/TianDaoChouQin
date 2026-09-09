@@ -285,26 +285,38 @@
       var raw = window.localStorage.getItem(STORAGE_KEY);
       if (raw) {
         var parsed = JSON.parse(raw);
-        return mergeDefaults(parsed);
+        if (!isImportableState(parsed)) { throw new Error('invalid primary state'); }
+        var primaryState = mergeDefaults(parsed);
+        if (!preservesImportedArrays(parsed, primaryState)) { throw new Error('invalid primary state'); }
+        return primaryState;
       }
     } catch (e) { /* fall through to legacy / default */ }
 
     try {
       var backupRaw = window.localStorage.getItem(STORAGE_BACKUP_KEY);
-      if (backupRaw) { return mergeDefaults(JSON.parse(backupRaw)); }
+      if (backupRaw) {
+        var backupState = JSON.parse(backupRaw);
+        if (!isImportableState(backupState)) { throw new Error('invalid backup state'); }
+        var normalizedBackup = mergeDefaults(backupState);
+        if (!preservesImportedArrays(backupState, normalizedBackup)) { throw new Error('invalid backup state'); }
+        return normalizedBackup;
+      }
     } catch (e) { /* fall through to legacy / default */ }
 
     // 兼容旧版本（v1）数据，做一次性迁移
     var fresh = defaultState();
+    var hasLegacyState = false;
     try {
       var legacyEntries = window.localStorage.getItem(LEGACY_ENTRIES_KEY);
       var legacyFocus = window.localStorage.getItem(LEGACY_FOCUS_KEY);
       var legacyHost = window.localStorage.getItem(LEGACY_NAME_KEY);
-      if (legacyEntries) { fresh.entries = JSON.parse(legacyEntries); }
-      if (legacyFocus) { fresh.focus = JSON.parse(legacyFocus); }
-      if (legacyHost) { fresh.host.name = JSON.parse(legacyHost); }
+      if (legacyEntries) { fresh.entries = JSON.parse(legacyEntries); hasLegacyState = true; }
+      if (legacyFocus) { fresh.focus = JSON.parse(legacyFocus); hasLegacyState = true; }
+      if (legacyHost) { fresh.host.name = JSON.parse(legacyHost); hasLegacyState = true; }
     } catch (e) { /* ignore malformed legacy data */ }
-    return mergeDefaults(fresh);
+    var migrated = mergeDefaults(fresh);
+    migrated.firstRun = !hasLegacyState;
+    return migrated;
   }
 
   function mergeDefaults(parsed) {
@@ -323,9 +335,10 @@
         var endDate = typeof item.endDate === 'string' ? item.endDate : startDate;
         var start = Number(item.start);
         var end = Number(item.end);
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate) ||
+        if (!isValidDateString(startDate) || !isValidDateString(endDate) ||
           !Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start >= DAY_MINUTES ||
-          end < 0 || end > DAY_MINUTES || dateTimeStamp(endDate, end) <= dateTimeStamp(startDate, start)) {
+          end < 0 || end > DAY_MINUTES || start !== Math.floor(start) || end !== Math.floor(end) ||
+          dateTimeStamp(endDate, end) <= dateTimeStamp(startDate, start)) {
           return null;
         }
         return Object.assign({}, item, {
@@ -429,7 +442,9 @@
       var logScrollTop = Number(parsedUi.logScrollTop);
       merged.ui.logScrollTop = Number.isFinite(logScrollTop) ? Math.max(0, logScrollTop) : base.ui.logScrollTop;
     });
-    safe(function () { merged.viewDate = typeof parsed.viewDate === 'string' ? parsed.viewDate : todayStr(); });
+    safe(function () {
+      merged.viewDate = isValidDateString(parsed.viewDate) ? parsed.viewDate : todayStr();
+    });
     merged.firstRun = false;
     return merged;
   }
@@ -651,7 +666,10 @@
 
   function dateIndex(dateStr) {
     var p = dateStr.split('-');
-    return Math.floor(Date.UTC(Number(p[0]), Number(p[1]) - 1, Number(p[2])) / 86400000);
+    var d = new Date(0);
+    d.setUTCHours(0, 0, 0, 0);
+    d.setUTCFullYear(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+    return Math.floor(d.getTime() / 86400000);
   }
 
   function dateFromIndex(index) {
@@ -661,6 +679,18 @@
 
   function dateTimeStamp(dateStr, minutes) {
     return dateIndex(dateStr) * DAY_MINUTES + minutes;
+  }
+
+  function isValidDateString(dateStr) {
+    if (typeof dateStr !== 'string') { return false; }
+    var match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+    if (!match) { return false; }
+    var d = new Date(0);
+    d.setUTCHours(0, 0, 0, 0);
+    d.setUTCFullYear(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    return d.getUTCFullYear() === Number(match[1]) &&
+      d.getUTCMonth() === Number(match[2]) - 1 &&
+      d.getUTCDate() === Number(match[3]);
   }
 
   function entryStartStamp(entry) {
@@ -766,12 +796,10 @@
 
   function applyEntryDefaults() {
     var startStamp = nextEntryStartStamp();
-    var nowStamp = currentStamp();
     var start = stampParts(startStamp);
-    var end = stampParts(Math.max(nowStamp, startStamp));
     el.startDate.value = start.date;
     el.startTime.value = toClock(start.minutes);
-    el.endDate.value = end.date;
+    el.endDate.value = '';
     el.endTime.value = '';
   }
 
@@ -1661,7 +1689,7 @@
     var start = toMinutes(startRaw);
     var startStamp = dateTimeStamp(startDate, start);
     if (!endRaw) {
-      if (endDate !== todayStr()) {
+      if (endDate && endDate !== todayStr()) {
         toast('结束时间为空，请宿主补全结束时间。', { level: 'WARN' });
         return;
       }
@@ -1710,6 +1738,7 @@
       el.viewDate.value = startDate;
       el.activity.value = '';
       applyEntryDefaults();
+      el.startDate.value = endDate;
 
       var rangeLabel = startDate === endDate
         ? startDate + ' ' + toClock(start) + '-' + toClock(end)
@@ -1844,6 +1873,19 @@
       Array.isArray(parsed.notifications);
   }
 
+  function preservesImportedArrays(parsed, normalized) {
+    var arrays = [
+      ['entries', parsed.entries, normalized.entries],
+      ['skills', parsed.skills, normalized.skills],
+      ['achievements', parsed.achievements || [], normalized.achievements],
+      ['notifications', parsed.notifications, normalized.notifications],
+      ['side quests', parsed.quests.side || [], normalized.quests.side]
+    ];
+    return arrays.every(function (item) {
+      return item[1].length === item[2].length;
+    });
+  }
+
   function exportDataBackup() {
     var filename = 'tiandaochouqin-' + todayStr() + '.json';
     var json = JSON.stringify(state, null, 2);
@@ -1908,6 +1950,9 @@
           throw new Error('导入数据不是有效的系统数据。');
         }
         var importedState = mergeDefaults(parsed);
+        if (!preservesImportedArrays(parsed, importedState)) {
+          throw new Error('导入数据包含无法识别的记录。');
+        }
         var confirmed = openConfirmModal('确认导入数据并覆盖当前系统数据？', function () {
           clearQuestUpgradeTimers();
           state = importedState;
@@ -2069,7 +2114,9 @@
     if (limit <= dayStart) { return []; }
 
     var intervals = state.entries.map(function (entry) {
-      return { start: entryStartStamp(entry), end: entryEndStamp(entry) };
+      return { start: Math.max(dayStart, entryStartStamp(entry)), end: Math.min(limit, entryEndStamp(entry)) };
+    }).filter(function (interval) {
+      return interval.end > interval.start;
     }).sort(function (a, b) { return a.start - b.start; });
     var merged = [];
     intervals.forEach(function (interval) {
@@ -2083,7 +2130,7 @@
 
     var gaps = [];
     function addGap(start, end) {
-      var cappedEnd = targetIndex === todayIndex ? Math.min(end, limit) : end;
+      var cappedEnd = Math.min(end, limit);
       if (cappedEnd <= start || cappedEnd <= dayStart || start >= limit) { return; }
       var chunkStart = start;
       while (chunkStart < cappedEnd) {
@@ -2327,12 +2374,12 @@
           '<span class="msg">[' + escapeHtml(l.category || '无') + ']</span></div>' +
           '<div class="msg log-entry-activity">' + escapeHtml(l.activity) +
           '<span class="log-entry-created-at">（复写时间：' + escapeHtml(formatCreatedAt(l.createdAt)) + '）</span></div></div>' +
-          '<button class="del" data-del="' + l.id + '" title="删除该时间段">[x]</button></div>';
+          '<button class="del" data-del="' + escapeHtml(l.id) + '" title="删除该时间段">[x]</button></div>';
       }
       return '<div class="log-line"><span class="ts">[' + l.time + ']</span> ' +
         '<span class="lv-' + l.level + '">[' + l.level + ']</span> ' +
         '<span class="msg">' + escapeHtml(l.message) + '</span>' +
-        (l.id ? ' <button class="del" data-del="' + l.id + '" title="删除该时间段">[x]</button>' : '') +
+        (l.id ? ' <button class="del" data-del="' + escapeHtml(l.id) + '" title="删除该时间段">[x]</button>' : '') +
         '</div>';
     }).join('');
     el.logView.scrollTop = state.ui.logScrollTop;
