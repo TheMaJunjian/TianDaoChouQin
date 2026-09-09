@@ -215,6 +215,42 @@ input, select, textarea {
   width: 100%;
 }
 
+.current-field {
+  position: relative;
+  display: block;
+}
+
+.current-field input.current-field-empty:not(:focus) {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: transparent;
+}
+
+.current-field input.current-field-empty:not(:focus)::-webkit-datetime-edit,
+.current-field input.current-field-empty:not(:focus)::-webkit-datetime-edit-fields-wrapper,
+.current-field input.current-field-empty:not(:focus)::-webkit-datetime-edit-text,
+.current-field input.current-field-empty:not(:focus)::-webkit-datetime-edit-hour-field,
+.current-field input.current-field-empty:not(:focus)::-webkit-datetime-edit-minute-field {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+.current-field-label {
+  position: absolute;
+  top: 50%;
+  left: 9px;
+  display: none;
+  color: var(--muted);
+  font: inherit;
+  line-height: normal;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.current-field input.current-field-empty:not(:focus) + .current-field-label {
+  display: block;
+}
+
 textarea {
   min-height: 58px;
   line-height: 1.5;
@@ -684,6 +720,14 @@ input:focus, select:focus {
   font: 12px/1.55 Consolas, "Courier New", monospace;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  user-select: text;
+}
+.import-json-input {
+  box-sizing: border-box;
+  min-height: 300px;
+  resize: vertical;
+  font: 12px/1.55 Consolas, "Courier New", monospace;
+  white-space: pre;
   user-select: text;
 }
 .backup-hint { margin-bottom: 12px; }

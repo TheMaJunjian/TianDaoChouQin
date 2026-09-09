@@ -153,8 +153,8 @@
       <form id="entryForm" class="entry-form" autocomplete="off" novalidate>
         <label><span>开始日期</span><input type="date" id="startDate" required></label>
         <label><span>开始时间</span><input type="time" id="startTime" required></label>
-        <label><span>结束日期</span><input type="date" id="endDate" required></label>
-        <label><span>结束时间</span><input type="time" id="endTime" required></label>
+        <label><span>结束日期</span><span class="current-field"><input type="date" id="endDate" required><span class="current-field-label" aria-hidden="true">今日</span></span></label>
+        <label><span>结束时间</span><span class="current-field"><input type="time" id="endTime" required><span class="current-field-label" aria-hidden="true">今时</span></span></label>
         <label><span>技能</span>
           <select id="category"></select>
         </label>
@@ -296,6 +296,8 @@
     <div class="modal-actions">
       <button type="button" class="btn ghost hidden" id="detailCopyBackup">复制</button>
       <a class="btn hidden" id="detailDownloadBackup">下载数据</a>
+      <button type="button" class="btn ghost hidden" id="detailPasteImport">粘贴</button>
+      <button type="button" class="btn hidden" id="detailUploadImport">上传数据</button>
       <button type="button" class="btn ghost hidden" id="detailAchievementToggle">隐藏</button>
       <button type="button" class="btn" id="detailClose">关闭</button>
       <button type="button" class="btn hidden" id="detailFillBlank">跳转到复写并补充</button>

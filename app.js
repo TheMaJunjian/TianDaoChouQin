@@ -92,7 +92,12 @@
         hiddenAchievementListCollapsed: false,
         hiddenSideQuestListCollapsed: false,
         achievementListCollapsed: false,
-        logScrollTop: 0
+        logScrollTop: 0,
+        noticeScrollTop: 0,
+        pageScrollTop: 0,
+        activeTab: 'attr',
+        timelineZoom: { start: 0, end: DAY_MINUTES },
+        entryDraft: null
       },
       viewDate: todayStr(),
       firstRun: true
@@ -122,6 +127,13 @@
     hiddenAchievementListCollapsed = ui.hiddenAchievementListCollapsed === true;
     hiddenSideQuestListCollapsed = ui.hiddenSideQuestListCollapsed === true;
     achievementListCollapsed = ui.achievementListCollapsed === true;
+    var savedZoom = ui.timelineZoom && typeof ui.timelineZoom === 'object' ? ui.timelineZoom : {};
+    var zoomStart = Number(savedZoom.start);
+    var zoomEnd = Number(savedZoom.end);
+    if (Number.isFinite(zoomStart) && Number.isFinite(zoomEnd) && zoomEnd - zoomStart >= 60) {
+      timelineZoom.start = Math.max(0, Math.min(DAY_MINUTES - 60, zoomStart));
+      timelineZoom.end = Math.min(DAY_MINUTES, Math.max(timelineZoom.start + 60, zoomEnd));
+    }
   }
 
   function persistCollapseState() {
@@ -131,7 +143,12 @@
       hiddenAchievementListCollapsed: hiddenAchievementListCollapsed,
       hiddenSideQuestListCollapsed: hiddenSideQuestListCollapsed,
       achievementListCollapsed: achievementListCollapsed,
-      logScrollTop: state.ui.logScrollTop
+      logScrollTop: state.ui.logScrollTop,
+      noticeScrollTop: state.ui.noticeScrollTop,
+      pageScrollTop: state.ui.pageScrollTop,
+      activeTab: state.ui.activeTab,
+      timelineZoom: { start: timelineZoom.start, end: timelineZoom.end },
+      entryDraft: state.ui.entryDraft
     };
     persist();
   }
@@ -147,7 +164,7 @@
     'nameModal', 'nameInput', 'nameConfirm', 'nameCancel',
     'confirmModal', 'confirmMessage', 'confirmCancel', 'confirmAccept',
     'detailModal', 'detailTitle', 'detailBody', 'detailClose', 'detailFillBlank', 'detailAchievementToggle',
-    'detailCopyBackup', 'detailDownloadBackup',
+    'detailCopyBackup', 'detailDownloadBackup', 'detailPasteImport', 'detailUploadImport',
     'focusLabel', 'focusPercent', 'focusFill', 'focusHint',
     'attrWeight', 'attrEdu', 'attrTalent', 'attrProperty', 'attrStatus',
     'polishPercent', 'polishFill',
@@ -441,6 +458,25 @@
       });
       var logScrollTop = Number(parsedUi.logScrollTop);
       merged.ui.logScrollTop = Number.isFinite(logScrollTop) ? Math.max(0, logScrollTop) : base.ui.logScrollTop;
+      var noticeScrollTop = Number(parsedUi.noticeScrollTop);
+      merged.ui.noticeScrollTop = Number.isFinite(noticeScrollTop) ? Math.max(0, noticeScrollTop) : base.ui.noticeScrollTop;
+      var pageScrollTop = Number(parsedUi.pageScrollTop);
+      merged.ui.pageScrollTop = Number.isFinite(pageScrollTop) ? Math.max(0, pageScrollTop) : base.ui.pageScrollTop;
+      merged.ui.activeTab = ['attr', 'entry', 'timeline', 'quest', 'notice'].indexOf(parsedUi.activeTab) >= 0
+        ? parsedUi.activeTab : base.ui.activeTab;
+      if (parsedUi.timelineZoom && typeof parsedUi.timelineZoom === 'object') {
+        var zoomStart = Number(parsedUi.timelineZoom.start);
+        var zoomEnd = Number(parsedUi.timelineZoom.end);
+        if (Number.isFinite(zoomStart) && Number.isFinite(zoomEnd) && zoomEnd - zoomStart >= 60) {
+          merged.ui.timelineZoom = { start: zoomStart, end: zoomEnd };
+        }
+      }
+      if (parsedUi.entryDraft && typeof parsedUi.entryDraft === 'object') {
+        merged.ui.entryDraft = {};
+        ['startDate', 'startTime', 'endDate', 'endTime', 'category', 'activity', 'level'].forEach(function (key) {
+          merged.ui.entryDraft[key] = typeof parsedUi.entryDraft[key] === 'string' ? parsedUi.entryDraft[key] : '';
+        });
+      }
     });
     safe(function () {
       merged.viewDate = isValidDateString(parsed.viewDate) ? parsed.viewDate : todayStr();
@@ -578,15 +614,30 @@
       if (JSON.stringify(incoming) === JSON.stringify(state)) { return; }
       state = incoming;
       persistedSnapshot = cloneState(state);
+      syncCollapseState();
       fullRender();
+      applyActiveTabView(state.ui.activeTab);
     } catch (e) {
       console.error('[storage] SYNC_FAILED', e);
     }
   });
 
-  function flushState() { persist(); }
+  function flushState() {
+    state.ui.pageScrollTop = Math.max(0, window.scrollY || window.pageYOffset || 0);
+    captureEntryDraft();
+    persist();
+  }
   window.addEventListener('pagehide', flushState);
   window.addEventListener('beforeunload', flushState);
+  var pageScrollSaveTimer = null;
+  window.addEventListener('scroll', function () {
+    state.ui.pageScrollTop = Math.max(0, window.scrollY || window.pageYOffset || 0);
+    if (pageScrollSaveTimer) { window.clearTimeout(pageScrollSaveTimer); }
+    pageScrollSaveTimer = window.setTimeout(function () {
+      pageScrollSaveTimer = null;
+      persist();
+    }, 150);
+  }, { passive: true });
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'hidden') { flushState(); }
   });
@@ -801,7 +852,62 @@
     el.startTime.value = toClock(start.minutes);
     el.endDate.value = '';
     el.endTime.value = '';
+    syncCurrentField(el.endDate);
+    syncCurrentField(el.endTime);
   }
+
+  function captureEntryDraft() {
+    state.ui.entryDraft = {
+      startDate: el.startDate.value,
+      startTime: el.startTime.value,
+      endDate: el.endDate.value,
+      endTime: el.endTime.value,
+      category: el.category.value,
+      activity: el.activity.value,
+      level: el.level.value
+    };
+  }
+
+  function restoreEntryDraft() {
+    var draft = state.ui.entryDraft;
+    if (!draft) { return; }
+    el.startDate.value = draft.startDate;
+    el.startTime.value = draft.startTime;
+    el.endDate.value = draft.endDate;
+    el.endTime.value = draft.endTime;
+    el.category.value = draft.category;
+    el.activity.value = draft.activity;
+    el.level.value = draft.level || 'INFO';
+    syncCurrentField(el.endDate);
+    syncCurrentField(el.endTime);
+    syncCustomSelects();
+  }
+
+  var draftSaveTimer = null;
+  function scheduleEntryDraftSave() {
+    captureEntryDraft();
+    if (draftSaveTimer) { window.clearTimeout(draftSaveTimer); }
+    draftSaveTimer = window.setTimeout(function () {
+      draftSaveTimer = null;
+      persist();
+    }, 150);
+  }
+
+  function syncCurrentField(input) {
+    input.classList.toggle('current-field-empty', !input.value);
+  }
+
+  [el.endDate, el.endTime].forEach(function (input) {
+    input.addEventListener('input', function () { syncCurrentField(input); scheduleEntryDraftSave(); });
+    input.addEventListener('change', function () { syncCurrentField(input); scheduleEntryDraftSave(); });
+    input.addEventListener('blur', function () { syncCurrentField(input); });
+    input.addEventListener('focus', function () { syncCurrentField(input); });
+  });
+
+  [el.startDate, el.startTime, el.category, el.activity, el.level].forEach(function (input) {
+    input.addEventListener('input', scheduleEntryDraftSave);
+    input.addEventListener('change', scheduleEntryDraftSave);
+  });
 
   function entriesOverlapping(startStamp, endStamp) {
     return state.entries.filter(function (entry) {
@@ -1010,13 +1116,11 @@
   });
 
   function setActiveTab(tab) {
-    document.querySelectorAll('.tab-btn').forEach(function (b) {
-      b.classList.toggle('active', b.getAttribute('data-tab') === tab);
-    });
-    document.querySelectorAll('.tab-panel').forEach(function (p) {
-      p.classList.toggle('active', p.getAttribute('data-tab-panel') === tab);
-    });
+    if (['attr', 'entry', 'timeline', 'quest', 'notice'].indexOf(tab) < 0) { tab = 'attr'; }
+    state.ui.activeTab = tab;
+    applyActiveTabView(tab);
     if (tab === 'timeline') { el.logView.scrollTop = state.ui.logScrollTop; }
+    if (tab === 'notice') { el.noticeView.scrollTop = state.ui.noticeScrollTop; }
     updatePolishFloat();
     if (tab === 'quest') { onOpenQuestTab(); }
     if (tab === 'notice') {
@@ -1024,6 +1128,16 @@
       persist();
       updateNoticeBadge();
     }
+    persist();
+  }
+
+  function applyActiveTabView(tab) {
+    document.querySelectorAll('.tab-btn').forEach(function (b) {
+      b.classList.toggle('active', b.getAttribute('data-tab') === tab);
+    });
+    document.querySelectorAll('.tab-panel').forEach(function (p) {
+      p.classList.toggle('active', p.getAttribute('data-tab-panel') === tab);
+    });
   }
 
   /* ---------- 宿主称号：自定义弹窗，替代原生 prompt ---------- */
@@ -1465,6 +1579,8 @@
     el.detailBody.innerHTML = body;
     el.detailCopyBackup.classList.add('hidden');
     el.detailDownloadBackup.classList.add('hidden');
+    el.detailPasteImport.classList.add('hidden');
+    el.detailUploadImport.classList.add('hidden');
     el.detailDownloadBackup.removeAttribute('href');
     el.detailDownloadBackup.removeAttribute('download');
     el.detailFillBlank.classList.add('hidden');
@@ -1523,6 +1639,8 @@
     el.startTime.value = toClock(start.minutes);
     el.endDate.value = end.date;
     el.endTime.value = toClock(end.minutes);
+    syncCurrentField(el.endDate);
+    syncCurrentField(el.endTime);
     state.viewDate = start.date;
     el.viewDate.value = start.date;
     persist();
@@ -1688,16 +1806,18 @@
 
     var start = toMinutes(startRaw);
     var startStamp = dateTimeStamp(startDate, start);
-    if (!endRaw) {
-      if (endDate && endDate !== todayStr()) {
-        toast('结束时间为空，请宿主补全结束时间。', { level: 'WARN' });
-        return;
-      }
+    if (!endDate || !endRaw) {
       var now = new Date();
-      endDate = todayStr();
-      endRaw = toClock(now.getHours() * 60 + now.getMinutes());
-      el.endDate.value = endDate;
-      el.endTime.value = endRaw;
+      if (!endDate) {
+        endDate = todayStr();
+        el.endDate.value = endDate;
+        syncCurrentField(el.endDate);
+      }
+      if (!endRaw) {
+        endRaw = toClock(now.getHours() * 60 + now.getMinutes());
+        el.endTime.value = endRaw;
+        syncCurrentField(el.endTime);
+      }
     }
     if (!endDate) {
       toast('输入不完整，请宿主补全结束日期。', { level: 'WARN' });
@@ -1739,6 +1859,8 @@
       el.activity.value = '';
       applyEntryDefaults();
       el.startDate.value = endDate;
+      captureEntryDraft();
+      persist();
 
       var rangeLabel = startDate === endDate
         ? startDate + ' ' + toClock(start) + '-' + toClock(end)
@@ -1803,6 +1925,7 @@
   function setViewDate(dateStr) {
     state.viewDate = dateStr;
     timelineZoom = { start: 0, end: DAY_MINUTES, anchor: null };
+    state.ui.timelineZoom = { start: 0, end: DAY_MINUTES };
     el.viewDate.value = dateStr;
     persist();
     refreshAll();
@@ -1904,7 +2027,7 @@
       backupDownloadUrl = null;
     }
     backupCopyText = json;
-    openDetailModal('系统数据', '<p class="hint backup-hint">系统已显示运行数据。宿主可复制内容，或直接下载。</p>' +
+    openDetailModal('封印系统数据', '<p class="hint backup-hint">系统已显示运行数据。宿主可复制内容，或直接下载。</p>' +
       '<pre class="backup-json">' + escapeHtml(json) + '</pre>');
     el.detailCopyBackup.classList.remove('hidden');
     if (window.URL && URL.createObjectURL) {
@@ -1913,6 +2036,13 @@
       el.detailDownloadBackup.download = filename;
       el.detailDownloadBackup.classList.remove('hidden');
     }
+  }
+
+  function showImportModal() {
+    openDetailModal('启封系统数据', '<p class="hint backup-hint">请宿主载入系统曾被封印的数据，或选择封印数据所在文件。</p>' +
+      '<textarea id="importJsonInput" class="import-json-input" spellcheck="false" placeholder="此处显示系统被封印数据"></textarea>');
+    el.detailPasteImport.classList.remove('hidden');
+    el.detailUploadImport.classList.remove('hidden');
   }
 
   function copyBackupJson() {
@@ -1937,37 +2067,70 @@
 
   el.exportData.addEventListener('click', exportDataBackup);
 
-  el.importBtn.addEventListener('click', function () { el.importFile.click(); });
+  el.detailPasteImport.addEventListener('click', function () {
+    var input = document.getElementById('importJsonInput');
+    if (!input || !navigator.clipboard || !navigator.clipboard.readText) {
+      toast('当前环境不支持读取剪贴板，请宿主手动粘贴系统数据。', { level: 'WARN' });
+      return;
+    }
+    navigator.clipboard.readText().then(function (text) {
+      input.value = text;
+      input.focus();
+      toast('JSON 数据已粘贴到导入框。', { level: 'SYSTEM' });
+    }, function () {
+      toast('读取剪贴板失败，请宿主手动粘贴系统数据。', { level: 'WARN' });
+    });
+  });
+
+  el.detailUploadImport.addEventListener('click', function () {
+    var input = document.getElementById('importJsonInput');
+    if (input && input.value.trim()) {
+      importJsonText(input.value);
+      return;
+    }
+    el.importFile.click();
+  });
+
+  function importJsonText(rawText) {
+    var previousState = state;
+    try {
+      var parsed = JSON.parse(String(rawText));
+      if (!isImportableState(parsed)) {
+        throw new Error('导入数据不是有效的系统数据。');
+      }
+      var importedState = mergeDefaults(parsed);
+      if (!preservesImportedArrays(parsed, importedState)) {
+        throw new Error('导入数据包含无法识别的记录。');
+      }
+      closeDetailModal();
+      var confirmed = openConfirmModal('确认导入数据并覆盖当前系统数据？', function () {
+        clearQuestUpgradeTimers();
+        state = importedState;
+        syncCollapseState();
+        persist(true);
+        toast('宿主数据导入成功，面板已重新同步。', { level: 'SYSTEM' });
+        fullRender();
+      });
+      if (!confirmed) {
+        toast('当前有待确认操作，导入未执行。', { level: 'WARN' });
+      }
+    } catch (e) {
+      state = previousState;
+      toast('导入文件格式异常，数据未变更。', { level: 'ERROR' });
+    }
+  }
+
+  el.importBtn.addEventListener('click', showImportModal);
   el.importFile.addEventListener('change', function () {
     var file = el.importFile.files && el.importFile.files[0];
     if (!file) { return; }
     var reader = new FileReader();
     reader.onload = function () {
-      var previousState = state;
-      try {
-        var parsed = JSON.parse(String(reader.result));
-        if (!isImportableState(parsed)) {
-          throw new Error('导入数据不是有效的系统数据。');
-        }
-        var importedState = mergeDefaults(parsed);
-        if (!preservesImportedArrays(parsed, importedState)) {
-          throw new Error('导入数据包含无法识别的记录。');
-        }
-        var confirmed = openConfirmModal('确认导入数据并覆盖当前系统数据？', function () {
-          clearQuestUpgradeTimers();
-          state = importedState;
-          syncCollapseState();
-          persist(true);
-          toast('宿主数据导入成功，面板已重新同步。', { level: 'SYSTEM' });
-          fullRender();
-        });
-        if (!confirmed) {
-          toast('当前有待确认操作，导入未执行。', { level: 'WARN' });
-        }
-      } catch (e) {
-        state = previousState;
-        toast('导入文件格式异常，数据未变更。', { level: 'ERROR' });
+      var input = document.getElementById('importJsonInput');
+      if (input) {
+        input.value = String(reader.result);
       }
+      importJsonText(reader.result);
     };
     reader.onerror = function () {
       toast('导入文件读取失败，数据未变更。', { level: 'ERROR' });
@@ -2099,8 +2262,10 @@
     timelineZoom.start = boundedStart;
     timelineZoom.end = boundedStart + span;
     timelineZoom.anchor = anchor === undefined ? timelineZoom.anchor : anchor;
+    state.ui.timelineZoom = { start: timelineZoom.start, end: timelineZoom.end };
     updateTimelineZoomLabel();
     renderTimeline(byDate(state.viewDate));
+    persist();
   }
 
   function timelineBlankSegments(dateStr) {
@@ -2915,7 +3080,7 @@
           escapeHtml(n.text) + '</span>' + (n.count > 1 ? ' <span class="hint">(×' + n.count + ')</span>' : '') +
           '</div>';
       }).join('');
-      el.noticeView.scrollTop = el.noticeView.scrollHeight;
+      el.noticeView.scrollTop = state.ui.noticeScrollTop;
     }
     updateNoticeBadge();
   }
@@ -2924,6 +3089,15 @@
     var unread = Math.max(state.notifications.length - state.noticeSeenCount, 0);
     if (unread > 0) { flashTab('notice'); }
   }
+
+  el.noticeView.addEventListener('scroll', function () {
+    state.ui.noticeScrollTop = Math.max(0, el.noticeView.scrollTop);
+    if (saveTimer) { window.clearTimeout(saveTimer); }
+    saveTimer = window.setTimeout(function () {
+      saveTimer = null;
+      persist();
+    }, 150);
+  }, { passive: true });
 
   /* 不使用红点与数字角标：仅让对应标签高亮 1 秒作为提醒。 */
   var flashTimers = {};
@@ -3060,6 +3234,7 @@
 
     refreshAll();
     applyEntryDefaults();
+    restoreEntryDraft();
     renderNotifications();
   }
 
@@ -3069,8 +3244,11 @@
     requestPersistentStorage();
     checkTamperOnBoot();
     syncMainQuestAvailability();
-    setActiveTab('attr');
+    setActiveTab(state.ui.activeTab || 'attr');
     fullRender();
+    window.setTimeout(function () {
+      window.scrollTo(0, state.ui.pageScrollTop || 0);
+    }, 0);
     setupClickHints();
     updatePolishFloat();
 
