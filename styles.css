@@ -377,6 +377,9 @@ input:focus, select:focus {
   gap: 0 10px;
 }
 
+.entry-form > label,
+.entry-form > .btn { min-width: 0; }
+
 .entry-form .wide, .entry-form .btn { grid-column: 1 / -1; }
 
 .btn {
@@ -677,12 +680,17 @@ input:focus, select:focus {
 .quest-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .quest-title-row > span:first-child { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
 .quest-status { color: var(--muted); font-size: 11px; }
-.quest-desc { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 4px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.quest-desc { max-height: 96px; overflow-y: auto; padding-right: 8px; color: var(--muted); font-size: 12px; line-height: 1.5; margin: 4px 0; overflow-wrap: anywhere; white-space: pre-wrap; scrollbar-gutter: stable; }
+.quest-desc::-webkit-scrollbar { width: 6px; }
+.quest-desc::-webkit-scrollbar-track { background: rgba(28, 59, 77, 0.28); border-radius: 3px; }
+.quest-desc::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+.quest-desc::-webkit-scrollbar-thumb:hover { background: var(--cyan); }
 .quest-reward { color: var(--green); font-size: 11px; }
 .quest-reward-inline { flex: 0 0 auto; margin-left: auto; text-align: right; white-space: nowrap; }
 .quest-reward-pending { color: var(--muted); }
 .quest-actions { margin-top: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
 .quest-progress { color: var(--text); font-size: 13px; margin-bottom: 6px; }
+.quest-current-progress { align-self: center; color: var(--muted); font-size: 11px; }
 .quest-card { margin-top: 10px; border: 1px solid var(--line); border-radius: 4px; padding: 10px; }
 .quest-item.quest-done { opacity: 0.6; }
 
@@ -807,8 +815,8 @@ input:focus, select:focus {
   padding: 2px 5px;
   border: 1px solid var(--line);
   border-radius: 3px;
-  background: #07131d;
-  color: var(--text);
+  background: #152735;
+  color: #f3d98a;
   font-size: 11px;
   line-height: 1.2;
   white-space: nowrap;
@@ -938,7 +946,57 @@ input:focus, select:focus {
 .log-line .lv-SYSTEM { color: #b98bff; }
 .log-line .lv-REWARD { color: var(--gold); }
 .log-line .msg { color: var(--text); }
-.log-entry { display: flex; align-items: flex-start; gap: 12px; }
+.log-entry { position: relative; display: flex; align-items: flex-start; gap: 12px; cursor: pointer; }
+.log-entry:hover,
+.log-entry:focus-visible,
+.log-entry.log-linked { background: rgba(238, 193, 91, 0.1); outline: 1px solid rgba(238, 193, 91, 0.45); }
+.log-entry::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 8px;
+  bottom: calc(100% + 6px);
+  z-index: 5;
+  display: none;
+  width: max-content;
+  max-width: min(72vw, 360px);
+  padding: 7px 9px;
+  border: 1px solid rgba(238, 193, 91, 0.65);
+  border-radius: 3px;
+  background: #152735;
+  color: #f3d98a;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-line;
+  pointer-events: none;
+}
+.log-entry:hover::after,
+.log-entry:focus-visible::after { display: block; }
+.task-submit-box { box-sizing: border-box; width: min(94vw, 620px); max-height: calc(100vh - 32px); overflow: hidden; padding-bottom: 24px; }
+.task-submit-body { display: grid; gap: 5px; min-width: 0; max-height: min(300px, calc(100vh - 244px)); overflow-y: auto; padding-right: 14px; scrollbar-gutter: stable; }
+.task-submit-body::-webkit-scrollbar { width: 8px; }
+.task-submit-body::-webkit-scrollbar-track { background: rgba(28, 59, 77, 0.28); border-radius: 4px; }
+.task-submit-body::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+.task-submit-body::-webkit-scrollbar-thumb:hover { background: var(--cyan); }
+.task-submit-name { color: var(--cyan); font-size: 16px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.task-submit-description,
+.task-submit-date { color: var(--muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
+.task-progress-control { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 12px; margin-top: 16px; color: var(--text); }
+.task-progress-label { align-self: center; color: var(--text); font-size: 12px; line-height: 1; white-space: nowrap; transform: translateY(2px); }
+.task-progress-ruler { position: relative; height: 48px; margin-top: 4px; border-bottom: 1px solid var(--line); touch-action: none; }
+.task-progress-ruler::before { content: ''; position: absolute; left: 0; right: 0; bottom: 15px; height: 6px; border: 1px solid var(--line); border-radius: 3px; background: repeating-linear-gradient(to right, #06121b 0, #06121b calc(10% - 1px), #0a1a25 10%); }
+.task-progress-fill { position: absolute; left: 0; bottom: 16px; z-index: 1; height: 4px; background: var(--cyan); pointer-events: none; }
+.task-progress-cursor { position: absolute; bottom: 23px; z-index: 3; width: 20px; height: 28px; transform: translateX(-50%); cursor: grab; touch-action: none; }
+.task-progress-cursor::before { content: ''; position: absolute; left: 3px; bottom: 0; border-top: 12px solid var(--cyan); border-right: 7px solid transparent; border-left: 7px solid transparent; }
+.task-progress-cursor:hover::before,
+.task-progress-cursor:focus-visible::before,
+.task-progress-cursor.dragging::before { border-top-color: var(--gold); }
+.task-progress-cursor:focus-visible { outline: 1px solid var(--cyan); outline-offset: 1px; }
+.task-progress-cursor::after { content: attr(data-value); position: absolute; bottom: 20px; left: 50%; display: block; padding: 2px 5px; border: 1px solid var(--line); border-radius: 3px; background: #152735; color: #f3d98a; font-size: 11px; line-height: 1.2; white-space: nowrap; transform: translateX(-50%); pointer-events: none; }
+.task-progress-previous-cursor { z-index: 2; pointer-events: none; user-select: none; cursor: default; }
+.task-progress-previous-cursor::before { border-top-color: var(--muted); }
+.task-progress-previous-cursor::after { color: var(--muted); }
+.task-progress-scale { grid-column: 2; display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; transform: translateY(-8px); }
 .log-entry-content { min-width: 0; flex: 1 1 auto; }
 .log-entry-head { min-width: 0; }
 .log-entry-activity { margin-top: 2px; white-space: pre-wrap; }
