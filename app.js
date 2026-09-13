@@ -41,6 +41,7 @@
     '注册成为「公论」与会者，并获得五十万贡献点',
     '使「公论」活跃注册用户达到八十亿'
   ];
+  var MAIN_QUEST_TOTAL_LABEL = 'TREE(3)';
 
   /* 主线任务指引：由开发者自定义，与上面的线索一一对应；留空则提示「暂无提示」。 */
   var MAIN_QUEST_GUIDES = [
@@ -49,7 +50,6 @@
     ''
   ];
 
-  /* 点击空白区域时的兜底提示：按点击位置所属的纵向区域给出不同内容。 */
   var ZONE_HINTS = [
     { max: 0.2, text: '系统面板顶部：此处显示宿主的系统等级与三种点数，全部由任务与成就结算而来。' },
     { max: 0.5, text: '面板主体区域：在这里补全你的属性、技能与日常记录。' },
@@ -64,7 +64,7 @@
       entryCategory: '',
       focus: '',
       host: {
-        name: '未命名修行者',
+        name: '修行者',
         boundAt: '',
         weight: '',
         education: '',
@@ -80,6 +80,7 @@
       quests: {
         mainRevealed: 0,   // 已解锁的主线线索数
         mainCompleted: 0,  // 已提交完成的主线线索数
+        mainProgress: 0,
         mainAccepted: false, // 当前线索是否已「接受」
         lastSeenAppVersion: '0.0',
         side: []
@@ -114,6 +115,8 @@
   var timelineZoom = { start: 0, end: DAY_MINUTES, anchor: null };
   var renderedTimelineBlanks = [];
   var pendingBlankRange = null;
+  var pendingEntryEdit = null;
+  var editingEntryId = null;
   var toastQueue = [];
   var toastTimer = null;
   var toastNextStartAt = 0;
@@ -163,6 +166,7 @@
     'hostName', 'todayFilled', 'todayMissing', 'totalHours', 'skillCount', 'focusCategory',
     'nameModal', 'nameInput', 'nameConfirm', 'nameCancel',
     'confirmModal', 'confirmMessage', 'confirmCancel', 'confirmAccept',
+    'taskSubmitModal', 'taskSubmitTitle', 'taskSubmitBody', 'taskProgress', 'taskProgressRuler', 'taskProgressFill', 'taskProgressCursor', 'taskProgressPreviousCursor', 'taskSubmitCancel', 'taskSubmitConfirm',
     'detailModal', 'detailTitle', 'detailBody', 'detailClose', 'detailFillBlank', 'detailAchievementToggle',
     'detailCopyBackup', 'detailDownloadBackup', 'detailPasteImport', 'detailUploadImport',
     'focusLabel', 'focusPercent', 'focusFill', 'focusHint',
@@ -352,10 +356,12 @@
         var endDate = typeof item.endDate === 'string' ? item.endDate : startDate;
         var start = Number(item.start);
         var end = Number(item.end);
+        var startStamp = dateTimeStamp(startDate, start);
+        var endStamp = dateTimeStamp(endDate, end);
         if (!isValidDateString(startDate) || !isValidDateString(endDate) ||
           !Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start >= DAY_MINUTES ||
           end < 0 || end > DAY_MINUTES || start !== Math.floor(start) || end !== Math.floor(end) ||
-          dateTimeStamp(endDate, end) <= dateTimeStamp(startDate, start)) {
+          endStamp < startStamp) {
           return null;
         }
         return Object.assign({}, item, {
@@ -434,6 +440,10 @@
       merged.quests.mainRevealed = Math.max(revealed, completed);
       merged.quests.mainCompleted = completed;
       merged.quests.mainAccepted = merged.quests.mainAccepted === true;
+      merged.quests.mainProgress = Math.max(0, Math.min(99, Math.floor(Number(merged.quests.mainProgress) || 0)));
+      merged.quests.side.forEach(function (item) {
+        item.progress = Math.max(0, Math.min(99, Math.floor(Number(item.progress) || 0)));
+      });
     });
     safe(function () {
       merged.notifications = Array.isArray(parsed.notifications) ? parsed.notifications.filter(function (item) {
@@ -552,7 +562,7 @@
     Object.keys(state.points).forEach(function (key) {
       if (!statesEqual(state.points[key], baseline.points[key])) { merged.points[key] = state.points[key]; }
     });
-    ['mainRevealed', 'mainCompleted', 'mainAccepted', 'lastSeenAppVersion'].forEach(function (key) {
+    ['mainRevealed', 'mainCompleted', 'mainProgress', 'mainAccepted', 'lastSeenAppVersion'].forEach(function (key) {
       if (!statesEqual(state.quests[key], baseline.quests[key])) {
         merged.quests[key] = state.quests[key];
       }
@@ -909,9 +919,9 @@
     input.addEventListener('change', scheduleEntryDraftSave);
   });
 
-  function entriesOverlapping(startStamp, endStamp) {
+  function entriesOverlapping(startStamp, endStamp, excludedId) {
     return state.entries.filter(function (entry) {
-      return startStamp < entryEndStamp(entry) && endStamp > entryStartStamp(entry);
+      return entry.id !== excludedId && startStamp < entryEndStamp(entry) && endStamp > entryStartStamp(entry);
     });
   }
 
@@ -1042,11 +1052,28 @@
   }
 
   /* ---------- 点击空白区域弹出对应区域的提示 ---------- */
-  function isInteractive(node) {
+  function isTextHit(node, clientX, clientY) {
+    var walker = document.createTreeWalker(node, 4);
+    var textNode;
+    while ((textNode = walker.nextNode())) {
+      var range = document.createRange();
+      range.selectNodeContents(textNode);
+      var rects = range.getClientRects();
+      for (var i = 0; i < rects.length; i++) {
+        if (clientX >= rects[i].left && clientX <= rects[i].right && clientY >= rects[i].top && clientY <= rects[i].bottom) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function isInteractive(node, event) {
     if (!node.closest) { return false; }
-    var holder = node.closest('[data-hint]');
-    if (holder && node !== holder) { return true; }
-    return !!node.closest('input, select, textarea, button, a, label, .skill-item, .ach-item, .quest-item, .quest-card, .slot, .timeline-ruler, .timeline-axis, .log-view, .log-line, .modal-box, .egg-box, .toast');
+    if (node.closest('footer, input, select, textarea, button, a, label, .panel-footer, .skill-item, .ach-item, .quest-item, .quest-card, .slot, .timeline-ruler, .timeline-axis, .log-view, .log-line, .modal-box, .egg-box, .toast')) {
+      return true;
+    }
+    return isTextHit(node, event.clientX, event.clientY);
   }
 
   function zoneHintFor(clientY) {
@@ -1060,7 +1087,7 @@
   function setupClickHints() {
     document.addEventListener('click', function (event) {
       var target = event.target;
-      if (!target || target.nodeType !== 1 || isInteractive(target)) { return; }
+      if (!target || target.nodeType !== 1 || isInteractive(target, event)) { return; }
       var holder = target.closest('[data-hint]');
       toast(holder ? holder.getAttribute('data-hint') : zoneHintFor(event.clientY), { level: 'INFO' });
     });
@@ -1142,7 +1169,7 @@
 
   /* ---------- 宿主称号：自定义弹窗，替代原生 prompt ---------- */
   function openNameModal() {
-    el.nameInput.value = state.host.name === '未命名修行者' ? '' : state.host.name;
+    el.nameInput.value = state.host.name === '修行者' ? '' : state.host.name;
     el.nameModal.classList.remove('hidden');
     window.setTimeout(function () { el.nameInput.focus(); }, 30);
   }
@@ -1150,7 +1177,7 @@
   function closeNameModal() { el.nameModal.classList.add('hidden'); }
 
   function confirmName() {
-    var name = el.nameInput.value.trim() || '未命名修行者';
+    var name = el.nameInput.value.trim() || '修行者';
     state.host.name = name;
     if (!state.host.boundAt) { state.host.boundAt = String(currentStamp()); }
     persist();
@@ -1299,7 +1326,7 @@
     });
   }
   bindAttrField(el.attrWeight, 'weight', '体重');
-  bindAttrField(el.attrEdu, 'education', '学历');
+  bindAttrField(el.attrEdu, 'education', '修为');
   bindAttrField(el.attrTalent, 'talent', '天赋');
   bindAttrField(el.attrProperty, 'property', '财产');
   bindAttrField(el.attrStatus, 'status', '状态');
@@ -1632,6 +1659,36 @@
   });
 
   el.detailFillBlank.addEventListener('click', function () {
+    if (pendingEntryEdit) {
+      var hasEntryInput = !!el.activity.value.trim();
+      if (hasEntryInput) {
+        toast('当前复写输入框已有内容，无法跳转。', { level: 'WARN' });
+        return;
+      }
+      var entry = pendingEntryEdit;
+      var entryStart = stampParts(entryStartStamp(entry));
+      var entryEnd = stampParts(entryEndStamp(entry));
+      el.startDate.value = entryStart.date;
+      el.startTime.value = toClock(entryStart.minutes);
+      el.endDate.value = entryEnd.date;
+      el.endTime.value = toClock(entryEnd.minutes);
+      el.category.value = entry.category || '';
+      el.activity.value = entry.activity;
+      el.level.value = entry.level || 'INFO';
+      syncCurrentField(el.endDate);
+      syncCurrentField(el.endTime);
+      syncCustomSelects();
+      state.viewDate = entryStart.date;
+      el.viewDate.value = entryStart.date;
+      editingEntryId = entry.id;
+      captureEntryDraft();
+      persist();
+      pendingEntryEdit = null;
+      closeDetailModal();
+      setActiveTab('entry');
+      window.setTimeout(function () { el.activity.focus(); }, 30);
+      return;
+    }
     if (!pendingBlankRange) { return; }
     var start = stampParts(pendingBlankRange.start);
     var end = stampParts(pendingBlankRange.end);
@@ -1828,13 +1885,18 @@
 
     if (endStamp <= startStamp) {
       toast('时间悖论警告：结束日期时间须晚于开始日期时间。', { level: 'ERROR' });
+      el.endDate.value = '';
+      el.endTime.value = '';
+      syncCurrentField(el.endDate);
+      syncCurrentField(el.endTime);
+      captureEntryDraft();
+      persist();
       return;
     }
-
     var skillBeforeEntry = skillByName(category);
     var previousSkillHours = skillBeforeEntry ? effectiveHours(skillBeforeEntry) : 0;
     var newEntry = {
-      id: uid(),
+      id: editingEntryId || uid(),
       date: startDate,
       startDate: startDate,
       endDate: endDate,
@@ -1845,13 +1907,17 @@
       createdAt: new Date().toISOString(),
       level: el.level.value
     };
-    var conflicts = entriesOverlapping(startStamp, endStamp);
+    var conflicts = entriesOverlapping(startStamp, endStamp, editingEntryId);
     function writeEntry(rewrite) {
+      if (editingEntryId) {
+        state.entries = state.entries.filter(function (entry) { return entry.id !== editingEntryId; });
+      }
       if (rewrite) {
         rewriteOverlappingEntries(startStamp, endStamp, newEntry);
       } else {
         state.entries.push(newEntry);
       }
+      editingEntryId = null;
       persist();
 
       state.viewDate = startDate;
@@ -2382,7 +2448,11 @@
       '<div class="detail-row"><span>技能</span><b>' + escapeHtml(entry.category || '无') + '</b></div>' +
       '<div class="detail-row"><span>作为</span><b>' + escapeHtml(entry.activity) + '</b></div>' +
       '<div class="detail-row"><span>记录等级</span><b>' + escapeHtml(entry.level || 'INFO') + '</b></div>' +
-      '<div class="detail-row"><span>投入时间</span><b>' + hours(entryDuration(entry)) + ' h</b></div>');
+      '<div class="detail-row"><span>投入时间</span><b>' + hours(entryDuration(entry)) + ' h</b></div>' +
+      '<div class="detail-row"><span>记录时间</span><b>' + escapeHtml(formatCreatedAt(entry.createdAt)) + '</b></div>');
+    pendingEntryEdit = entry;
+    el.detailFillBlank.textContent = '跳转到复写并修改';
+    el.detailFillBlank.classList.remove('hidden');
   }
 
   function timelineEntryFromTarget(target) {
@@ -2400,6 +2470,8 @@
     var start = stampParts(blank.start);
     var end = stampParts(blank.end);
     pendingBlankRange = blank;
+    pendingEntryEdit = null;
+    el.detailFillBlank.textContent = '跳转到复写并补充';
     openDetailModal('空白时间段',
       '<div class="timeline-detail-time">开始：' + escapeHtml(start.date) + ' ' + toClock(start.minutes) + '<br>结束：' + escapeHtml(end.date) + ' ' + toClock(end.minutes) + '</div>' +
       '<div class="detail-row"><span>状态</span><b>尚未复写</b></div>' +
@@ -2547,8 +2619,69 @@
         (l.id ? ' <button class="del" data-del="' + escapeHtml(l.id) + '" title="删除该时间段">[x]</button>' : '') +
         '</div>';
     }).join('');
+    Array.prototype.forEach.call(el.logView.querySelectorAll('.log-entry'), function (line) {
+      var entry = state.entries.filter(function (item) {
+        return item.id === line.querySelector('[data-del]').getAttribute('data-del');
+      })[0];
+      if (!entry) { return; }
+      var start = stampParts(entryStartStamp(entry));
+      var end = stampParts(entryEndStamp(entry));
+      line.setAttribute('role', 'button');
+      line.setAttribute('tabindex', '0');
+      line.setAttribute('data-entry-id', entry.id);
+      line.setAttribute('data-tooltip', '开始：' + start.date + ' ' + toClock(start.minutes) + '\n结束：' + end.date + ' ' + toClock(end.minutes) + '\n时间长度：' + hours(entryDuration(entry)) + ' h');
+    });
     el.logView.scrollTop = state.ui.logScrollTop;
   }
+
+  function timelineSlotsForEntry(entryId) {
+    return Array.prototype.filter.call(el.timeline.querySelectorAll('.slot[data-entry-id]'), function (slot) {
+      return slot.getAttribute('data-entry-id') === entryId;
+    });
+  }
+
+  function setTimelineEntryLinked(entryId, linked) {
+    timelineSlotsForEntry(entryId).forEach(function (slot) {
+      slot.classList.toggle('log-linked', linked);
+    });
+  }
+
+  function logEntryFromTarget(target) {
+    var line = target && target.closest && target.closest('.log-entry[data-entry-id]');
+    if (!line) { return null; }
+    return state.entries.filter(function (entry) {
+      return entry.id === line.getAttribute('data-entry-id');
+    })[0] || null;
+  }
+
+  el.logView.addEventListener('mouseover', function (event) {
+    var entry = logEntryFromTarget(event.target);
+    if (entry) { setTimelineEntryLinked(entry.id, true); }
+  });
+
+  el.logView.addEventListener('mouseout', function (event) {
+    var entry = logEntryFromTarget(event.target);
+    var related = event.relatedTarget;
+    if (entry && (!related || !related.closest || !related.closest('.log-entry[data-entry-id]'))) {
+      setTimelineEntryLinked(entry.id, false);
+    }
+  });
+
+  function openLogEntryDetail(event) {
+    if (event.target.closest && event.target.closest('[data-del]')) { return; }
+    var entry = logEntryFromTarget(event.target);
+    if (!entry) { return; }
+    event.preventDefault();
+    setTimelineEntryLinked(entry.id, true);
+    showTimelineEntry(entry);
+  }
+
+  el.logView.addEventListener('click', openLogEntryDetail);
+  el.logView.addEventListener('keydown', function (event) {
+    if (event.key !== 'Enter' && event.key !== ' ') { return; }
+    if (event.target.closest && event.target.closest('[data-del]')) { return; }
+    openLogEntryDetail(event);
+  });
 
   el.logView.addEventListener('scroll', function () {
     if (!el.logView.clientHeight) { return; }
@@ -2630,7 +2763,7 @@
   /* ---------- 宿主信息完整度 ---------- */
   function renderPolish() {
     var checks = [
-      state.host.name && state.host.name !== '未命名修行者',
+      state.host.name && state.host.name !== '修行者',
       !!state.host.weight,
       !!state.host.education,
       !!state.host.talent,
@@ -2695,10 +2828,9 @@
       el.polishFloat.classList.add('hidden');
       return;
     }
-    if (polishPercentValue >= 100) {
-      el.polishFloat.classList.add('hidden');
-      return;
-    }
+    var progressMode = getPriorityProgressMode();
+    if (progressMode === 'polish') { renderProgressFloat(polishPercentValue); }
+    else { renderTaskFloat(); }
     if (!visiblePanel) {
       el.polishFloat.classList.remove('at-top');
       el.polishFloat.classList.add('at-bottom');
@@ -2730,18 +2862,25 @@
     el.polishFloatFill.style.width = percent + '%';
   }
 
+  function getPriorityProgressMode() {
+    if (polishPercentValue < 100) { return 'polish'; }
+    var sideTasks = state.quests.side;
+    if (sideTasks.some(function (q) { return q.status !== 'done'; })) { return 'side'; }
+    return 'main';
+  }
+
   function renderTaskFloat() {
     var mainTotal = availableMainQuestTotal();
     var mainCompleted = Math.min(state.quests.mainCompleted, mainTotal);
     var sideTasks = state.quests.side;
     var sideDone = sideTasks.filter(function (q) { return q.status === 'done'; }).length;
-    var useSide = mainCompleted >= mainTotal && sideTasks.length > 0;
+    var useSide = getPriorityProgressMode() === 'side';
     var completed = useSide ? sideDone : mainCompleted;
     var total = useSide ? sideTasks.length : mainTotal;
     var label = useSide ? '支线任务' : '主线任务';
     var percent = total ? Math.min(completed / total * (useSide ? 100 : 99), useSide ? 100 : 99) : 0;
     el.polishFloatLabel.textContent = label;
-    el.polishFloatPercent.textContent = completed + '/' + total;
+    el.polishFloatPercent.textContent = useSide ? completed + '/' + total : completed + '/' + MAIN_QUEST_TOTAL_LABEL;
     el.polishFloatFill.style.width = percent + '%';
   }
 
@@ -2788,6 +2927,99 @@
   }
 
   var questUpgradeTimers = [];
+  var pendingTaskSubmission = null;
+
+  function updateTaskProgressVisual() {
+    var progress = Number(el.taskProgress.value) || 0;
+    el.taskProgressFill.style.width = progress + '%';
+    el.taskProgressCursor.style.left = progress + '%';
+    el.taskProgressCursor.setAttribute('aria-valuenow', String(progress));
+    el.taskProgressCursor.setAttribute('data-value', progress + '%');
+  }
+
+  function closeTaskSubmitModal() {
+    pendingTaskSubmission = null;
+    el.taskSubmitModal.classList.add('hidden');
+  }
+
+  function openTaskSubmitModal(task) {
+    pendingTaskSubmission = task;
+    var progress = Math.max(0, Math.min(99, Number(task.progress) || 0));
+    el.taskSubmitTitle.textContent = '提交当前任务';
+    el.taskSubmitBody.innerHTML = '<div class="task-submit-name">' + escapeHtml(task.title) + '</div>' +
+      '<div class="task-submit-description">' + escapeHtml(task.desc || '当前任务') + '</div>';
+    el.taskProgressPreviousCursor.style.left = progress + '%';
+    el.taskProgressPreviousCursor.setAttribute('data-value', progress + '%');
+    el.taskProgress.value = '100';
+    updateTaskProgressVisual();
+    el.taskSubmitModal.classList.remove('hidden');
+    el.taskProgressCursor.focus();
+  }
+
+  el.taskProgressCursor.addEventListener('pointerdown', function (event) {
+    event.preventDefault();
+    el.taskProgressCursor.classList.add('dragging');
+    el.taskProgressCursor.setPointerCapture(event.pointerId);
+    setTaskProgressFromPointer(event);
+  });
+  el.taskProgressCursor.addEventListener('pointermove', function (event) {
+    if (el.taskProgressCursor.hasPointerCapture(event.pointerId)) { setTaskProgressFromPointer(event); }
+  });
+  el.taskProgressCursor.addEventListener('pointerup', function (event) {
+    el.taskProgressCursor.classList.remove('dragging');
+    if (el.taskProgressCursor.hasPointerCapture(event.pointerId)) { el.taskProgressCursor.releasePointerCapture(event.pointerId); }
+  });
+  el.taskProgressCursor.addEventListener('click', function (event) {
+    event.stopPropagation();
+  });
+  el.taskProgressRuler.addEventListener('click', function (event) {
+    setTaskProgressFromPointer(event);
+  });
+  function setTaskProgressFromPointer(event) {
+    var rect = document.getElementById('taskProgressRuler').getBoundingClientRect();
+    var progress = Math.round(Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * 100);
+    el.taskProgress.value = String(progress);
+    updateTaskProgressVisual();
+  }
+  el.taskProgressCursor.addEventListener('keydown', function (event) {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') { return; }
+    event.preventDefault();
+    var delta = event.key === 'ArrowLeft' ? -1 : 1;
+    el.taskProgress.value = String(Math.max(0, Math.min(100, Number(el.taskProgress.value) + delta)));
+    updateTaskProgressVisual();
+  });
+  el.taskSubmitCancel.addEventListener('click', closeTaskSubmitModal);
+  el.taskSubmitModal.addEventListener('click', function (event) {
+    if (event.target === el.taskSubmitModal) { closeTaskSubmitModal(); }
+  });
+  el.taskSubmitModal.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') { closeTaskSubmitModal(); }
+  });
+  el.taskSubmitConfirm.addEventListener('click', function () {
+    if (!pendingTaskSubmission) { return; }
+    var progress = Number(el.taskProgress.value);
+    var task = pendingTaskSubmission;
+    closeTaskSubmitModal();
+    if (task.kind === 'main') {
+      if (progress >= 100) {
+        submitMainQuest();
+      } else {
+        state.quests.mainProgress = progress;
+        persist();
+        renderMainQuest();
+        updatePolishFloat();
+        toast('主线任务当前进展已记录：' + progress + '%。', { level: 'SYSTEM' });
+      }
+      return;
+    }
+    task.quest.progress = progress;
+    persist();
+    renderSideQuests();
+    updatePolishFloat();
+    if (progress >= 100) { completeSideQuest(task.quest); }
+    else { toast('支线任务当前进展已记录：' + progress + '%。', { level: 'SYSTEM' }); }
+  });
+
   function clearQuestUpgradeTimers() {
     questUpgradeTimers.forEach(function (timer) { window.clearTimeout(timer); });
     questUpgradeTimers = [];
@@ -2797,7 +3029,7 @@
     syncMainQuestAvailability();
     renderMainQuest();
     renderSideQuests();
-    renderTaskFloat();
+    updatePolishFloat();
     updateQuestBadge();
     syncCustomSelects();
   }
@@ -2817,8 +3049,9 @@
       el.mainQuestBody.innerHTML = '<p class="hint">主线任务尚未加载，请宿主稍候……</p>';
       return;
     }
-    var progress = total ? Math.min(completed / total * 100, 100) : 0;
-    var html = '<div class="quest-progress">系统升级，解锁系统面板全部功能 · 进度 ' + completed + '/' + total + '（' + progress.toFixed(0) + '%）</div>' +
+    var currentProgress = completed < total ? Math.max(0, Math.min(99, Number(state.quests.mainProgress) || 0)) : 0;
+    var progress = total ? Math.min((completed + currentProgress / 100) / total * 99, 99) : 0;
+    var html = '<div class="quest-progress">系统升级，解锁系统面板全部功能 · 进度 ' + completed + '/' + MAIN_QUEST_TOTAL_LABEL + '（' + progress.toFixed(0) + '%）</div>' +
       '<div class="progress-bar"><div class="progress-fill" style="width:' + progress + '%"></div></div>';
 
     MAIN_QUEST_CLUES.slice(0, total).forEach(function (clue, index) {
@@ -2830,6 +3063,7 @@
             ? '<button type="button" class="btn" id="questSubmit">提交任务</button>'
             : '<button type="button" class="btn" id="questAccept">接受任务</button>') +
           '<button type="button" class="btn ghost" id="questGuide">查看指引</button>' +
+          '<div class="quest-current-progress">当前进展：' + (Number(state.quests.mainProgress) || 0) + '%</div>' +
           '</div>';
       }
       html += '<div class="quest-card quest-main-' + (index < completed ? 'done' : index === completed ? 'active' : 'locked') + '">' +
@@ -2861,7 +3095,9 @@
     }
     var submitBtn = document.getElementById('questSubmit');
     if (submitBtn) {
-      submitBtn.addEventListener('click', function () { submitMainQuest(); });
+      submitBtn.addEventListener('click', function () {
+        openTaskSubmitModal({ kind: 'main', title: MAIN_QUEST_CLUES[completed], desc: '系统升级任务', progress: state.quests.mainProgress });
+      });
     }
   }
 
@@ -2869,6 +3105,7 @@
     clearQuestUpgradeTimers();
     state.quests.mainCompleted += 1;
     state.quests.mainAccepted = false;
+    state.quests.mainProgress = 0;
     state.points.attribute += 5;
     persist();
     renderPoints();
@@ -2879,6 +3116,23 @@
     toast('系统正在升级……', { level: 'REWARD' });
     toast('系统升级完成。', { level: 'REWARD' });
     toast('系统等级已提升至 ' + userVersionText() + '，获得属性点 +5。', { level: 'REWARD' });
+  }
+
+  function completeSideQuest(quest) {
+    quest.status = 'done';
+    quest.progress = 0;
+    state.points.attribute += quest.rewardAttr;
+    var contributionReward = quest.rewardAttr + quest.rewardAchievement;
+    state.points.contribution += contributionReward;
+    state.points.achievement += quest.rewardAchievement;
+    state.achievements.push({
+      id: uid(), name: quest.title, points: quest.rewardAchievement,
+      desc: quest.desc || '完成支线任务结算', questId: quest.id
+    });
+    persist();
+    toast('支线任务【' + quest.title + '】已完成，属性点 +' + quest.rewardAttr +
+      '，成就点 +' + quest.rewardAchievement + '，贡献点 +' + contributionReward + '。', { level: 'REWARD' });
+    refreshAll();
   }
 
   el.sideQuestForm.addEventListener('submit', function (event) {
@@ -2921,27 +3175,8 @@
       persist();
       toast('已接受支线任务【' + quest.title + '】。', { level: 'SYSTEM' });
     } else if (target.hasAttribute('data-submit') && quest.status === 'accepted') {
-      quest.status = 'done';
-      state.points.attribute += quest.rewardAttr;
-      var contributionReward = quest.rewardAttr + quest.rewardAchievement;
-      state.points.contribution += contributionReward;
-      state.points.achievement += quest.rewardAchievement;
-      // 支线任务完成即成就：直接结算为一枚成就与对应成就点。
-      var achPoints = quest.rewardAchievement;
-      var attrDelta = quest.rewardAttr > 0 ? '+' + quest.rewardAttr : String(quest.rewardAttr);
-      var achievementDelta = quest.rewardAchievement > 0 ? '+' + quest.rewardAchievement : String(quest.rewardAchievement);
-      var contributionDelta = contributionReward > 0 ? '+' + contributionReward : String(contributionReward);
-      state.achievements.push({
-        id: uid(),
-        name: quest.title,
-        points: achPoints,
-        desc: quest.desc || '完成支线任务结算',
-        questId: quest.id
-      });
-      persist();
-      toast('支线任务【' + quest.title + '】已完成，属性点 ' + attrDelta +
-        '，成就点 ' + achievementDelta + '，贡献点 ' + contributionDelta + '。', { level: 'REWARD' });
-      toast('该支线任务已记入成就簿【' + quest.title + '】，成就点 ' + achievementDelta + '。', { level: 'REWARD' });
+      openTaskSubmitModal({ kind: 'side', title: quest.title, desc: quest.desc, progress: quest.progress, quest: quest });
+      return;
     } else if (target.hasAttribute('data-del-quest')) {
       openConfirmModal('确认删除支线任务【' + quest.title + '】？已获得的奖励和成就不会撤销。', function () {
         state.quests.side = state.quests.side.filter(function (q) { return q.id !== id; });
@@ -2978,19 +3213,8 @@
       persist();
       toast('已接受支线任务【' + quest.title + '】。', { level: 'SYSTEM' });
     } else if (target.hasAttribute('data-submit') && quest.status === 'accepted') {
-      quest.status = 'done';
-      state.points.attribute += quest.rewardAttr;
-      var contributionReward = quest.rewardAttr + quest.rewardAchievement;
-      state.points.contribution += contributionReward;
-      state.points.achievement += quest.rewardAchievement;
-      var achPoints = quest.rewardAchievement;
-      state.achievements.push({
-        id: uid(), name: quest.title, points: achPoints,
-        desc: quest.desc || '完成支线任务结算', questId: quest.id
-      });
-      persist();
-      toast('支线任务【' + quest.title + '】已完成，属性点 +' + quest.rewardAttr +
-        '，成就点 +' + quest.rewardAchievement + '，贡献点 +' + contributionReward + '。', { level: 'REWARD' });
+      openTaskSubmitModal({ kind: 'side', title: quest.title, desc: quest.desc, progress: quest.progress, quest: quest });
+      return;
     } else if (target.hasAttribute('data-del-quest')) {
       openConfirmModal('确认删除支线任务【' + quest.title + '】？已获得的奖励和成就不会撤销。', function () {
         state.quests.side = state.quests.side.filter(function (q) { return q.id !== id; });
@@ -3038,10 +3262,14 @@
       if (q.status === 'open') {
         actions = '<button type="button" class="btn ghost" data-accept="' + escapeHtml(q.id) + '">接受任务</button>';
       } else if (q.status === 'accepted') {
-        actions = '<button type="button" class="btn" data-submit="' + escapeHtml(q.id) + '">提交任务</button>';
+        actions = '<button type="button" class="btn" data-submit="' + escapeHtml(q.id) + '">提交任务</button>' +
+          '';
       }
       actions += '<button type="button" class="btn ghost" data-' + (isHidden ? 'show' : 'hide') + '-quest="' + escapeHtml(q.id) + '">' + (isHidden ? '显示任务' : '隐藏任务') + '</button>';
       actions += '<button type="button" class="btn ghost danger" data-del-quest="' + escapeHtml(q.id) + '">删除任务</button>';
+      if (q.status === 'accepted') {
+        actions += '<div class="quest-current-progress">当前进展：' + (Number(q.progress) || 0) + '%</div>';
+      }
       var rewardClass = q.status === 'done' ? '' : ' quest-reward-pending';
       return '<li class="quest-item quest-' + q.status + (isHidden ? ' quest-hidden' : '') + '">' +
         '<div class="quest-title quest-title-row"><span>' + escapeHtml(q.title) + ' <span class="quest-status">[' + statusLabel + ']</span></span>' +
