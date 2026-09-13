@@ -633,10 +633,6 @@
   });
 
   function flushState() {
-    if (!isValidDateString(startDate) || !Number.isFinite(start) || start < 0 || start >= DAY_MINUTES) {
-      toast('开始日期或时间格式无效，请宿主检查输入。', { level: 'WARN' });
-      return;
-    }
     state.ui.pageScrollTop = Math.max(0, window.scrollY || window.pageYOffset || 0);
     captureEntryDraft();
     persist();
@@ -1866,6 +1862,10 @@
     }
 
     var start = toMinutes(startRaw);
+    if (!isValidDateString(startDate) || !Number.isFinite(start) || start < 0 || start >= DAY_MINUTES) {
+      toast('开始日期或时间格式无效，请宿主检查输入。', { level: 'WARN' });
+      return;
+    }
     var startStamp = dateTimeStamp(startDate, start);
     if (!endDate || !endRaw) {
       var now = new Date();
