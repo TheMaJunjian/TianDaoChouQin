@@ -614,13 +614,13 @@
     if (event.key !== STORAGE_KEY) { return; }
     try {
       if (!event.newValue) {
-        state = defaultState();
+        state = mergeConcurrentState(defaultState());
         persistedSnapshot = cloneState(state);
         syncCollapseState();
         fullRender();
         return;
       }
-      var incoming = mergeDefaults(JSON.parse(event.newValue));
+      var incoming = mergeConcurrentState(JSON.parse(event.newValue));
       if (JSON.stringify(incoming) === JSON.stringify(state)) { return; }
       state = incoming;
       persistedSnapshot = cloneState(state);
@@ -633,6 +633,10 @@
   });
 
   function flushState() {
+    if (!isValidDateString(startDate) || !Number.isFinite(start) || start < 0 || start >= DAY_MINUTES) {
+      toast('开始日期或时间格式无效，请宿主检查输入。', { level: 'WARN' });
+      return;
+    }
     state.ui.pageScrollTop = Math.max(0, window.scrollY || window.pageYOffset || 0);
     captureEntryDraft();
     persist();
@@ -1881,6 +1885,10 @@
       return;
     }
     var end = toMinutes(endRaw);
+    if (!isValidDateString(endDate) || !Number.isFinite(end) || end < 0 || end > DAY_MINUTES) {
+      toast('结束日期或时间格式无效，请宿主检查输入。', { level: 'WARN' });
+      return;
+    }
     var endStamp = dateTimeStamp(endDate, end);
 
     if (endStamp <= startStamp) {
@@ -3407,11 +3415,10 @@
     var list = byDate(state.viewDate);
     var filled = filledMinutes(list);
     var todayList = byDate(todayStr());
-    var todayFilled = filledMinutes(todayList);
 
     var todayLimit = dayLimit(todayStr());
     var todayFilledNow = filledMinutesUpTo(todayList, todayLimit);
-    el.todayFilled.textContent = hours(todayFilled) + ' h';
+    el.todayFilled.textContent = hours(todayFilledNow) + ' h';
     // 今日缺失只统计「已经过去却没有复写」的时间。
     el.todayMissing.textContent = hours(Math.max(todayLimit - todayFilledNow, 0)) + ' h';
     el.totalHours.textContent = hours(rawMinutes(state.entries)) + ' h';
@@ -3419,10 +3426,11 @@
 
     var limit = dayLimit(state.viewDate);
     var filledNow = filledMinutesUpTo(list, limit);
-    var coverage = Math.min(filled / DAY_MINUTES * 100, 100);
+    var displayedFilled = state.viewDate === todayStr() ? filledNow : filled;
+    var coverage = Math.min(displayedFilled / DAY_MINUTES * 100, 100);
     el.coverageFill.style.width = coverage + '%';
     el.coverageHint.textContent = state.viewDate + ' 时间线覆盖 ' + coverage.toFixed(1) + '%（' +
-      hours(filled) + ' h / 24.0 h）' +
+      hours(displayedFilled) + ' h / 24.0 h）' +
       (filledNow >= limit
         ? ' · 截至 ' + toClock(limit) + ' 的日志已闭合。'
         : ' · 截至 ' + toClock(limit) + ' 仍有 ' + hours(limit - filledNow) +
