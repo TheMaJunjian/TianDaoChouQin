@@ -360,7 +360,7 @@
         var endStamp = dateTimeStamp(endDate, end);
         if (!isValidDateString(startDate) || !isValidDateString(endDate) ||
           !Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start >= DAY_MINUTES ||
-          end < 0 || end > DAY_MINUTES || start !== Math.floor(start) || end !== Math.floor(end) ||
+          end < 0 || end > DAY_MINUTES ||
           endStamp < startStamp) {
           return null;
         }
@@ -709,11 +709,15 @@
 
   function toMinutes(hhmm) {
     var p = hhmm.split(':');
-    return Number(p[0]) * 60 + Number(p[1]);
+    return Number(p[0]) * 60 + Number(p[1]) + (Number(p[2]) || 0) / 60;
   }
 
   function toClock(minutes) {
-    return pad(Math.floor(minutes / 60)) + ':' + pad(minutes % 60);
+    var totalSeconds = Math.round(minutes * 60);
+    var wholeMinutes = Math.floor(totalSeconds / 60);
+    var seconds = totalSeconds % 60;
+    var clock = pad(Math.floor(wholeMinutes / 60)) + ':' + pad(wholeMinutes % 60);
+    return seconds ? clock + ':' + pad(seconds) : clock;
   }
 
   function formatCreatedAt(value) {
@@ -773,13 +777,13 @@
 
   function currentStamp() {
     var now = new Date();
-    return dateTimeStamp(todayStr(), now.getHours() * 60 + now.getMinutes());
+    return dateTimeStamp(todayStr(), now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60);
   }
 
   /* 当日进行中的时间不算「空洞」：结算上限取当前时刻。 */
   function nowMinutes() {
     var d = new Date();
-    return d.getHours() * 60 + d.getMinutes();
+    return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
   }
 
   function dayLimit(dateStr) {
