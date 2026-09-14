@@ -720,6 +720,11 @@
     return seconds ? clock + ':' + pad(seconds) : clock;
   }
 
+  function toInputClock(minutes) {
+    var wholeMinutes = Math.floor(Math.max(0, minutes));
+    return pad(Math.floor(wholeMinutes / 60)) + ':' + pad(wholeMinutes % 60);
+  }
+
   function formatCreatedAt(value) {
     if (!value || !Number.isFinite(Date.parse(value))) { return '未知'; }
     var date = new Date(value);
@@ -863,7 +868,7 @@
     var startStamp = nextEntryStartStamp();
     var start = stampParts(startStamp);
     el.startDate.value = start.date;
-    el.startTime.value = toClock(start.minutes);
+    el.startTime.value = toInputClock(start.minutes);
     el.endDate.value = '';
     el.endTime.value = '';
     syncCurrentField(el.endDate);
@@ -1673,9 +1678,9 @@
       var entryStart = stampParts(entryStartStamp(entry));
       var entryEnd = stampParts(entryEndStamp(entry));
       el.startDate.value = entryStart.date;
-      el.startTime.value = toClock(entryStart.minutes);
+      el.startTime.value = toInputClock(entryStart.minutes);
       el.endDate.value = entryEnd.date;
-      el.endTime.value = toClock(entryEnd.minutes);
+      el.endTime.value = toInputClock(entryEnd.minutes);
       el.category.value = entry.category || '';
       el.activity.value = entry.activity;
       el.level.value = entry.level || 'INFO';
@@ -1697,9 +1702,9 @@
     var start = stampParts(pendingBlankRange.start);
     var end = stampParts(pendingBlankRange.end);
     el.startDate.value = start.date;
-    el.startTime.value = toClock(start.minutes);
+    el.startTime.value = toInputClock(start.minutes);
     el.endDate.value = end.date;
-    el.endTime.value = toClock(end.minutes);
+    el.endTime.value = toInputClock(end.minutes);
     syncCurrentField(el.endDate);
     syncCurrentField(el.endTime);
     state.viewDate = start.date;
@@ -1879,7 +1884,7 @@
         syncCurrentField(el.endDate);
       }
       if (!endRaw) {
-        endRaw = toClock(now.getHours() * 60 + now.getMinutes());
+        endRaw = toInputClock(now.getHours() * 60 + now.getMinutes());
         el.endTime.value = endRaw;
         syncCurrentField(el.endTime);
       }
@@ -1895,6 +1900,11 @@
     }
     var endStamp = dateTimeStamp(endDate, end);
 
+    if (endStamp <= startStamp && startDate === endDate && startRaw === endRaw) {
+      // 表单只显示到分钟；同一分钟的记录用一秒后台精度区分。
+      end += 1 / 60;
+      endStamp = dateTimeStamp(endDate, end);
+    }
     if (endStamp <= startStamp) {
       toast('时间悖论警告：结束日期时间须晚于开始日期时间。', { level: 'ERROR' });
       el.endDate.value = '';
