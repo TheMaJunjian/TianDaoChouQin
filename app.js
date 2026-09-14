@@ -117,6 +117,8 @@
   var pendingBlankRange = null;
   var pendingEntryEdit = null;
   var editingEntryId = null;
+  var entryStartSecond = null;
+  var entryEndSecond = null;
   var toastQueue = [];
   var toastTimer = null;
   var toastNextStartAt = 0;
@@ -486,6 +488,10 @@
         ['startDate', 'startTime', 'endDate', 'endTime', 'category', 'activity', 'level'].forEach(function (key) {
           merged.ui.entryDraft[key] = typeof parsedUi.entryDraft[key] === 'string' ? parsedUi.entryDraft[key] : '';
         });
+        merged.ui.entryDraft.startSecond = Number.isFinite(Number(parsedUi.entryDraft.startSecond))
+          ? Number(parsedUi.entryDraft.startSecond) : null;
+        merged.ui.entryDraft.endSecond = Number.isFinite(Number(parsedUi.entryDraft.endSecond))
+          ? Number(parsedUi.entryDraft.endSecond) : null;
       }
     });
     safe(function () {
@@ -716,13 +722,13 @@
     var totalSeconds = Math.round(minutes * 60);
     var wholeMinutes = Math.floor(totalSeconds / 60);
     var seconds = totalSeconds % 60;
-    var clock = pad(Math.floor(wholeMinutes / 60)) + ':' + pad(wholeMinutes % 60);
-    return seconds ? clock + ':' + pad(seconds) : clock;
+    return pad(Math.floor(wholeMinutes / 60)) + ':' + pad(wholeMinutes % 60) + ':' + pad(seconds);
   }
 
   function toInputClock(minutes) {
-    var wholeMinutes = Math.floor(Math.max(0, minutes));
-    return pad(Math.floor(wholeMinutes / 60)) + ':' + pad(wholeMinutes % 60);
+    var totalSeconds = Math.round(Math.max(0, minutes) * 60);
+    var wholeMinutes = Math.floor(totalSeconds / 60);
+    return pad(Math.floor(wholeMinutes / 60)) + ':' + pad(wholeMinutes % 60) + ':' + pad(totalSeconds % 60);
   }
 
   function formatCreatedAt(value) {
@@ -869,6 +875,8 @@
     var start = stampParts(startStamp);
     el.startDate.value = start.date;
     el.startTime.value = toInputClock(start.minutes);
+    entryStartSecond = Math.round((start.minutes - Math.floor(start.minutes)) * 60);
+    entryEndSecond = null;
     el.endDate.value = '';
     el.endTime.value = '';
     syncCurrentField(el.endDate);
@@ -881,6 +889,8 @@
       startTime: el.startTime.value,
       endDate: el.endDate.value,
       endTime: el.endTime.value,
+      startSecond: entryStartSecond,
+      endSecond: entryEndSecond,
       category: el.category.value,
       activity: el.activity.value,
       level: el.level.value
@@ -894,6 +904,8 @@
     el.startTime.value = draft.startTime;
     el.endDate.value = draft.endDate;
     el.endTime.value = draft.endTime;
+    entryStartSecond = Number.isFinite(Number(draft.startSecond)) ? Number(draft.startSecond) : null;
+    entryEndSecond = Number.isFinite(Number(draft.endSecond)) ? Number(draft.endSecond) : null;
     el.category.value = draft.category;
     el.activity.value = draft.activity;
     el.level.value = draft.level || 'INFO';
@@ -917,15 +929,21 @@
   }
 
   [el.endDate, el.endTime].forEach(function (input) {
-    input.addEventListener('input', function () { syncCurrentField(input); scheduleEntryDraftSave(); });
-    input.addEventListener('change', function () { syncCurrentField(input); scheduleEntryDraftSave(); });
+    input.addEventListener('input', function () { entryEndSecond = null; syncCurrentField(input); scheduleEntryDraftSave(); });
+    input.addEventListener('change', function () { entryEndSecond = null; syncCurrentField(input); scheduleEntryDraftSave(); });
     input.addEventListener('blur', function () { syncCurrentField(input); });
     input.addEventListener('focus', function () { syncCurrentField(input); });
   });
 
   [el.startDate, el.startTime, el.category, el.activity, el.level].forEach(function (input) {
-    input.addEventListener('input', scheduleEntryDraftSave);
-    input.addEventListener('change', scheduleEntryDraftSave);
+    input.addEventListener('input', function () {
+      if (input === el.startDate || input === el.startTime) { entryStartSecond = null; }
+      scheduleEntryDraftSave();
+    });
+    input.addEventListener('change', function () {
+      if (input === el.startDate || input === el.startTime) { entryStartSecond = null; }
+      scheduleEntryDraftSave();
+    });
   });
 
   function entriesOverlapping(startStamp, endStamp, excludedId) {
@@ -1679,8 +1697,10 @@
       var entryEnd = stampParts(entryEndStamp(entry));
       el.startDate.value = entryStart.date;
       el.startTime.value = toInputClock(entryStart.minutes);
+      entryStartSecond = Math.round((entryStart.minutes - Math.floor(entryStart.minutes)) * 60);
       el.endDate.value = entryEnd.date;
       el.endTime.value = toInputClock(entryEnd.minutes);
+      entryEndSecond = Math.round((entryEnd.minutes - Math.floor(entryEnd.minutes)) * 60);
       el.category.value = entry.category || '';
       el.activity.value = entry.activity;
       el.level.value = entry.level || 'INFO';
@@ -1701,10 +1721,13 @@
     if (!pendingBlankRange) { return; }
     var start = stampParts(pendingBlankRange.start);
     var end = stampParts(pendingBlankRange.end);
+    editingEntryId = null;
     el.startDate.value = start.date;
     el.startTime.value = toInputClock(start.minutes);
+    entryStartSecond = Math.round((start.minutes - Math.floor(start.minutes)) * 60);
     el.endDate.value = end.date;
     el.endTime.value = toInputClock(end.minutes);
+    entryEndSecond = null;
     syncCurrentField(el.endDate);
     syncCurrentField(el.endTime);
     state.viewDate = start.date;
@@ -1871,6 +1894,9 @@
     }
 
     var start = toMinutes(startRaw);
+    if (startRaw.split(':').length < 3 && Number.isFinite(entryStartSecond)) {
+      start += entryStartSecond / 60;
+    }
     if (!isValidDateString(startDate) || !Number.isFinite(start) || start < 0 || start >= DAY_MINUTES) {
       toast('开始日期或时间格式无效，请宿主检查输入。', { level: 'WARN' });
       return;
@@ -1884,7 +1910,7 @@
         syncCurrentField(el.endDate);
       }
       if (!endRaw) {
-        endRaw = toInputClock(now.getHours() * 60 + now.getMinutes());
+        endRaw = toInputClock(now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60);
         el.endTime.value = endRaw;
         syncCurrentField(el.endTime);
       }
@@ -1894,17 +1920,14 @@
       return;
     }
     var end = toMinutes(endRaw);
+    if (endRaw.split(':').length < 3) {
+      end += (Number.isFinite(entryEndSecond) ? entryEndSecond : new Date().getSeconds()) / 60;
+    }
     if (!isValidDateString(endDate) || !Number.isFinite(end) || end < 0 || end > DAY_MINUTES) {
       toast('结束日期或时间格式无效，请宿主检查输入。', { level: 'WARN' });
       return;
     }
     var endStamp = dateTimeStamp(endDate, end);
-
-    if (endStamp <= startStamp && startDate === endDate && startRaw === endRaw) {
-      // 表单只显示到分钟；同一分钟的记录用一秒后台精度区分。
-      end += 1 / 60;
-      endStamp = dateTimeStamp(endDate, end);
-    }
     if (endStamp <= startStamp) {
       toast('时间悖论警告：结束日期时间须晚于开始日期时间。', { level: 'ERROR' });
       el.endDate.value = '';
@@ -1940,6 +1963,7 @@
         state.entries.push(newEntry);
       }
       editingEntryId = null;
+      entryEndSecond = null;
       persist();
 
       state.viewDate = startDate;
@@ -1947,7 +1971,7 @@
       el.activity.value = '';
       applyEntryDefaults();
       el.startDate.value = endDate;
-      captureEntryDraft();
+      state.ui.entryDraft = null;
       persist();
 
       var rangeLabel = startDate === endDate
@@ -2270,7 +2294,7 @@
       var gapEnd = Math.min(e.start, limit);
       if (gapEnd > cursor) {
         lines.push({
-          time: toClock(cursor) + ':00',
+          time: toClock(cursor),
           level: 'WARN',
           message: '未记录时段 ' + toClock(cursor) + '-' + toClock(gapEnd) +
             '（' + hours(gapEnd - cursor) + ' h）：这段时间尚未记录。',
@@ -2278,7 +2302,7 @@
         });
       }
       lines.push({
-        time: toClock(e.start) + ':00',
+        time: toClock(e.start),
         level: e.level,
         message: toClock(e.start) + '-' + toClock(e.end) + ' [' + e.category + '] ' +
           e.activity + '（' + hours(e.end - e.start) + ' h；复写时间：' + formatCreatedAt(e.createdAt) + '）',
@@ -2292,7 +2316,7 @@
 
     if (cursor < limit) {
       lines.push({
-        time: toClock(cursor) + ':00',
+        time: toClock(cursor),
         level: 'WARN',
         message: '未记录时段 ' + toClock(cursor) + '-' + toClock(limit) + '（' + hours(limit - cursor) +
           ' h）：这段时间尚未记录。',
@@ -2303,7 +2327,7 @@
     var filled = filledMinutesUpTo(list, limit);
     var closed = filled >= limit;
     lines.push({
-      time: isToday ? toClock(limit) + ':00' : '23:59:59',
+      time: isToday ? toClock(limit) : '23:59:59',
       level: closed ? 'SYSTEM' : 'WARN',
       message: closed
         ? (isToday
