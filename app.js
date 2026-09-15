@@ -657,74 +657,46 @@
 
   /* 仅在复写页填写「作为」时，把提交按钮移到键盘和浮动进度条上方。 */
   var focusedEntryActivity = false;
-  var keyboardScrollTimer = null;
+  var lastKeyboardInset = 0;
 
-  function cancelKeyboardScroll() {
-    if (keyboardScrollTimer) {
-      window.clearTimeout(keyboardScrollTimer);
-      keyboardScrollTimer = null;
-    }
-  }
-
-  function updateKeyboardInset() {
+  function getKeyboardInset() {
     var viewport = window.visualViewport;
-    var isEntryActivityFocused = focusedEntryActivity && document.activeElement === el.activity;
-    var inset = isEntryActivityFocused && viewport
+    return viewport
       ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
       : 0;
-    document.documentElement.style.setProperty('--keyboard-inset', Math.round(inset) + 'px');
   }
 
   function keepEntrySubmitVisible() {
-    keyboardScrollTimer = null;
     if (!focusedEntryActivity || document.activeElement !== el.activity || !el.entrySubmit.isConnected) { return; }
 
     var viewport = window.visualViewport;
-    var keyboardInset = viewport
-      ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
-      : 0;
-    if (viewport && keyboardInset < 80) { return; }
-    var viewportTop = viewport ? viewport.offsetTop : 0;
-    var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
-    var safeBottom = viewportBottom - 8;
-    if (!el.polishFloat.classList.contains('hidden')) {
-      var progressRect = el.polishFloat.getBoundingClientRect();
-      if (progressRect.top > viewportTop && progressRect.top < viewportBottom) {
-        safeBottom = progressRect.top - 4;
-      }
-    }
+    if (!viewport || el.polishFloat.classList.contains('hidden')) { return; }
+    var progressRect = el.polishFloat.getBoundingClientRect();
     var submitRect = el.entrySubmit.getBoundingClientRect();
-    var scrollDelta = 0;
-
-    if (submitRect.bottom > safeBottom) {
-      scrollDelta = submitRect.bottom - safeBottom;
-    }
-    if (scrollDelta) { window.scrollBy(0, scrollDelta); }
-  }
-
-  function scheduleEntrySubmitScroll(delay) {
-    cancelKeyboardScroll();
-    keyboardScrollTimer = window.setTimeout(keepEntrySubmitVisible, delay || 0);
+    var fixedGap = 12;
+    var targetBottom = progressRect.top - fixedGap;
+    window.scrollBy(0, submitRect.bottom - targetBottom);
   }
 
   document.addEventListener('focusin', function (event) {
     if (event.target !== el.activity || !isNarrowScreen()) { return; }
     focusedEntryActivity = true;
-    updateKeyboardInset();
-    scheduleEntrySubmitScroll(350);
+    lastKeyboardInset = getKeyboardInset();
   });
   document.addEventListener('focusout', function (event) {
     if (event.target === el.activity) {
       focusedEntryActivity = false;
-      cancelKeyboardScroll();
-      updateKeyboardInset();
+      lastKeyboardInset = 0;
     }
   });
-  updateKeyboardInset();
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
-      updateKeyboardInset();
-      if (focusedEntryActivity) { scheduleEntrySubmitScroll(80); }
+      var previousInset = lastKeyboardInset;
+      var currentInset = getKeyboardInset();
+      lastKeyboardInset = currentInset;
+      if (focusedEntryActivity && previousInset < 80 && currentInset >= 80) {
+        keepEntrySubmitVisible();
+      }
     });
   }
   document.addEventListener('visibilitychange', function () {
