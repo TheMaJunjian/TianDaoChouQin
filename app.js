@@ -705,7 +705,7 @@
     if (event.target !== el.activity || !isNarrowScreen()) { return; }
     focusedEntryActivity = true;
     updateKeyboardInset();
-    scheduleEntrySubmitScroll(0);
+    scheduleEntrySubmitScroll(300);
   });
   document.addEventListener('focusout', function (event) {
     if (event.target === el.activity) {
@@ -720,7 +720,8 @@
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
       updateKeyboardInset();
-      if (focusedEntryActivity && window.visualViewport.height < window.innerHeight - 80) {
+      if (focusedEntryActivity && document.activeElement === el.activity
+        && window.visualViewport.height < window.innerHeight - 80) {
         scheduleEntrySubmitScroll(60);
       }
     });
