@@ -658,24 +658,13 @@
   /* 仅在复写页填写「作为」时，把提交按钮移到键盘和浮动进度条上方。 */
   var focusedEntryActivity = false;
   var keyboardScrollTimer = null;
-  var keyboardScrollSequenceTimers = [];
-
-  function cancelKeyboardScrollSequence() {
-    keyboardScrollSequenceTimers.forEach(function (timer) { window.clearTimeout(timer); });
-    keyboardScrollSequenceTimers = [];
-    if (keyboardScrollTimer) {
-      window.clearTimeout(keyboardScrollTimer);
-      keyboardScrollTimer = null;
-    }
-  }
 
   function updateKeyboardInset() {
     var viewport = window.visualViewport;
-    var isEntryActivityFocused = focusedEntryActivity && document.activeElement === el.activity;
-    var inset = isEntryActivityFocused && viewport
+    var keyboardInset = focusedEntryActivity && viewport
       ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
       : 0;
-    document.documentElement.style.setProperty('--keyboard-inset', Math.round(inset) + 'px');
+    document.documentElement.style.setProperty('--keyboard-inset', Math.round(keyboardInset) + 'px');
   }
 
   function keepEntrySubmitVisible() {
@@ -694,12 +683,17 @@
       }
     }
     var submitRect = el.entrySubmit.getBoundingClientRect();
-    var scrollDelta = 0;
-
-    if (submitRect.bottom > safeBottom) {
-      scrollDelta = submitRect.bottom - safeBottom;
+    var scrollDelta = submitRect.bottom - safeBottom;
+    if (scrollDelta > 1) {
+      var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight - window.scrollY);
+      var extraSpace = Math.max(0, scrollDelta - maxScroll);
+      if (extraSpace > 1) {
+        document.documentElement.style.setProperty('--entry-scroll-space', Math.ceil(extraSpace) + 'px');
+        scheduleEntrySubmitScroll(0);
+        return;
+      }
     }
-    if (scrollDelta) { window.scrollBy(0, scrollDelta); }
+    if (Math.abs(scrollDelta) > 1) { window.scrollBy(0, scrollDelta); }
   }
 
   function scheduleEntrySubmitScroll(delay) {
@@ -707,23 +701,18 @@
     keyboardScrollTimer = window.setTimeout(keepEntrySubmitVisible, delay || 0);
   }
 
-  function scheduleEntrySubmitScrollSequence() {
-    cancelKeyboardScrollSequence();
-    [0, 180, 420].forEach(function (delay) {
-      keyboardScrollSequenceTimers.push(window.setTimeout(keepEntrySubmitVisible, delay));
-    });
-  }
-
   document.addEventListener('focusin', function (event) {
     if (event.target !== el.activity || !isNarrowScreen()) { return; }
     focusedEntryActivity = true;
     updateKeyboardInset();
-    scheduleEntrySubmitScrollSequence();
+    scheduleEntrySubmitScroll(0);
   });
   document.addEventListener('focusout', function (event) {
     if (event.target === el.activity) {
       focusedEntryActivity = false;
-      cancelKeyboardScrollSequence();
+      document.documentElement.style.setProperty('--entry-scroll-space', '0px');
+      if (keyboardScrollTimer) { window.clearTimeout(keyboardScrollTimer); }
+      keyboardScrollTimer = null;
       updateKeyboardInset();
     }
   });
@@ -731,7 +720,9 @@
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
       updateKeyboardInset();
-      if (focusedEntryActivity) { scheduleEntrySubmitScroll(40); }
+      if (focusedEntryActivity && window.visualViewport.height < window.innerHeight - 80) {
+        scheduleEntrySubmitScroll(60);
+      }
     });
     window.visualViewport.addEventListener('scroll', updateKeyboardInset);
   }
