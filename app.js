@@ -177,7 +177,7 @@
     'skillForm', 'skillName', 'skillMode', 'skillLevelWrap', 'skillLevel',
     'skillHoursWrap', 'skillHours', 'skillList', 'hiddenSkillsBlock', 'hiddenSkillList', 'hiddenSkillToggle',
     'achList', 'hiddenAchievementsBlock', 'hiddenAchievementList', 'hiddenAchievementToggle',
-    'entryForm', 'startDate', 'startTime', 'endDate', 'endTime', 'category', 'activity',
+    'entryForm', 'entrySubmit', 'startDate', 'startTime', 'endDate', 'endTime', 'category', 'activity',
     'level', 'prevDay', 'nextDay', 'viewDate', 'timeline', 'timelineRuler', 'timelineStartCursor', 'timelineEndCursor', 'timelineAxis', 'coverageFill',
     'coverageHint', 'logDateLabel', 'logView', 'copyLog', 'exportData',
     'importBtn', 'importFile', 'resetAll', 'clearDay', 'catList',
@@ -654,6 +654,87 @@
       persist();
     }, 150);
   }, { passive: true });
+
+  /* 仅在复写页填写「作为」时，把提交按钮移到键盘和浮动进度条上方。 */
+  var focusedEntryActivity = false;
+  var keyboardScrollTimer = null;
+  var keyboardScrollSequenceTimers = [];
+
+  function cancelKeyboardScrollSequence() {
+    keyboardScrollSequenceTimers.forEach(function (timer) { window.clearTimeout(timer); });
+    keyboardScrollSequenceTimers = [];
+    if (keyboardScrollTimer) {
+      window.clearTimeout(keyboardScrollTimer);
+      keyboardScrollTimer = null;
+    }
+  }
+
+  function updateKeyboardInset() {
+    var viewport = window.visualViewport;
+    var isEntryActivityFocused = focusedEntryActivity && document.activeElement === el.activity;
+    var inset = isEntryActivityFocused && viewport
+      ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
+      : 0;
+    document.documentElement.style.setProperty('--keyboard-inset', Math.round(inset) + 'px');
+  }
+
+  function keepEntrySubmitVisible() {
+    keyboardScrollTimer = null;
+    if (!focusedEntryActivity || document.activeElement !== el.activity || !el.entrySubmit.isConnected) { return; }
+
+    var viewport = window.visualViewport;
+    var viewportTop = viewport ? viewport.offsetTop : 0;
+    var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
+    var edgePadding = 16;
+    var safeBottom = viewportBottom - edgePadding;
+    if (!el.polishFloat.classList.contains('hidden')) {
+      var progressRect = el.polishFloat.getBoundingClientRect();
+      if (progressRect.top > viewportTop && progressRect.top < viewportBottom) {
+        safeBottom = Math.min(safeBottom, progressRect.top - 8);
+      }
+    }
+    var submitRect = el.entrySubmit.getBoundingClientRect();
+    var scrollDelta = 0;
+
+    if (submitRect.bottom > safeBottom) {
+      scrollDelta = submitRect.bottom - safeBottom;
+    }
+    if (scrollDelta) { window.scrollBy(0, scrollDelta); }
+  }
+
+  function scheduleEntrySubmitScroll(delay) {
+    if (keyboardScrollTimer) { window.clearTimeout(keyboardScrollTimer); }
+    keyboardScrollTimer = window.setTimeout(keepEntrySubmitVisible, delay || 0);
+  }
+
+  function scheduleEntrySubmitScrollSequence() {
+    cancelKeyboardScrollSequence();
+    [0, 180, 420].forEach(function (delay) {
+      keyboardScrollSequenceTimers.push(window.setTimeout(keepEntrySubmitVisible, delay));
+    });
+  }
+
+  document.addEventListener('focusin', function (event) {
+    if (event.target !== el.activity || !isNarrowScreen()) { return; }
+    focusedEntryActivity = true;
+    updateKeyboardInset();
+    scheduleEntrySubmitScrollSequence();
+  });
+  document.addEventListener('focusout', function (event) {
+    if (event.target === el.activity) {
+      focusedEntryActivity = false;
+      cancelKeyboardScrollSequence();
+      updateKeyboardInset();
+    }
+  });
+  updateKeyboardInset();
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', function () {
+      updateKeyboardInset();
+      if (focusedEntryActivity) { scheduleEntrySubmitScroll(40); }
+    });
+    window.visualViewport.addEventListener('scroll', updateKeyboardInset);
+  }
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'hidden') { flushState(); }
   });
