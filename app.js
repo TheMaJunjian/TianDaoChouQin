@@ -658,8 +658,11 @@
   /* 仅在复写页填写「作为」时，把提交按钮移到键盘和浮动进度条上方。 */
   var focusedEntryActivity = false;
   var keyboardScrollTimer = null;
+  var keyboardScrollSequenceTimers = [];
 
-  function cancelKeyboardScroll() {
+  function cancelKeyboardScrollSequence() {
+    keyboardScrollSequenceTimers.forEach(function (timer) { window.clearTimeout(timer); });
+    keyboardScrollSequenceTimers = [];
     if (keyboardScrollTimer) {
       window.clearTimeout(keyboardScrollTimer);
       keyboardScrollTimer = null;
@@ -680,17 +683,14 @@
     if (!focusedEntryActivity || document.activeElement !== el.activity || !el.entrySubmit.isConnected) { return; }
 
     var viewport = window.visualViewport;
-    var keyboardInset = viewport
-      ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
-      : 0;
-    if (viewport && keyboardInset < 80) { return; }
     var viewportTop = viewport ? viewport.offsetTop : 0;
     var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
-    var safeBottom = viewportBottom - 8;
+    var edgePadding = 16;
+    var safeBottom = viewportBottom - edgePadding;
     if (!el.polishFloat.classList.contains('hidden')) {
       var progressRect = el.polishFloat.getBoundingClientRect();
       if (progressRect.top > viewportTop && progressRect.top < viewportBottom) {
-        safeBottom = progressRect.top - 4;
+        safeBottom = Math.min(safeBottom, progressRect.top - 8);
       }
     }
     var submitRect = el.entrySubmit.getBoundingClientRect();
@@ -703,20 +703,27 @@
   }
 
   function scheduleEntrySubmitScroll(delay) {
-    cancelKeyboardScroll();
+    if (keyboardScrollTimer) { window.clearTimeout(keyboardScrollTimer); }
     keyboardScrollTimer = window.setTimeout(keepEntrySubmitVisible, delay || 0);
+  }
+
+  function scheduleEntrySubmitScrollSequence() {
+    cancelKeyboardScrollSequence();
+    [0, 180, 420].forEach(function (delay) {
+      keyboardScrollSequenceTimers.push(window.setTimeout(keepEntrySubmitVisible, delay));
+    });
   }
 
   document.addEventListener('focusin', function (event) {
     if (event.target !== el.activity || !isNarrowScreen()) { return; }
     focusedEntryActivity = true;
     updateKeyboardInset();
-    scheduleEntrySubmitScroll(350);
+    scheduleEntrySubmitScrollSequence();
   });
   document.addEventListener('focusout', function (event) {
     if (event.target === el.activity) {
       focusedEntryActivity = false;
-      cancelKeyboardScroll();
+      cancelKeyboardScrollSequence();
       updateKeyboardInset();
     }
   });
@@ -724,8 +731,9 @@
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
       updateKeyboardInset();
-      if (focusedEntryActivity) { scheduleEntrySubmitScroll(80); }
+      if (focusedEntryActivity) { scheduleEntrySubmitScroll(40); }
     });
+    window.visualViewport.addEventListener('scroll', updateKeyboardInset);
   }
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'hidden') { flushState(); }
