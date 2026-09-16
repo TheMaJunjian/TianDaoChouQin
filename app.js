@@ -658,6 +658,7 @@
   /* 仅在复写页填写「作为」时，通过一次页面滚动把提交按钮移到浮动条上方。 */
   var ENTRY_FLOAT_GAP = 8;
   var ENTRY_ALIGNMENT_SETTLE_MS = 120;
+  var ENTRY_CLICK_ALIGNMENT_WINDOW_MS = 700;
   var focusedEntryActivity = false;
   var entryAlignmentTimer = null;
   var entryAutoScrollClearTimer = null;
@@ -666,6 +667,7 @@
   var entryKeyboardStableHeight = 0;
   var entryKeyboardVisible = false;
   var entryViewportStabilityTimer = null;
+  var entryActivityClickedAt = 0;
 
   function updateKeyboardInset() {
     var viewport = window.visualViewport;
@@ -696,7 +698,8 @@
       var stableHeightDelta = stableHeight - previousStableHeight;
       entryKeyboardStableHeight = stableHeight;
       entryKeyboardVisible = stableHeightDelta < -80;
-      if (entryKeyboardVisible && focusedEntryActivity
+      var recentlyClickedActivity = Date.now() - entryActivityClickedAt <= ENTRY_CLICK_ALIGNMENT_WINDOW_MS;
+      if (entryKeyboardVisible && recentlyClickedActivity && focusedEntryActivity
         && (entryAlignmentRequested || entryAutoScrollPending)) {
         scheduleEntryAlignment(entryAutoScrollPending ? 0 : ENTRY_ALIGNMENT_SETTLE_MS);
       }
@@ -706,7 +709,8 @@
   function alignEntrySubmitOnce() {
     entryAlignmentTimer = null;
     if (!focusedEntryActivity || document.activeElement !== el.activity || !el.entrySubmit.isConnected) { return; }
-    if (!entryKeyboardVisible) {
+    var recentlyClickedActivity = Date.now() - entryActivityClickedAt <= ENTRY_CLICK_ALIGNMENT_WINDOW_MS;
+    if (!entryKeyboardVisible || !recentlyClickedActivity) {
       return;
     }
 
@@ -782,6 +786,7 @@
   el.activity.addEventListener('click', function () {
     if (!isNarrowScreen() || document.activeElement !== el.activity) { return; }
     focusedEntryActivity = true;
+    entryActivityClickedAt = Date.now();
     entryAlignmentRequested = true;
     updateKeyboardInset();
     scheduleEntryViewportStability();
