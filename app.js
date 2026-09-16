@@ -661,7 +661,6 @@
   var focusedEntryActivity = false;
   var entryAlignmentTimer = null;
   var entryAutoScrollClearTimer = null;
-  var entryAutoScrollCorrectionTimer = null;
   var entryAutoScrollPending = false;
   var entryAlignmentRequested = false;
   var entryKeyboardStableHeight = 0;
@@ -744,11 +743,6 @@
       }, ENTRY_ALIGNMENT_SETTLE_MS * 2);
       // 视口变化后如果差值为负，scrollDelta 会带符号地把多余滚动反向抵消。
       window.scrollBy(0, scrollDelta);
-      if (entryAutoScrollCorrectionTimer) { window.clearTimeout(entryAutoScrollCorrectionTimer); }
-      entryAutoScrollCorrectionTimer = window.setTimeout(function () {
-        entryAutoScrollCorrectionTimer = null;
-        if (entryAutoScrollPending) { alignEntrySubmitOnce(); }
-      }, ENTRY_ALIGNMENT_SETTLE_MS);
     } else if (entryAutoScrollPending) {
       entryAutoScrollPending = false;
       if (entryAutoScrollClearTimer) { window.clearTimeout(entryAutoScrollClearTimer); }
@@ -776,8 +770,6 @@
       entryAlignmentTimer = null;
       if (entryAutoScrollClearTimer) { window.clearTimeout(entryAutoScrollClearTimer); }
       entryAutoScrollClearTimer = null;
-      if (entryAutoScrollCorrectionTimer) { window.clearTimeout(entryAutoScrollCorrectionTimer); }
-      entryAutoScrollCorrectionTimer = null;
       entryAutoScrollPending = false;
       entryAlignmentRequested = false;
       entryKeyboardVisible = false;
