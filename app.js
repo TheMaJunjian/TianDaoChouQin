@@ -664,9 +664,6 @@
   var entryAutoScrollPending = false;
   var entryAlignmentRequested = false;
   var entryKeyboardBaseHeight = 0;
-  var entryKeyboardStableHeight = 0;
-  var entryKeyboardVisible = false;
-  var entryViewportStabilityTimer = null;
 
   function updateKeyboardInset() {
     var viewport = window.visualViewport;
@@ -676,34 +673,19 @@
     document.documentElement.style.setProperty('--keyboard-inset', Math.round(keyboardInset) + 'px');
   }
 
-  function currentEntryViewportHeight() {
+  function isKeyboardVisible() {
     var viewport = window.visualViewport;
-    return viewport ? viewport.height : window.innerHeight;
-  }
-
-  function scheduleEntryViewportStability() {
-    if (entryViewportStabilityTimer) { window.clearTimeout(entryViewportStabilityTimer); }
-    var observedHeight = currentEntryViewportHeight();
-    entryViewportStabilityTimer = window.setTimeout(function checkStableViewport() {
-      entryViewportStabilityTimer = null;
-      var stableHeight = currentEntryViewportHeight();
-      if (Math.abs(stableHeight - observedHeight) > 1) {
-        scheduleEntryViewportStability();
-        return;
-      }
-      entryKeyboardStableHeight = stableHeight;
-      entryKeyboardVisible = entryKeyboardBaseHeight - entryKeyboardStableHeight > 80;
-      if (entryKeyboardVisible && focusedEntryActivity
-        && (entryAlignmentRequested || entryAutoScrollPending)) {
-        scheduleEntryAlignment(entryAutoScrollPending ? 0 : ENTRY_ALIGNMENT_SETTLE_MS);
-      }
-    }, ENTRY_ALIGNMENT_SETTLE_MS);
+    var viewportShrunk = entryKeyboardBaseHeight > 0
+      && entryKeyboardBaseHeight - window.innerHeight > 80;
+    var visualViewportShrunk = viewport
+      && window.innerHeight - viewport.height - viewport.offsetTop > 80;
+    return !!(viewportShrunk || visualViewportShrunk);
   }
 
   function alignEntrySubmitOnce() {
     entryAlignmentTimer = null;
     if (!focusedEntryActivity || document.activeElement !== el.activity || !el.entrySubmit.isConnected) { return; }
-    if (!entryKeyboardVisible) {
+    if (!isKeyboardVisible()) {
       return;
     }
 
@@ -752,12 +734,10 @@
   document.addEventListener('focusin', function (event) {
     if (event.target !== el.activity || !isNarrowScreen()) { return; }
     focusedEntryActivity = true;
-    entryKeyboardBaseHeight = currentEntryViewportHeight();
-    entryKeyboardStableHeight = entryKeyboardBaseHeight;
-    entryKeyboardVisible = false;
+    entryKeyboardBaseHeight = Math.max(window.innerHeight, window.screen.height || 0);
     entryAlignmentRequested = true;
     updateKeyboardInset();
-    scheduleEntryViewportStability();
+    scheduleEntryAlignment(ENTRY_ALIGNMENT_SETTLE_MS);
   });
   document.addEventListener('focusout', function (event) {
     if (event.target === el.activity) {
@@ -769,10 +749,6 @@
       entryAutoScrollPending = false;
       entryAlignmentRequested = false;
       entryKeyboardBaseHeight = 0;
-      entryKeyboardStableHeight = 0;
-      entryKeyboardVisible = false;
-      if (entryViewportStabilityTimer) { window.clearTimeout(entryViewportStabilityTimer); }
-      entryViewportStabilityTimer = null;
       document.documentElement.style.setProperty('--entry-scroll-space', '0px');
       updateKeyboardInset();
     }
@@ -781,18 +757,21 @@
     if (!isNarrowScreen() || document.activeElement !== el.activity) { return; }
     focusedEntryActivity = true;
     if (!entryKeyboardBaseHeight) {
-      entryKeyboardBaseHeight = currentEntryViewportHeight();
+      entryKeyboardBaseHeight = Math.max(window.innerHeight, window.screen.height || 0);
     }
     entryAlignmentRequested = true;
     updateKeyboardInset();
-    scheduleEntryViewportStability();
+    scheduleEntryAlignment(ENTRY_ALIGNMENT_SETTLE_MS);
   });
   updateKeyboardInset();
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
       updateKeyboardInset();
       updatePolishFloat();
-      if (focusedEntryActivity) { scheduleEntryViewportStability(); }
+      if (focusedEntryActivity && isKeyboardVisible()
+        && (entryAlignmentRequested || entryAutoScrollPending)) {
+        scheduleEntryAlignment(entryAutoScrollPending ? 0 : ENTRY_ALIGNMENT_SETTLE_MS);
+      }
     });
     window.visualViewport.addEventListener('scroll', function () {
       updateKeyboardInset();
@@ -3081,9 +3060,9 @@
   }, { passive: true });
   window.addEventListener('resize', function () {
     updatePolishFloat();
-    if (focusedEntryActivity) {
+    if (focusedEntryActivity && isKeyboardVisible()) {
       updateKeyboardInset();
-      scheduleEntryViewportStability();
+      scheduleEntryAlignment(ENTRY_ALIGNMENT_SETTLE_MS);
     }
   });
 
