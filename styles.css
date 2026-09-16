@@ -16,6 +16,8 @@
 
 * { box-sizing: border-box; }
 
+html, body { overflow-anchor: none; }
+
 body {
   margin: 0;
   padding: 0 0 calc(40px + var(--keyboard-inset) + var(--entry-scroll-space));
