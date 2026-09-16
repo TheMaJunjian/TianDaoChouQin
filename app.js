@@ -656,8 +656,20 @@
   }, { passive: true });
 
   /* 仅在复写页填写「作为」时，把提交按钮移到键盘和浮动进度条上方。 */
+  var ENTRY_FLOAT_GAP = 8;
+  var ENTRY_ALIGNMENT_SETTLE_MS = 120;
+  var ENTRY_NATIVE_SCROLL_SETTLE_MS = 250;
+  var ENTRY_CLICK_ALIGNMENT_WINDOW_MS = 700;
   var focusedEntryActivity = false;
-  var keyboardScrollTimer = null;
+  var entryAlignmentTimer = null;
+  var entryAutoScrollClearTimer = null;
+  var entryAutoScrollPending = false;
+  var entryAlignmentRequested = false;
+  var entryKeyboardStableHeight = 0;
+  var entryKeyboardShrunkAt = 0;
+  var entryViewportStabilityTimer = null;
+  var entryClickAlignmentTimer = null;
+  var entryActivityClickedAt = 0;
 
   function updateKeyboardInset() {
     var viewport = window.visualViewport;
@@ -667,62 +679,127 @@
     document.documentElement.style.setProperty('--keyboard-inset', Math.round(keyboardInset) + 'px');
   }
 
-  function keepEntrySubmitVisible() {
-    keyboardScrollTimer = null;
-    if (!focusedEntryActivity || document.activeElement !== el.activity || !el.entrySubmit.isConnected) { return; }
+  function currentEntryViewportHeight() {
+    var viewport = window.visualViewport;
+    return viewport ? viewport.height : window.innerHeight;
+  }
 
+  entryKeyboardStableHeight = currentEntryViewportHeight();
+
+  function scheduleEntryViewportStability() {
+    if (entryViewportStabilityTimer) { window.clearTimeout(entryViewportStabilityTimer); }
+    var observedHeight = currentEntryViewportHeight();
+    entryViewportStabilityTimer = window.setTimeout(function checkStableViewport() {
+      entryViewportStabilityTimer = null;
+      var stableHeight = currentEntryViewportHeight();
+      if (Math.abs(stableHeight - observedHeight) > 1) {
+        scheduleEntryViewportStability();
+        return;
+      }
+      var previousStableHeight = entryKeyboardStableHeight || stableHeight;
+      if (stableHeight - previousStableHeight < -80) {
+        entryKeyboardShrunkAt = Date.now();
+      }
+      entryKeyboardStableHeight = stableHeight;
+      var recentlyClickedActivity = Date.now() - entryActivityClickedAt <= ENTRY_CLICK_ALIGNMENT_WINDOW_MS;
+      var recentlyShrunkViewport = Date.now() - entryKeyboardShrunkAt <= ENTRY_CLICK_ALIGNMENT_WINDOW_MS;
+      if (recentlyShrunkViewport && recentlyClickedActivity && focusedEntryActivity
+        && (entryAlignmentRequested || entryAutoScrollPending)) {
+        scheduleEntryAlignment(entryAutoScrollPending ? 0 : ENTRY_ALIGNMENT_SETTLE_MS);
+      }
+    }, ENTRY_ALIGNMENT_SETTLE_MS);
+  }
+
+  function alignEntrySubmitOnce() {
+    entryAlignmentTimer = null;
+    if (!focusedEntryActivity || document.activeElement !== el.activity || !el.entrySubmit.isConnected) { return; }
+    var recentlyClickedActivity = Date.now() - entryActivityClickedAt <= ENTRY_CLICK_ALIGNMENT_WINDOW_MS;
+    var recentlyShrunkViewport = Date.now() - entryKeyboardShrunkAt <= ENTRY_CLICK_ALIGNMENT_WINDOW_MS;
+    if (!recentlyShrunkViewport || !recentlyClickedActivity) { return; }
     var viewport = window.visualViewport;
     var viewportTop = viewport ? viewport.offsetTop : 0;
     var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
-    var edgePadding = 16;
-    var safeBottom = viewportBottom - edgePadding;
+    var targetSubmitBottom = viewportBottom - 16;
     if (!el.polishFloat.classList.contains('hidden')) {
       var progressRect = el.polishFloat.getBoundingClientRect();
-      if (progressRect.top > viewportTop && progressRect.top < viewportBottom) {
-        safeBottom = Math.min(safeBottom, progressRect.top - 8);
+      if (progressRect.height > 0 && progressRect.bottom > viewportTop && progressRect.top < viewportBottom) {
+        targetSubmitBottom = progressRect.top - ENTRY_FLOAT_GAP;
       }
     }
     var submitRect = el.entrySubmit.getBoundingClientRect();
-    var scrollDelta = submitRect.bottom - safeBottom;
+    var scrollDelta = submitRect.bottom - targetSubmitBottom;
     if (scrollDelta > 1) {
       var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight - window.scrollY);
       var extraSpace = Math.max(0, scrollDelta - maxScroll);
       if (extraSpace > 1) {
         document.documentElement.style.setProperty('--entry-scroll-space', Math.ceil(extraSpace) + 'px');
-        scheduleEntrySubmitScroll(0);
+        entryAlignmentRequested = false;
+        scheduleEntryAlignment(0);
         return;
       }
     }
-    if (Math.abs(scrollDelta) > 1) { window.scrollBy(0, scrollDelta); }
+    if (Math.abs(scrollDelta) > 1) {
+      entryAutoScrollPending = true;
+      if (entryAutoScrollClearTimer) { window.clearTimeout(entryAutoScrollClearTimer); }
+      entryAutoScrollClearTimer = window.setTimeout(function () {
+        entryAutoScrollClearTimer = null;
+        entryAutoScrollPending = false;
+      }, ENTRY_ALIGNMENT_SETTLE_MS * 2);
+      window.scrollBy(0, scrollDelta);
+    } else if (entryAutoScrollPending) {
+      entryAutoScrollPending = false;
+      if (entryAutoScrollClearTimer) { window.clearTimeout(entryAutoScrollClearTimer); }
+      entryAutoScrollClearTimer = null;
+    }
+    entryAlignmentRequested = false;
   }
 
-  function scheduleEntrySubmitScroll(delay) {
-    if (keyboardScrollTimer) { window.clearTimeout(keyboardScrollTimer); }
-    keyboardScrollTimer = window.setTimeout(keepEntrySubmitVisible, delay || 0);
+  function scheduleEntryAlignment(delay) {
+    if (entryAlignmentTimer) { window.clearTimeout(entryAlignmentTimer); }
+    entryAlignmentTimer = window.setTimeout(alignEntrySubmitOnce, delay || 0);
   }
 
   document.addEventListener('focusin', function (event) {
     if (event.target !== el.activity || !isNarrowScreen()) { return; }
     focusedEntryActivity = true;
     updateKeyboardInset();
-    scheduleEntrySubmitScroll(0);
+    scheduleEntryViewportStability();
   });
   document.addEventListener('focusout', function (event) {
     if (event.target === el.activity) {
       focusedEntryActivity = false;
+      if (entryAlignmentTimer) { window.clearTimeout(entryAlignmentTimer); }
+      entryAlignmentTimer = null;
+      if (entryClickAlignmentTimer) { window.clearTimeout(entryClickAlignmentTimer); }
+      entryClickAlignmentTimer = null;
+      if (entryAutoScrollClearTimer) { window.clearTimeout(entryAutoScrollClearTimer); }
+      entryAutoScrollClearTimer = null;
+      entryAutoScrollPending = false;
+      entryAlignmentRequested = false;
+      entryKeyboardShrunkAt = 0;
+      if (entryViewportStabilityTimer) { window.clearTimeout(entryViewportStabilityTimer); }
+      entryViewportStabilityTimer = null;
       document.documentElement.style.setProperty('--entry-scroll-space', '0px');
-      if (keyboardScrollTimer) { window.clearTimeout(keyboardScrollTimer); }
-      keyboardScrollTimer = null;
       updateKeyboardInset();
     }
+  });
+  el.activity.addEventListener('click', function () {
+    if (!isNarrowScreen() || document.activeElement !== el.activity) { return; }
+    focusedEntryActivity = true;
+    entryActivityClickedAt = Date.now();
+    if (entryClickAlignmentTimer) { window.clearTimeout(entryClickAlignmentTimer); }
+    entryClickAlignmentTimer = window.setTimeout(function () {
+      entryClickAlignmentTimer = null;
+      if (!focusedEntryActivity || document.activeElement !== el.activity) { return; }
+      entryAlignmentRequested = true;
+      scheduleEntryViewportStability();
+    }, ENTRY_NATIVE_SCROLL_SETTLE_MS);
   });
   updateKeyboardInset();
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
       updateKeyboardInset();
-      if (focusedEntryActivity && window.visualViewport.height < window.innerHeight - 80) {
-        scheduleEntrySubmitScroll(60);
-      }
+      scheduleEntryViewportStability();
     });
     window.visualViewport.addEventListener('scroll', updateKeyboardInset);
   }
