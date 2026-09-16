@@ -648,7 +648,7 @@
   var pageScrollSaveTimer = null;
   var bottomGuardTimer = null;
   var BOTTOM_GUARD_IDLE_MS = 250;
-  var BOTTOM_REBOUND_DISTANCE = 40;
+  var BOTTOM_REBOUND_DISTANCE = 60;
   var lastTouchPageY = null;
 
   function guardedPageScrollTop() {
