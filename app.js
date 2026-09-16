@@ -3680,9 +3680,6 @@
     syncMainQuestAvailability();
     setActiveTab(state.ui.activeTab || 'attr');
     fullRender();
-    window.setTimeout(function () {
-      window.scrollTo(0, state.ui.pageScrollTop || 0);
-    }, 0);
     setupClickHints();
     updatePolishFloat();
 
