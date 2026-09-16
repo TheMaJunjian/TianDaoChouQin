@@ -646,29 +646,6 @@
   window.addEventListener('pagehide', flushState);
   window.addEventListener('beforeunload', flushState);
   var pageScrollSaveTimer = null;
-  var BOTTOM_REBOUND_DISTANCE = 75;
-  var BOTTOM_REBOUND_EDGE_TOLERANCE = 6;
-
-  function guardedPageScrollTop() {
-    var layoutMaxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-    var viewport = window.visualViewport;
-    var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
-    var targetScroll = document.documentElement.scrollHeight - viewportBottom - BOTTOM_REBOUND_DISTANCE;
-    return Math.max(0, Math.min(layoutMaxScroll, targetScroll));
-  }
-
-  function reboundBeforeNativeScroll() {
-    if (!isNarrowScreen()) { return; }
-    var layoutMaxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-    if (window.scrollY >= layoutMaxScroll - BOTTOM_REBOUND_EDGE_TOLERANCE) {
-      window.scrollTo(0, guardedPageScrollTop());
-      window.requestAnimationFrame(function () {
-        if (window.scrollY >= layoutMaxScroll - BOTTOM_REBOUND_EDGE_TOLERANCE) {
-          window.scrollTo(0, guardedPageScrollTop());
-        }
-      });
-    }
-  }
 
   window.addEventListener('scroll', function () {
     state.ui.pageScrollTop = Math.max(0, window.scrollY || window.pageYOffset || 0);
@@ -678,10 +655,6 @@
       persist();
     }, 150);
   }, { passive: true });
-
-  document.addEventListener('pointerdown', reboundBeforeNativeScroll, true);
-  document.addEventListener('touchstart', reboundBeforeNativeScroll, { capture: true, passive: true });
-  document.addEventListener('mousedown', reboundBeforeNativeScroll, true);
 
   /* 仅在复写页填写「作为」时，通过一次页面滚动把提交按钮移到浮动条上方。 */
   var ENTRY_FLOAT_GAP = 8;
