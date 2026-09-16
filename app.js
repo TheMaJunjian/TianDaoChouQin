@@ -648,12 +648,12 @@
   var pageScrollSaveTimer = null;
   var bottomGuardTimer = null;
   var BOTTOM_GUARD_IDLE_MS = 250;
-  var BOTTOM_REBOUND_DISTANCE = 40;
+  var NATIVE_SCROLL_BUFFER = 8;
   var lastTouchPageY = null;
 
   function guardedPageScrollTop() {
     var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-    return Math.max(0, maxScroll - BOTTOM_REBOUND_DISTANCE);
+    return Math.max(0, maxScroll - NATIVE_SCROLL_BUFFER);
   }
 
   function scheduleBottomGuardAfterInputClick() {
@@ -663,7 +663,7 @@
       bottomGuardTimer = null;
       var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
       if (window.scrollY >= maxScroll - 1) {
-        window.scrollTo(0, Math.max(0, maxScroll - BOTTOM_REBOUND_DISTANCE));
+        window.scrollTo(0, Math.max(0, maxScroll - NATIVE_SCROLL_BUFFER));
       }
     }, BOTTOM_GUARD_IDLE_MS);
   }
