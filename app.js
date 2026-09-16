@@ -646,7 +646,7 @@
   window.addEventListener('pagehide', flushState);
   window.addEventListener('beforeunload', flushState);
   var pageScrollSaveTimer = null;
-  var BOTTOM_REBOUND_DISTANCE = 60;
+  var BOTTOM_REBOUND_DISTANCE = 75;
   var BOTTOM_REBOUND_EDGE_TOLERANCE = 6;
   var lastTouchPageY = null;
 
