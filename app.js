@@ -646,25 +646,6 @@
   window.addEventListener('pagehide', flushState);
   window.addEventListener('beforeunload', flushState);
   var pageScrollSaveTimer = null;
-  var bottomGuardTimer = null;
-  var BOTTOM_GUARD_IDLE_MS = 250;
-  var NATIVE_SCROLL_BUFFER = 8;
-  var lastTouchPageY = null;
-
-  function guardedPageScrollTop() {
-    var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-    return Math.max(0, maxScroll - NATIVE_SCROLL_BUFFER);
-  }
-
-  function guardBottomAfterScroll() {
-    if (isNarrowScreen() && window.scrollY > guardedPageScrollTop()) {
-      window.scrollTo(0, guardedPageScrollTop());
-    }
-  }
-
-  window.addEventListener('scrollend', guardBottomAfterScroll, { passive: true });
-  document.addEventListener('scrollend', guardBottomAfterScroll, { passive: true });
-
   window.addEventListener('scroll', function () {
     state.ui.pageScrollTop = Math.max(0, window.scrollY || window.pageYOffset || 0);
     if (pageScrollSaveTimer) { window.clearTimeout(pageScrollSaveTimer); }
@@ -672,33 +653,88 @@
       pageScrollSaveTimer = null;
       persist();
     }, 150);
-    if (isNarrowScreen()) {
-      if (bottomGuardTimer) { window.clearTimeout(bottomGuardTimer); }
-      bottomGuardTimer = window.setTimeout(function () {
-        bottomGuardTimer = null;
-        var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-        if (window.scrollY >= maxScroll - 1) {
-          window.scrollTo(0, Math.max(0, maxScroll - NATIVE_SCROLL_BUFFER));
+  }, { passive: true });
+
+  var focusedNativeField = false;
+  var NATIVE_KEYBOARD_RESERVE = 120;
+  var nativeKeyboardSpaceClearTimer = null;
+  var nativeKeyboardSpaceReleaseTimer = null;
+  var nativeKeyboardStableTimer = null;
+  var nativeKeyboardBaselineHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  var nativeKeyboardVisible = false;
+
+  function currentNativeViewportHeight() {
+    return window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  }
+
+  function scheduleNativeKeyboardState() {
+    if (nativeKeyboardStableTimer) { window.clearTimeout(nativeKeyboardStableTimer); }
+    var observedHeight = currentNativeViewportHeight();
+    nativeKeyboardStableTimer = window.setTimeout(function () {
+      nativeKeyboardStableTimer = null;
+      var stableHeight = currentNativeViewportHeight();
+      if (Math.abs(stableHeight - observedHeight) > 1) {
+        scheduleNativeKeyboardState();
+        return;
+      }
+      var heightDelta = stableHeight - nativeKeyboardBaselineHeight;
+      if (!nativeKeyboardVisible && heightDelta < -80) {
+        nativeKeyboardVisible = true;
+      } else if (nativeKeyboardVisible && heightDelta > 80) {
+        nativeKeyboardVisible = false;
+        nativeKeyboardBaselineHeight = stableHeight;
+      } else if (!nativeKeyboardVisible && !focusedNativeField) {
+        nativeKeyboardBaselineHeight = stableHeight;
+      }
+      updateNativeKeyboardSpace();
+    }, 120);
+  }
+
+  function updateNativeKeyboardSpace() {
+    var viewport = window.visualViewport;
+    var keyboardSpace = focusedNativeField
+      ? (nativeKeyboardVisible && viewport
+        ? Math.max(0, nativeKeyboardBaselineHeight - viewport.height)
+        : NATIVE_KEYBOARD_RESERVE)
+      : 0;
+    document.documentElement.style.setProperty('--native-keyboard-space', Math.round(keyboardSpace) + 'px');
+    if (keyboardSpace > 0) {
+      if (nativeKeyboardSpaceReleaseTimer) { window.clearTimeout(nativeKeyboardSpaceReleaseTimer); }
+      nativeKeyboardSpaceReleaseTimer = window.setTimeout(function () {
+        nativeKeyboardSpaceReleaseTimer = null;
+        if (focusedNativeField) {
+          document.documentElement.style.setProperty('--native-keyboard-space', '0px');
         }
-      }, BOTTOM_GUARD_IDLE_MS);
+      }, 500);
     }
-  }, { passive: true });
+  }
 
-  window.addEventListener('wheel', function (event) {
-    if (!isNarrowScreen() || event.deltaY <= 0) { return; }
-    if (window.scrollY >= guardedPageScrollTop() - 1) { event.preventDefault(); }
-  }, { passive: false });
+  document.addEventListener('focusin', function (event) {
+    if (!isNarrowScreen() || !event.target.matches('input, textarea, select')) { return; }
+    focusedNativeField = true;
+    if (nativeKeyboardSpaceClearTimer) { window.clearTimeout(nativeKeyboardSpaceClearTimer); }
+    nativeKeyboardSpaceClearTimer = null;
+    updateNativeKeyboardSpace();
+    scheduleNativeKeyboardState();
+  });
 
-  window.addEventListener('touchstart', function (event) {
-    lastTouchPageY = event.touches.length ? event.touches[0].pageY : null;
-  }, { passive: true });
-  window.addEventListener('touchmove', function (event) {
-    if (!isNarrowScreen() || !event.touches.length || lastTouchPageY === null) { return; }
-    var currentTouchPageY = event.touches[0].pageY;
-    var movingDownPage = currentTouchPageY < lastTouchPageY;
-    lastTouchPageY = currentTouchPageY;
-    if (movingDownPage && window.scrollY >= guardedPageScrollTop() - 1) { event.preventDefault(); }
-  }, { passive: false });
+  document.addEventListener('click', function (event) {
+    if (!isNarrowScreen() || !event.target.matches('input, textarea, select')) { return; }
+    if (document.activeElement === event.target) { updateNativeKeyboardSpace(); }
+  });
+
+  document.addEventListener('focusout', function (event) {
+    if (!event.target.matches('input, textarea, select')) { return; }
+    focusedNativeField = false;
+    if (nativeKeyboardSpaceClearTimer) { window.clearTimeout(nativeKeyboardSpaceClearTimer); }
+    nativeKeyboardSpaceClearTimer = window.setTimeout(function () {
+      nativeKeyboardSpaceClearTimer = null;
+      if (nativeKeyboardSpaceReleaseTimer) { window.clearTimeout(nativeKeyboardSpaceReleaseTimer); }
+      nativeKeyboardSpaceReleaseTimer = null;
+      if (!focusedNativeField) { updateNativeKeyboardSpace(); }
+    }, 0);
+    scheduleNativeKeyboardState();
+  });
 
   /* 仅在复写页填写「作为」时，通过一次页面滚动把提交按钮移到浮动条上方。 */
   var ENTRY_FLOAT_GAP = 8;
@@ -845,6 +881,8 @@
   });
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
+      updateNativeKeyboardSpace();
+      scheduleNativeKeyboardState();
       updatePolishFloat();
       scheduleEntryViewportStability();
     });
@@ -3134,6 +3172,7 @@
   }, { passive: true });
   window.addEventListener('resize', function () {
     updatePolishFloat();
+    updateKeyboardInset();
     scheduleEntryViewportStability();
   });
 
