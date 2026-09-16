@@ -655,11 +655,9 @@
     }, 150);
   }, { passive: true });
 
-  /* 仅在复写页填写「作为」时，通过一次页面滚动把提交按钮移到浮动条上方。 */
-  var ENTRY_FLOAT_GAP = 8;
-  var ENTRY_ALIGNMENT_SETTLE_MS = 120;
+  /* 仅在复写页填写「作为」时，把提交按钮移到键盘和浮动进度条上方。 */
   var focusedEntryActivity = false;
-  var entryAlignmentTimer = null;
+  var keyboardScrollTimer = null;
 
   function updateKeyboardInset() {
     var viewport = window.visualViewport;
@@ -669,63 +667,64 @@
     document.documentElement.style.setProperty('--keyboard-inset', Math.round(keyboardInset) + 'px');
   }
 
-  function alignEntrySubmitOnce() {
-    entryAlignmentTimer = null;
+  function keepEntrySubmitVisible() {
+    keyboardScrollTimer = null;
     if (!focusedEntryActivity || document.activeElement !== el.activity || !el.entrySubmit.isConnected) { return; }
 
     var viewport = window.visualViewport;
     var viewportTop = viewport ? viewport.offsetTop : 0;
     var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
-    var targetSubmitBottom = viewportBottom - 16;
+    var edgePadding = 16;
+    var safeBottom = viewportBottom - edgePadding;
     if (!el.polishFloat.classList.contains('hidden')) {
       var progressRect = el.polishFloat.getBoundingClientRect();
-      if (progressRect.height > 0
-        && progressRect.bottom > viewportTop
-        && progressRect.top < viewportBottom) {
-        targetSubmitBottom = progressRect.top - ENTRY_FLOAT_GAP;
+      if (progressRect.top > viewportTop && progressRect.top < viewportBottom) {
+        safeBottom = Math.min(safeBottom, progressRect.top - 8);
       }
     }
     var submitRect = el.entrySubmit.getBoundingClientRect();
-    var scrollDelta = submitRect.bottom - targetSubmitBottom;
+    var scrollDelta = submitRect.bottom - safeBottom;
+    if (scrollDelta > 1) {
+      var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight - window.scrollY);
+      var extraSpace = Math.max(0, scrollDelta - maxScroll);
+      if (extraSpace > 1) {
+        document.documentElement.style.setProperty('--entry-scroll-space', Math.ceil(extraSpace) + 'px');
+        scheduleEntrySubmitScroll(0);
+        return;
+      }
+    }
     if (Math.abs(scrollDelta) > 1) { window.scrollBy(0, scrollDelta); }
   }
 
-  function scheduleEntryAlignment(delay) {
-    if (entryAlignmentTimer) { window.clearTimeout(entryAlignmentTimer); }
-    entryAlignmentTimer = window.setTimeout(alignEntrySubmitOnce, delay || 0);
+  function scheduleEntrySubmitScroll(delay) {
+    if (keyboardScrollTimer) { window.clearTimeout(keyboardScrollTimer); }
+    keyboardScrollTimer = window.setTimeout(keepEntrySubmitVisible, delay || 0);
   }
 
   document.addEventListener('focusin', function (event) {
     if (event.target !== el.activity || !isNarrowScreen()) { return; }
     focusedEntryActivity = true;
     updateKeyboardInset();
-    scheduleEntryAlignment(ENTRY_ALIGNMENT_SETTLE_MS);
+    scheduleEntrySubmitScroll(0);
   });
   document.addEventListener('focusout', function (event) {
     if (event.target === el.activity) {
       focusedEntryActivity = false;
-      if (entryAlignmentTimer) { window.clearTimeout(entryAlignmentTimer); }
-      entryAlignmentTimer = null;
+      document.documentElement.style.setProperty('--entry-scroll-space', '0px');
+      if (keyboardScrollTimer) { window.clearTimeout(keyboardScrollTimer); }
+      keyboardScrollTimer = null;
       updateKeyboardInset();
     }
-  });
-  el.activity.addEventListener('click', function () {
-    if (!isNarrowScreen() || document.activeElement !== el.activity) { return; }
-    focusedEntryActivity = true;
-    updateKeyboardInset();
-    scheduleEntryAlignment(ENTRY_ALIGNMENT_SETTLE_MS);
   });
   updateKeyboardInset();
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
       updateKeyboardInset();
-      updatePolishFloat();
-      if (focusedEntryActivity) { scheduleEntryAlignment(ENTRY_ALIGNMENT_SETTLE_MS); }
+      if (focusedEntryActivity && window.visualViewport.height < window.innerHeight - 80) {
+        scheduleEntrySubmitScroll(60);
+      }
     });
-    window.visualViewport.addEventListener('scroll', function () {
-      updateKeyboardInset();
-      updatePolishFloat();
-    });
+    window.visualViewport.addEventListener('scroll', updateKeyboardInset);
   }
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'hidden') { flushState(); }
@@ -2958,21 +2957,20 @@
     }
     var rect = el.polishBlock.getBoundingClientRect();
     if (!rect.width || !rect.height) {
-      el.polishFloat.classList.add('at-bottom');
+      el.polishFloat.classList.remove('at-bottom');
+      el.polishFloat.classList.add('at-top');
       el.polishFloat.classList.remove('hidden');
       return;
     }
-    var viewport = window.visualViewport;
-    var viewportTop = viewport ? viewport.offsetTop : 0;
-    var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
-    var inView = rect.bottom > viewportTop && rect.top < viewportBottom;
+    var inView = rect.bottom > 0 && rect.top < window.innerHeight;
     if (inView) {
       el.polishFloat.classList.add('hidden');
       return;
     }
-    // 浮动条始终贴在视觉视口底部；视口高度变化时其顶部坐标随之变化。
-    el.polishFloat.classList.remove('at-top');
-    el.polishFloat.classList.add('at-bottom');
+    // 不在可视区域时，按相对位置吸附在顶部或底部。
+    var atTop = rect.bottom <= 0;
+    el.polishFloat.classList.toggle('at-top', atTop);
+    el.polishFloat.classList.toggle('at-bottom', !atTop);
     el.polishFloat.classList.remove('hidden');
   }
 
@@ -3004,12 +3002,8 @@
     el.polishFloatFill.style.width = percent + '%';
   }
 
-  window.addEventListener('scroll', function () {
-    updatePolishFloat();
-  }, { passive: true });
-  window.addEventListener('resize', function () {
-    updatePolishFloat();
-  });
+  window.addEventListener('scroll', updatePolishFloat, { passive: true });
+  window.addEventListener('resize', updatePolishFloat);
 
   /* ---------- 积分展示 ---------- */
   function renderPoints() {
