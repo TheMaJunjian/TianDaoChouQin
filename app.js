@@ -678,13 +678,29 @@
       if (extraSpace > 1) {
         document.documentElement.style.setProperty('--entry-scroll-space', Math.ceil(extraSpace) + 'px');
       }
+    }
+    if (Math.abs(scrollDelta) > 1) {
       window.scrollBy(0, scrollDelta);
     }
   }
 
+  var entryVisibilityTimers = [];
+  function scheduleEntrySubmitVisibility() {
+    entryVisibilityTimers.forEach(function (timer) { window.clearTimeout(timer); });
+    entryVisibilityTimers = [
+      window.setTimeout(keepEntrySubmitVisible, 300),
+      window.setTimeout(keepEntrySubmitVisible, 650)
+    ];
+  }
+
   document.addEventListener('focusin', function (event) {
     if (event.target !== el.activity || !isNarrowScreen()) { return; }
-    window.setTimeout(keepEntrySubmitVisible, 300);
+    scheduleEntrySubmitVisibility();
+  });
+
+  document.addEventListener('click', function (event) {
+    if (event.target !== el.activity || !isNarrowScreen()) { return; }
+    scheduleEntrySubmitVisibility();
   });
 
   document.addEventListener('visibilitychange', function () {
