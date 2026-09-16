@@ -646,6 +646,7 @@
   window.addEventListener('pagehide', flushState);
   window.addEventListener('beforeunload', flushState);
   var pageScrollSaveTimer = null;
+
   window.addEventListener('scroll', function () {
     state.ui.pageScrollTop = Math.max(0, window.scrollY || window.pageYOffset || 0);
     if (pageScrollSaveTimer) { window.clearTimeout(pageScrollSaveTimer); }
@@ -654,87 +655,6 @@
       persist();
     }, 150);
   }, { passive: true });
-
-  var focusedNativeField = false;
-  var NATIVE_KEYBOARD_RESERVE = 120;
-  var nativeKeyboardSpaceClearTimer = null;
-  var nativeKeyboardSpaceReleaseTimer = null;
-  var nativeKeyboardStableTimer = null;
-  var nativeKeyboardBaselineHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-  var nativeKeyboardVisible = false;
-
-  function currentNativeViewportHeight() {
-    return window.visualViewport ? window.visualViewport.height : window.innerHeight;
-  }
-
-  function scheduleNativeKeyboardState() {
-    if (nativeKeyboardStableTimer) { window.clearTimeout(nativeKeyboardStableTimer); }
-    var observedHeight = currentNativeViewportHeight();
-    nativeKeyboardStableTimer = window.setTimeout(function () {
-      nativeKeyboardStableTimer = null;
-      var stableHeight = currentNativeViewportHeight();
-      if (Math.abs(stableHeight - observedHeight) > 1) {
-        scheduleNativeKeyboardState();
-        return;
-      }
-      var heightDelta = stableHeight - nativeKeyboardBaselineHeight;
-      if (!nativeKeyboardVisible && heightDelta < -80) {
-        nativeKeyboardVisible = true;
-      } else if (nativeKeyboardVisible && heightDelta > 80) {
-        nativeKeyboardVisible = false;
-        nativeKeyboardBaselineHeight = stableHeight;
-      } else if (!nativeKeyboardVisible && !focusedNativeField) {
-        nativeKeyboardBaselineHeight = stableHeight;
-      }
-      updateNativeKeyboardSpace();
-    }, 120);
-  }
-
-  function updateNativeKeyboardSpace() {
-    var viewport = window.visualViewport;
-    var keyboardSpace = focusedNativeField
-      ? (nativeKeyboardVisible && viewport
-        ? Math.max(0, nativeKeyboardBaselineHeight - viewport.height)
-        : NATIVE_KEYBOARD_RESERVE)
-      : 0;
-    document.documentElement.style.setProperty('--native-keyboard-space', Math.round(keyboardSpace) + 'px');
-    if (keyboardSpace > 0) {
-      if (nativeKeyboardSpaceReleaseTimer) { window.clearTimeout(nativeKeyboardSpaceReleaseTimer); }
-      nativeKeyboardSpaceReleaseTimer = window.setTimeout(function () {
-        nativeKeyboardSpaceReleaseTimer = null;
-        if (focusedNativeField) {
-          document.documentElement.style.setProperty('--native-keyboard-space', '0px');
-        }
-      }, 500);
-    }
-  }
-
-  document.addEventListener('focusin', function (event) {
-    if (!isNarrowScreen() || !event.target.matches('input, textarea, select')) { return; }
-    focusedNativeField = true;
-    if (nativeKeyboardSpaceClearTimer) { window.clearTimeout(nativeKeyboardSpaceClearTimer); }
-    nativeKeyboardSpaceClearTimer = null;
-    updateNativeKeyboardSpace();
-    scheduleNativeKeyboardState();
-  });
-
-  document.addEventListener('click', function (event) {
-    if (!isNarrowScreen() || !event.target.matches('input, textarea, select')) { return; }
-    if (document.activeElement === event.target) { updateNativeKeyboardSpace(); }
-  });
-
-  document.addEventListener('focusout', function (event) {
-    if (!event.target.matches('input, textarea, select')) { return; }
-    focusedNativeField = false;
-    if (nativeKeyboardSpaceClearTimer) { window.clearTimeout(nativeKeyboardSpaceClearTimer); }
-    nativeKeyboardSpaceClearTimer = window.setTimeout(function () {
-      nativeKeyboardSpaceClearTimer = null;
-      if (nativeKeyboardSpaceReleaseTimer) { window.clearTimeout(nativeKeyboardSpaceReleaseTimer); }
-      nativeKeyboardSpaceReleaseTimer = null;
-      if (!focusedNativeField) { updateNativeKeyboardSpace(); }
-    }, 0);
-    scheduleNativeKeyboardState();
-  });
 
   /* 仅在复写页填写「作为」时，通过一次页面滚动把提交按钮移到浮动条上方。 */
   var ENTRY_FLOAT_GAP = 8;
@@ -874,15 +794,13 @@
     if (entryClickAlignmentTimer) { window.clearTimeout(entryClickAlignmentTimer); }
     entryClickAlignmentTimer = window.setTimeout(function () {
       entryClickAlignmentTimer = null;
-      if (!focusedEntryActivity || document.activeElement !== el.activity) { return; }
+      if (document.activeElement !== el.activity) { return; }
       entryAlignmentRequested = true;
-      scheduleEntryViewportStability();
+      scheduleEntryAlignment(ENTRY_ALIGNMENT_SETTLE_MS);
     }, ENTRY_NATIVE_SCROLL_SETTLE_MS);
   });
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
-      updateNativeKeyboardSpace();
-      scheduleNativeKeyboardState();
       updatePolishFloat();
       scheduleEntryViewportStability();
     });
@@ -3172,7 +3090,6 @@
   }, { passive: true });
   window.addEventListener('resize', function () {
     updatePolishFloat();
-    updateKeyboardInset();
     scheduleEntryViewportStability();
   });
 
