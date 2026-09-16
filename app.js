@@ -672,14 +672,6 @@
   var entryActivityClickedAt = 0;
   var entryKeyboardShrunkAt = 0;
 
-  function updateKeyboardInset() {
-    var viewport = window.visualViewport;
-    var keyboardInset = focusedEntryActivity && viewport
-      ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
-      : 0;
-    document.documentElement.style.setProperty('--keyboard-inset', Math.round(keyboardInset) + 'px');
-  }
-
   function currentEntryViewportHeight() {
     var viewport = window.visualViewport;
     return viewport ? viewport.height : window.innerHeight;
@@ -771,7 +763,6 @@
   document.addEventListener('focusin', function (event) {
     if (event.target !== el.activity || !isNarrowScreen()) { return; }
     focusedEntryActivity = true;
-    updateKeyboardInset();
     scheduleEntryViewportStability();
   });
   document.addEventListener('focusout', function (event) {
@@ -789,15 +780,16 @@
       entryKeyboardShrunkAt = 0;
       if (entryViewportStabilityTimer) { window.clearTimeout(entryViewportStabilityTimer); }
       entryViewportStabilityTimer = null;
-      document.documentElement.style.setProperty('--entry-scroll-space', '0px');
-      updateKeyboardInset();
+      window.setTimeout(function () {
+        if (focusedEntryActivity) { return; }
+        document.documentElement.style.setProperty('--entry-scroll-space', '0px');
+      }, 0);
     }
   });
   el.activity.addEventListener('click', function () {
     if (!isNarrowScreen() || document.activeElement !== el.activity) { return; }
     focusedEntryActivity = true;
     entryActivityClickedAt = Date.now();
-    updateKeyboardInset();
     if (entryClickAlignmentTimer) { window.clearTimeout(entryClickAlignmentTimer); }
     entryClickAlignmentTimer = window.setTimeout(function () {
       entryClickAlignmentTimer = null;
@@ -806,10 +798,8 @@
       scheduleEntryViewportStability();
     }, ENTRY_NATIVE_SCROLL_SETTLE_MS);
   });
-  updateKeyboardInset();
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
-      updateKeyboardInset();
       updatePolishFloat();
       scheduleEntryViewportStability();
     });
