@@ -656,7 +656,9 @@
   }, { passive: true });
 
   var focusedNativeField = false;
+  var NATIVE_KEYBOARD_RESERVE = 120;
   var nativeKeyboardSpaceClearTimer = null;
+  var nativeKeyboardSpaceReleaseTimer = null;
   var nativeKeyboardStableTimer = null;
   var nativeKeyboardBaselineHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
   var nativeKeyboardVisible = false;
@@ -681,7 +683,7 @@
       } else if (nativeKeyboardVisible && heightDelta > 80) {
         nativeKeyboardVisible = false;
         nativeKeyboardBaselineHeight = stableHeight;
-      } else if (!nativeKeyboardVisible) {
+      } else if (!nativeKeyboardVisible && !focusedNativeField) {
         nativeKeyboardBaselineHeight = stableHeight;
       }
       updateNativeKeyboardSpace();
@@ -690,10 +692,21 @@
 
   function updateNativeKeyboardSpace() {
     var viewport = window.visualViewport;
-    var keyboardSpace = focusedNativeField && nativeKeyboardVisible && viewport
-      ? Math.max(0, nativeKeyboardBaselineHeight - viewport.height)
+    var keyboardSpace = focusedNativeField
+      ? (nativeKeyboardVisible && viewport
+        ? Math.max(0, nativeKeyboardBaselineHeight - viewport.height)
+        : NATIVE_KEYBOARD_RESERVE)
       : 0;
     document.documentElement.style.setProperty('--native-keyboard-space', Math.round(keyboardSpace) + 'px');
+    if (keyboardSpace > 0) {
+      if (nativeKeyboardSpaceReleaseTimer) { window.clearTimeout(nativeKeyboardSpaceReleaseTimer); }
+      nativeKeyboardSpaceReleaseTimer = window.setTimeout(function () {
+        nativeKeyboardSpaceReleaseTimer = null;
+        if (focusedNativeField) {
+          document.documentElement.style.setProperty('--native-keyboard-space', '0px');
+        }
+      }, 500);
+    }
   }
 
   document.addEventListener('focusin', function (event) {
@@ -705,14 +718,22 @@
     scheduleNativeKeyboardState();
   });
 
+  document.addEventListener('click', function (event) {
+    if (!isNarrowScreen() || !event.target.matches('input, textarea, select')) { return; }
+    if (document.activeElement === event.target) { updateNativeKeyboardSpace(); }
+  });
+
   document.addEventListener('focusout', function (event) {
     if (!event.target.matches('input, textarea, select')) { return; }
     focusedNativeField = false;
     if (nativeKeyboardSpaceClearTimer) { window.clearTimeout(nativeKeyboardSpaceClearTimer); }
     nativeKeyboardSpaceClearTimer = window.setTimeout(function () {
       nativeKeyboardSpaceClearTimer = null;
+      if (nativeKeyboardSpaceReleaseTimer) { window.clearTimeout(nativeKeyboardSpaceReleaseTimer); }
+      nativeKeyboardSpaceReleaseTimer = null;
       if (!focusedNativeField) { updateNativeKeyboardSpace(); }
     }, 0);
+    scheduleNativeKeyboardState();
   });
 
   /* 仅在复写页填写「作为」时，通过一次页面滚动把提交按钮移到浮动条上方。 */
