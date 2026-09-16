@@ -646,9 +646,8 @@
   window.addEventListener('pagehide', flushState);
   window.addEventListener('beforeunload', flushState);
   var pageScrollSaveTimer = null;
-  var bottomGuardTimer = null;
-  var BOTTOM_GUARD_IDLE_MS = 250;
   var BOTTOM_REBOUND_DISTANCE = 60;
+  var BOTTOM_REBOUND_EDGE_TOLERANCE = 6;
   var lastTouchPageY = null;
 
   function guardedPageScrollTop() {
@@ -656,16 +655,12 @@
     return Math.max(0, maxScroll - BOTTOM_REBOUND_DISTANCE);
   }
 
-  function scheduleBottomGuardAfterInputClick() {
+  function reboundBeforeNativeScroll() {
     if (!isNarrowScreen()) { return; }
-    if (bottomGuardTimer) { window.clearTimeout(bottomGuardTimer); }
-    bottomGuardTimer = window.setTimeout(function () {
-      bottomGuardTimer = null;
-      var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-      if (window.scrollY >= maxScroll - 1) {
-        window.scrollTo(0, Math.max(0, maxScroll - BOTTOM_REBOUND_DISTANCE));
-      }
-    }, BOTTOM_GUARD_IDLE_MS);
+    var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    if (window.scrollY >= maxScroll - BOTTOM_REBOUND_EDGE_TOLERANCE) {
+      window.scrollTo(0, Math.max(0, maxScroll - BOTTOM_REBOUND_DISTANCE));
+    }
   }
 
   window.addEventListener('scroll', function () {
@@ -677,9 +672,9 @@
     }, 150);
   }, { passive: true });
 
-  document.addEventListener('click', function (event) {
-    scheduleBottomGuardAfterInputClick();
-  });
+  document.addEventListener('pointerdown', reboundBeforeNativeScroll, true);
+  document.addEventListener('touchstart', reboundBeforeNativeScroll, { capture: true, passive: true });
+  document.addEventListener('mousedown', reboundBeforeNativeScroll, true);
 
   window.addEventListener('wheel', function (event) {
     if (!isNarrowScreen() || event.deltaY <= 0) { return; }
