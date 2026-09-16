@@ -17,6 +17,8 @@
   var DAY_MINUTES = 1440;
   var TOAST_DURATION_MS = 4600;
   var TOAST_GAP_MS = 700;
+  var DEFAULT_HOST_NAME = '未绑定';
+  var HOST_NAME_PLACEHOLDER = '修行者';
 
   var SKILL_LEVELS = [
     { key: 'aware', label: '了解', minHours: 20, locked: false },
@@ -64,7 +66,7 @@
       entryCategory: '',
       focus: '',
       host: {
-        name: '修行者',
+        name: DEFAULT_HOST_NAME,
         boundAt: '',
         weight: '',
         education: '',
@@ -380,7 +382,15 @@
     });
     safe(function () { merged.entryCategory = typeof parsed.entryCategory === 'string' ? parsed.entryCategory : base.entryCategory; });
     safe(function () { merged.focus = typeof parsed.focus === 'string' ? parsed.focus : base.focus; });
-    safe(function () { merged.host = Object.assign({}, base.host, (parsed.host && typeof parsed.host === 'object') ? parsed.host : {}); });
+    safe(function () {
+      merged.host = Object.assign({}, base.host, (parsed.host && typeof parsed.host === 'object') ? parsed.host : {});
+      if (!String(merged.host.name || '').trim()) {
+        merged.host.name = DEFAULT_HOST_NAME;
+      } else if (merged.host.name === HOST_NAME_PLACEHOLDER && !merged.host.boundAt) {
+        // 旧版本把占位称号当成了默认值，升级时恢复为未绑定。
+        merged.host.name = DEFAULT_HOST_NAME;
+      }
+    });
     safe(function () {
       merged.skills = Array.isArray(parsed.skills) ? parsed.skills.filter(function (item) {
         return item && typeof item === 'object' && typeof item.name === 'string' && Number.isFinite(Number(item.hours));
@@ -1350,7 +1360,8 @@
 
   /* ---------- 宿主称号：自定义弹窗，替代原生 prompt ---------- */
   function openNameModal() {
-    el.nameInput.value = state.host.name === '修行者' ? '' : state.host.name;
+    el.nameInput.placeholder = HOST_NAME_PLACEHOLDER;
+    el.nameInput.value = state.host.name === DEFAULT_HOST_NAME ? '' : state.host.name;
     el.nameModal.classList.remove('hidden');
     window.setTimeout(function () { el.nameInput.focus(); }, 30);
   }
@@ -1358,7 +1369,7 @@
   function closeNameModal() { el.nameModal.classList.add('hidden'); }
 
   function confirmName() {
-    var name = el.nameInput.value.trim() || '修行者';
+    var name = el.nameInput.value.trim() || HOST_NAME_PLACEHOLDER;
     state.host.name = name;
     if (!state.host.boundAt) { state.host.boundAt = String(currentStamp()); }
     persist();
@@ -2963,7 +2974,7 @@
   /* ---------- 宿主信息完整度 ---------- */
   function renderPolish() {
     var checks = [
-      state.host.name && state.host.name !== '修行者',
+      state.host.name && state.host.name !== DEFAULT_HOST_NAME,
       !!state.host.weight,
       !!state.host.education,
       !!state.host.talent,
