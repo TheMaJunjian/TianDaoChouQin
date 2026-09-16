@@ -669,6 +669,11 @@
     document.documentElement.style.setProperty('--keyboard-inset', Math.round(keyboardInset) + 'px');
   }
 
+  function isKeyboardVisible() {
+    var viewport = window.visualViewport;
+    return !!viewport && window.innerHeight - viewport.height - viewport.offsetTop > 80;
+  }
+
   function alignEntrySubmitOnce() {
     entryAlignmentTimer = null;
     if (!focusedEntryActivity || document.activeElement !== el.activity || !el.entrySubmit.isConnected) { return; }
@@ -687,6 +692,13 @@
     }
     var submitRect = el.entrySubmit.getBoundingClientRect();
     var scrollDelta = submitRect.bottom - targetSubmitBottom;
+    if (scrollDelta > 1) {
+      var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight - window.scrollY);
+      var extraSpace = Math.max(0, scrollDelta - maxScroll);
+      if (extraSpace > 1) {
+        document.documentElement.style.setProperty('--entry-scroll-space', Math.ceil(extraSpace) + 'px');
+      }
+    }
     if (Math.abs(scrollDelta) > 1) { window.scrollBy(0, scrollDelta); }
   }
 
@@ -706,6 +718,7 @@
       focusedEntryActivity = false;
       if (entryAlignmentTimer) { window.clearTimeout(entryAlignmentTimer); }
       entryAlignmentTimer = null;
+      document.documentElement.style.setProperty('--entry-scroll-space', '0px');
       updateKeyboardInset();
     }
   });
@@ -720,7 +733,9 @@
     window.visualViewport.addEventListener('resize', function () {
       updateKeyboardInset();
       updatePolishFloat();
-      if (focusedEntryActivity) { scheduleEntryAlignment(ENTRY_ALIGNMENT_SETTLE_MS); }
+      if (focusedEntryActivity && isKeyboardVisible()) {
+        scheduleEntryAlignment(ENTRY_ALIGNMENT_SETTLE_MS);
+      }
     });
     window.visualViewport.addEventListener('scroll', function () {
       updateKeyboardInset();
@@ -3009,6 +3024,10 @@
   }, { passive: true });
   window.addEventListener('resize', function () {
     updatePolishFloat();
+    if (focusedEntryActivity && isKeyboardVisible()) {
+      updateKeyboardInset();
+      scheduleEntryAlignment(ENTRY_ALIGNMENT_SETTLE_MS);
+    }
   });
 
   /* ---------- 积分展示 ---------- */
