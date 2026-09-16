@@ -663,6 +663,7 @@
   var entryAutoScrollClearTimer = null;
   var entryAutoScrollPending = false;
   var entryAlignmentRequested = false;
+  var entryKeyboardBaseHeight = 0;
   var entryKeyboardStableHeight = 0;
   var entryKeyboardVisible = false;
   var entryViewportStabilityTimer = null;
@@ -680,8 +681,6 @@
     return viewport ? viewport.height : window.innerHeight;
   }
 
-  entryKeyboardStableHeight = currentEntryViewportHeight();
-
   function scheduleEntryViewportStability() {
     if (entryViewportStabilityTimer) { window.clearTimeout(entryViewportStabilityTimer); }
     var observedHeight = currentEntryViewportHeight();
@@ -692,10 +691,8 @@
         scheduleEntryViewportStability();
         return;
       }
-      var previousStableHeight = entryKeyboardStableHeight || stableHeight;
-      var stableHeightDelta = stableHeight - previousStableHeight;
       entryKeyboardStableHeight = stableHeight;
-      entryKeyboardVisible = stableHeightDelta < -80;
+      entryKeyboardVisible = entryKeyboardBaseHeight - entryKeyboardStableHeight > 80;
       if (entryKeyboardVisible && focusedEntryActivity
         && (entryAlignmentRequested || entryAutoScrollPending)) {
         scheduleEntryAlignment(entryAutoScrollPending ? 0 : ENTRY_ALIGNMENT_SETTLE_MS);
@@ -755,6 +752,9 @@
   document.addEventListener('focusin', function (event) {
     if (event.target !== el.activity || !isNarrowScreen()) { return; }
     focusedEntryActivity = true;
+    entryKeyboardBaseHeight = currentEntryViewportHeight();
+    entryKeyboardStableHeight = entryKeyboardBaseHeight;
+    entryKeyboardVisible = false;
     entryAlignmentRequested = true;
     updateKeyboardInset();
     scheduleEntryViewportStability();
@@ -768,6 +768,8 @@
       entryAutoScrollClearTimer = null;
       entryAutoScrollPending = false;
       entryAlignmentRequested = false;
+      entryKeyboardBaseHeight = 0;
+      entryKeyboardStableHeight = 0;
       entryKeyboardVisible = false;
       if (entryViewportStabilityTimer) { window.clearTimeout(entryViewportStabilityTimer); }
       entryViewportStabilityTimer = null;
@@ -778,6 +780,9 @@
   el.activity.addEventListener('click', function () {
     if (!isNarrowScreen() || document.activeElement !== el.activity) { return; }
     focusedEntryActivity = true;
+    if (!entryKeyboardBaseHeight) {
+      entryKeyboardBaseHeight = currentEntryViewportHeight();
+    }
     entryAlignmentRequested = true;
     updateKeyboardInset();
     scheduleEntryViewportStability();
@@ -787,7 +792,7 @@
     window.visualViewport.addEventListener('resize', function () {
       updateKeyboardInset();
       updatePolishFloat();
-      scheduleEntryViewportStability();
+      if (focusedEntryActivity) { scheduleEntryViewportStability(); }
     });
     window.visualViewport.addEventListener('scroll', function () {
       updateKeyboardInset();
@@ -3076,8 +3081,10 @@
   }, { passive: true });
   window.addEventListener('resize', function () {
     updatePolishFloat();
-    updateKeyboardInset();
-    scheduleEntryViewportStability();
+    if (focusedEntryActivity) {
+      updateKeyboardInset();
+      scheduleEntryViewportStability();
+    }
   });
 
   /* ---------- 积分展示 ---------- */
