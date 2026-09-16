@@ -660,6 +660,8 @@
   var ENTRY_ALIGNMENT_SETTLE_MS = 120;
   var focusedEntryActivity = false;
   var entryAlignmentTimer = null;
+  var entryAutoScrollClearTimer = null;
+  var entryAutoScrollPending = false;
 
   function updateKeyboardInset() {
     var viewport = window.visualViewport;
@@ -676,6 +678,7 @@
 
   function alignEntrySubmitOnce() {
     entryAlignmentTimer = null;
+    entryAutoScrollPending = false;
     if (!focusedEntryActivity || document.activeElement !== el.activity || !el.entrySubmit.isConnected) { return; }
 
     var viewport = window.visualViewport;
@@ -699,7 +702,16 @@
         document.documentElement.style.setProperty('--entry-scroll-space', Math.ceil(extraSpace) + 'px');
       }
     }
-    if (Math.abs(scrollDelta) > 1) { window.scrollBy(0, scrollDelta); }
+    if (Math.abs(scrollDelta) > 1) {
+      entryAutoScrollPending = true;
+      if (entryAutoScrollClearTimer) { window.clearTimeout(entryAutoScrollClearTimer); }
+      entryAutoScrollClearTimer = window.setTimeout(function () {
+        entryAutoScrollClearTimer = null;
+        entryAutoScrollPending = false;
+      }, ENTRY_ALIGNMENT_SETTLE_MS * 3);
+      // 视口变化后如果差值为负，scrollDelta 会带符号地把多余滚动反向抵消。
+      window.scrollBy(0, scrollDelta);
+    }
   }
 
   function scheduleEntryAlignment(delay) {
@@ -718,6 +730,9 @@
       focusedEntryActivity = false;
       if (entryAlignmentTimer) { window.clearTimeout(entryAlignmentTimer); }
       entryAlignmentTimer = null;
+      if (entryAutoScrollClearTimer) { window.clearTimeout(entryAutoScrollClearTimer); }
+      entryAutoScrollClearTimer = null;
+      entryAutoScrollPending = false;
       document.documentElement.style.setProperty('--entry-scroll-space', '0px');
       updateKeyboardInset();
     }
@@ -734,7 +749,7 @@
       updateKeyboardInset();
       updatePolishFloat();
       if (focusedEntryActivity && isKeyboardVisible()) {
-        scheduleEntryAlignment(ENTRY_ALIGNMENT_SETTLE_MS);
+        scheduleEntryAlignment(entryAutoScrollPending ? 0 : ENTRY_ALIGNMENT_SETTLE_MS);
       }
     });
     window.visualViewport.addEventListener('scroll', function () {
