@@ -648,18 +648,25 @@
   var pageScrollSaveTimer = null;
   var BOTTOM_REBOUND_DISTANCE = 75;
   var BOTTOM_REBOUND_EDGE_TOLERANCE = 6;
-  var lastTouchPageY = null;
 
   function guardedPageScrollTop() {
-    var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-    return Math.max(0, maxScroll - BOTTOM_REBOUND_DISTANCE);
+    var layoutMaxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    var viewport = window.visualViewport;
+    var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
+    var targetScroll = document.documentElement.scrollHeight - viewportBottom - BOTTOM_REBOUND_DISTANCE;
+    return Math.max(0, Math.min(layoutMaxScroll, targetScroll));
   }
 
   function reboundBeforeNativeScroll() {
     if (!isNarrowScreen()) { return; }
-    var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-    if (window.scrollY >= maxScroll - BOTTOM_REBOUND_EDGE_TOLERANCE) {
-      window.scrollTo(0, Math.max(0, maxScroll - BOTTOM_REBOUND_DISTANCE));
+    var layoutMaxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    if (window.scrollY >= layoutMaxScroll - BOTTOM_REBOUND_EDGE_TOLERANCE) {
+      window.scrollTo(0, guardedPageScrollTop());
+      window.requestAnimationFrame(function () {
+        if (window.scrollY >= layoutMaxScroll - BOTTOM_REBOUND_EDGE_TOLERANCE) {
+          window.scrollTo(0, guardedPageScrollTop());
+        }
+      });
     }
   }
 
@@ -675,22 +682,6 @@
   document.addEventListener('pointerdown', reboundBeforeNativeScroll, true);
   document.addEventListener('touchstart', reboundBeforeNativeScroll, { capture: true, passive: true });
   document.addEventListener('mousedown', reboundBeforeNativeScroll, true);
-
-  window.addEventListener('wheel', function (event) {
-    if (!isNarrowScreen() || event.deltaY <= 0) { return; }
-    if (window.scrollY >= guardedPageScrollTop() - 1) { event.preventDefault(); }
-  }, { passive: false });
-
-  window.addEventListener('touchstart', function (event) {
-    lastTouchPageY = event.touches.length ? event.touches[0].pageY : null;
-  }, { passive: true });
-  window.addEventListener('touchmove', function (event) {
-    if (!isNarrowScreen() || !event.touches.length || lastTouchPageY === null) { return; }
-    var currentTouchPageY = event.touches[0].pageY;
-    var movingDownPage = currentTouchPageY < lastTouchPageY;
-    lastTouchPageY = currentTouchPageY;
-    if (movingDownPage && window.scrollY >= guardedPageScrollTop() - 1) { event.preventDefault(); }
-  }, { passive: false });
 
   /* 仅在复写页填写「作为」时，通过一次页面滚动把提交按钮移到浮动条上方。 */
   var ENTRY_FLOAT_GAP = 8;
@@ -830,9 +821,9 @@
     if (entryClickAlignmentTimer) { window.clearTimeout(entryClickAlignmentTimer); }
     entryClickAlignmentTimer = window.setTimeout(function () {
       entryClickAlignmentTimer = null;
-      if (!focusedEntryActivity || document.activeElement !== el.activity) { return; }
+      if (document.activeElement !== el.activity) { return; }
       entryAlignmentRequested = true;
-      scheduleEntryViewportStability();
+      scheduleEntryAlignment(ENTRY_ALIGNMENT_SETTLE_MS);
     }, ENTRY_NATIVE_SCROLL_SETTLE_MS);
   });
   if (window.visualViewport) {
