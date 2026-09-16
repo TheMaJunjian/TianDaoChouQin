@@ -656,14 +656,17 @@
     return Math.max(0, maxScroll - NATIVE_SCROLL_BUFFER);
   }
 
-  function guardBottomAfterScroll() {
-    if (isNarrowScreen() && window.scrollY > guardedPageScrollTop()) {
-      window.scrollTo(0, guardedPageScrollTop());
-    }
+  function scheduleBottomGuardAfterInputClick() {
+    if (!isNarrowScreen()) { return; }
+    if (bottomGuardTimer) { window.clearTimeout(bottomGuardTimer); }
+    bottomGuardTimer = window.setTimeout(function () {
+      bottomGuardTimer = null;
+      var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+      if (window.scrollY >= maxScroll - 1) {
+        window.scrollTo(0, Math.max(0, maxScroll - NATIVE_SCROLL_BUFFER));
+      }
+    }, BOTTOM_GUARD_IDLE_MS);
   }
-
-  window.addEventListener('scrollend', guardBottomAfterScroll, { passive: true });
-  document.addEventListener('scrollend', guardBottomAfterScroll, { passive: true });
 
   window.addEventListener('scroll', function () {
     state.ui.pageScrollTop = Math.max(0, window.scrollY || window.pageYOffset || 0);
@@ -672,17 +675,11 @@
       pageScrollSaveTimer = null;
       persist();
     }, 150);
-    if (isNarrowScreen()) {
-      if (bottomGuardTimer) { window.clearTimeout(bottomGuardTimer); }
-      bottomGuardTimer = window.setTimeout(function () {
-        bottomGuardTimer = null;
-        var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-        if (window.scrollY >= maxScroll - 1) {
-          window.scrollTo(0, Math.max(0, maxScroll - NATIVE_SCROLL_BUFFER));
-        }
-      }, BOTTOM_GUARD_IDLE_MS);
-    }
   }, { passive: true });
+
+  document.addEventListener('click', function (event) {
+    scheduleBottomGuardAfterInputClick();
+  });
 
   window.addEventListener('wheel', function (event) {
     if (!isNarrowScreen() || event.deltaY <= 0) { return; }
