@@ -656,8 +656,20 @@
   }, { passive: true });
 
   /* 仅在复写页填写「作为」时，把提交按钮移到键盘和浮动进度条上方。 */
+  var focusedEntryActivity = false;
+  var keyboardScrollTimer = null;
+
+  function updateKeyboardInset() {
+    var viewport = window.visualViewport;
+    var keyboardInset = focusedEntryActivity && viewport
+      ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
+      : 0;
+    document.documentElement.style.setProperty('--keyboard-inset', Math.round(keyboardInset) + 'px');
+  }
+
   function keepEntrySubmitVisible() {
-    if (!el.entrySubmit.isConnected) { return; }
+    keyboardScrollTimer = null;
+    if (!focusedEntryActivity || document.activeElement !== el.activity || !el.entrySubmit.isConnected) { return; }
 
     var viewport = window.visualViewport;
     var viewportTop = viewport ? viewport.offsetTop : 0;
@@ -677,36 +689,46 @@
       var extraSpace = Math.max(0, scrollDelta - maxScroll);
       if (extraSpace > 1) {
         document.documentElement.style.setProperty('--entry-scroll-space', Math.ceil(extraSpace) + 'px');
+        scheduleEntrySubmitScroll(0);
+        return;
       }
     }
-    if (Math.abs(scrollDelta) > 1) {
-      window.scrollBy(0, scrollDelta);
-    }
+    if (Math.abs(scrollDelta) > 1) { window.scrollBy(0, scrollDelta); }
   }
 
-  var entryVisibilityTimers = [];
-  function scheduleEntrySubmitVisibility() {
-    entryVisibilityTimers.forEach(function (timer) { window.clearTimeout(timer); });
-    entryVisibilityTimers = [
-      window.setTimeout(keepEntrySubmitVisible, 300),
-      window.setTimeout(keepEntrySubmitVisible, 650)
-    ];
+  function scheduleEntrySubmitScroll(delay) {
+    if (keyboardScrollTimer) { window.clearTimeout(keyboardScrollTimer); }
+    keyboardScrollTimer = window.setTimeout(keepEntrySubmitVisible, delay || 0);
   }
 
   document.addEventListener('focusin', function (event) {
     if (event.target !== el.activity || !isNarrowScreen()) { return; }
-    scheduleEntrySubmitVisibility();
+    focusedEntryActivity = true;
+    updateKeyboardInset();
+    scheduleEntrySubmitScroll(0);
   });
-
-  document.addEventListener('click', function (event) {
-    if (event.target !== el.activity || !isNarrowScreen()) { return; }
-    scheduleEntrySubmitVisibility();
+  document.addEventListener('focusout', function (event) {
+    if (event.target === el.activity) {
+      focusedEntryActivity = false;
+      document.documentElement.style.setProperty('--entry-scroll-space', '0px');
+      if (keyboardScrollTimer) { window.clearTimeout(keyboardScrollTimer); }
+      keyboardScrollTimer = null;
+      updateKeyboardInset();
+    }
   });
-
+  updateKeyboardInset();
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', function () {
+      updateKeyboardInset();
+      if (focusedEntryActivity && window.visualViewport.height < window.innerHeight - 80) {
+        scheduleEntrySubmitScroll(60);
+      }
+    });
+    window.visualViewport.addEventListener('scroll', updateKeyboardInset);
+  }
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'hidden') { flushState(); }
-  }
-  );
+  });
 
   function requestPersistentStorage() {
     if (!navigator.storage || !navigator.storage.persist) { return; }

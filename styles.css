@@ -1,5 +1,6 @@
 :root {
   --bg: #05080d;
+  --keyboard-inset: 0px;
   --entry-scroll-space: 0px;
   --panel: rgba(10, 22, 32, 0.85);
   --line: #1c3b4d;
@@ -17,7 +18,7 @@
 
 body {
   margin: 0;
-  padding: 0 0 calc(40px + var(--entry-scroll-space));
+  padding: 0 0 calc(40px + var(--keyboard-inset) + var(--entry-scroll-space));
   background:
     radial-gradient(circle at 20% 0%, #0d2233 0%, transparent 55%),
     radial-gradient(circle at 90% 10%, #12283a 0%, transparent 45%),
@@ -601,7 +602,7 @@ input:focus, select:focus {
 }
 
 .polish-float.at-top { top: 8px; }
-.polish-float.at-bottom { bottom: 8px; }
+.polish-float.at-bottom { bottom: calc(8px + var(--keyboard-inset)); }
 .polish-float .progress-bar { flex: 1; height: 10px; }
 .polish-float-label,
 .polish-float-pct {
