@@ -680,7 +680,7 @@ input:focus, select:focus {
 .quest-title { color: var(--cyan); font-size: 13px; }
 .quest-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .quest-title-row > span:first-child { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
-.quest-status { color: var(--muted); font-size: 11px; }
+.quest-status, .quest-completion-count { color: var(--muted); font-size: 11px; }
 .quest-desc { max-height: 96px; overflow-y: auto; padding-right: 8px; color: var(--muted); font-size: 12px; line-height: 1.5; margin: 4px 0; overflow-wrap: anywhere; white-space: pre-wrap; scrollbar-gutter: stable; }
 .quest-desc::-webkit-scrollbar { width: 6px; }
 .quest-desc::-webkit-scrollbar-track { background: rgba(28, 59, 77, 0.28); border-radius: 3px; }
