@@ -731,7 +731,7 @@
     var groupBottom = Math.max(submitRect.bottom, controlRect.bottom);
     var viewport = window.visualViewport;
     var viewportHeight = viewport ? viewport.height : window.innerHeight;
-    var groupFitsViewport = groupBottom - groupTop <= viewportHeight;
+    var groupFitsViewport = control.form.getBoundingClientRect().height <= viewportHeight;
     control.style.scrollMarginBlockStart = groupFitsViewport
       ? margin + Math.max(0, controlRect.top - groupTop) + 'px'
       : margin + 'px';
@@ -760,7 +760,7 @@
     var groupTop = Math.min(groupStartRect.top, controlRect.top);
     var groupBottom = Math.max(submitRect.bottom, controlRect.bottom);
     var floatHeight = floatRect ? floatRect.height : 0;
-    var groupFitsViewport = groupBottom - groupTop <= viewportHeight;
+    var groupFitsViewport = focusedControl.form.getBoundingClientRect().height <= viewportHeight;
     var controlTop = groupFitsViewport ? groupTop : controlRect.top;
     var submitBottom = groupFitsViewport ? groupBottom : controlRect.bottom;
 
