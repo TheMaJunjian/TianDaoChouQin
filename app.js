@@ -2216,7 +2216,6 @@
         notifySkillLevelUp(skill, previousSkillHours, currentSkillHours);
       }
       refreshAll();
-      el.entrySubmit.blur();
     }
 
     if (conflicts.length) {
