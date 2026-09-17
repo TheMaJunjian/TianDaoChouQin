@@ -693,10 +693,34 @@
   var entryActivityClickedAt = 0;
   var entryKeyboardShrunkAt = 0;
   var entryClickViewportHeight = 0;
+  var entryScrollAnimationFrame = null;
+  var ENTRY_SCROLL_ANIMATION_MS = 700;
+
+  function cancelEntryScrollAnimation() {
+    if (entryScrollAnimationFrame !== null) {
+      window.cancelAnimationFrame(entryScrollAnimationFrame);
+      entryScrollAnimationFrame = null;
+    }
+  }
 
   function scrollEntryBy(delta) {
     if (Math.abs(delta) <= 1) { return; }
-    window.scrollBy({ top: delta, left: 0, behavior: 'smooth' });
+    cancelEntryScrollAnimation();
+    var startY = window.scrollY || window.pageYOffset || 0;
+    var targetY = Math.max(0, startY + delta);
+    var startedAt = null;
+    function animate(timestamp) {
+      if (startedAt === null) { startedAt = timestamp; }
+      var progress = Math.min(1, (timestamp - startedAt) / ENTRY_SCROLL_ANIMATION_MS);
+      var easedProgress = 1 - Math.pow(1 - progress, 3);
+      window.scrollTo(0, startY + (targetY - startY) * easedProgress);
+      if (progress < 1) {
+        entryScrollAnimationFrame = window.requestAnimationFrame(animate);
+      } else {
+        entryScrollAnimationFrame = null;
+      }
+    }
+    entryScrollAnimationFrame = window.requestAnimationFrame(animate);
   }
 
   function currentEntryViewportHeight() {
@@ -783,7 +807,7 @@
     } else {
       return;
     }
-    scrollEntryBy(scrollDelta);
+    window.scrollBy(0, scrollDelta);
   }
 
   function scheduleFocusedControlAlignment() {
@@ -792,6 +816,7 @@
   }
 
   function cancelPendingFocusAlignment() {
+    cancelEntryScrollAnimation();
     if (focusedControlAlignmentTimer) { window.clearTimeout(focusedControlAlignmentTimer); }
     focusedControlAlignmentTimer = null;
     if (entryAutoScrollClearTimer) { window.clearTimeout(entryAutoScrollClearTimer); }
@@ -802,6 +827,7 @@
 
   document.addEventListener('touchstart', function () {
     manualScrollIntent = true;
+    cancelEntryScrollAnimation();
   }, { passive: true });
 
   document.addEventListener('click', function (event) {
