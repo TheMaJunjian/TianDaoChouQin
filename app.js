@@ -892,6 +892,9 @@
 
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'hidden') {
+      if (document.activeElement && document.activeElement.matches('button[type="submit"]')) {
+        document.activeElement.blur();
+      }
       cancelNativeScrollCorrection();
       nativeScrollCorrectionRequested = false;
       nativeScrollCorrectionControl = null;
