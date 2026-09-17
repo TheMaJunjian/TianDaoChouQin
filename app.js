@@ -694,6 +694,11 @@
   var entryKeyboardShrunkAt = 0;
   var entryClickViewportHeight = 0;
 
+  function scrollEntryBy(delta) {
+    if (Math.abs(delta) <= 1) { return; }
+    window.scrollBy({ top: delta, left: 0, behavior: 'smooth' });
+  }
+
   function currentEntryViewportHeight() {
     var viewport = window.visualViewport;
     return viewport ? viewport.height : window.innerHeight;
@@ -726,7 +731,7 @@
       var extraSpace = Math.max(0, scrollDelta - maxScroll);
       if (extraSpace > 1) {
         document.documentElement.style.setProperty('--entry-scroll-space', Math.ceil(extraSpace) + 'px');
-        window.scrollBy(0, scrollDelta);
+        scrollEntryBy(scrollDelta);
         entryAlignmentRequested = false;
         return;
       }
@@ -739,7 +744,7 @@
         entryAutoScrollPending = false;
       }, ENTRY_ALIGNMENT_SETTLE_MS * 2);
       // 视口变化后如果差值为负，scrollDelta 会带符号地把多余滚动反向抵消。
-      window.scrollBy(0, scrollDelta);
+      scrollEntryBy(scrollDelta);
     } else if (entryAutoScrollPending) {
       entryAutoScrollPending = false;
       if (entryAutoScrollClearTimer) { window.clearTimeout(entryAutoScrollClearTimer); }
@@ -778,7 +783,7 @@
     } else {
       return;
     }
-    if (Math.abs(scrollDelta) > 1) { window.scrollBy(0, scrollDelta); }
+    scrollEntryBy(scrollDelta);
   }
 
   function scheduleFocusedControlAlignment() {
