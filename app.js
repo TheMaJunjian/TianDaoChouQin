@@ -794,6 +794,8 @@
 
   var focusedControlAlignmentTimer = null;
   var focusedControlClickViewportHeight = 0;
+  var focusedControlAlignmentPasses = 0;
+  var FOCUSED_CONTROL_MAX_ALIGNMENT_PASSES = 3;
   var manualScrollIntent = false;
 
   function alignFocusedControlAroundPolishFloat() {
@@ -810,27 +812,50 @@
     if (floatRect.height <= 0 || floatRect.bottom <= viewportTop || floatRect.top >= viewportBottom) { return; }
 
     var controlRect = focusedControl.getBoundingClientRect();
+    var controlTop = controlRect.top;
+    var controlBottom = controlRect.bottom;
+    if (focusedControl === el.activity && el.entrySubmit.isConnected) {
+      var submitRect = el.entrySubmit.getBoundingClientRect();
+      controlTop = Math.min(controlTop, submitRect.top);
+      controlBottom = Math.max(controlBottom, submitRect.bottom);
+    }
+    var effectiveControlTop = controlTop - floatRect.height;
+    var effectiveControlBottom = controlBottom + floatRect.height;
     var scrollDelta = 0;
     if (el.polishFloat.classList.contains('at-bottom')) {
       var bottomTarget = floatRect.top - ENTRY_FLOAT_GAP;
-      if (controlRect.bottom <= bottomTarget) { return; }
-      scrollDelta = controlRect.bottom - bottomTarget;
+      if (effectiveControlBottom <= bottomTarget) { return; }
+      scrollDelta = effectiveControlBottom - bottomTarget;
     } else if (el.polishFloat.classList.contains('at-top')) {
       var topTarget = floatRect.bottom + ENTRY_FLOAT_GAP;
-      if (controlRect.top >= topTarget) { return; }
-      scrollDelta = controlRect.top - topTarget;
+      if (effectiveControlTop >= topTarget) { return; }
+      scrollDelta = effectiveControlTop - topTarget;
     } else {
       return;
     }
     if (focusedControl === el.activity) {
       scrollEntryBy(scrollDelta, false);
     } else {
+      if (scrollDelta > 1) {
+        var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight - window.scrollY);
+        var extraSpace = Math.max(0, scrollDelta - maxScroll);
+        if (extraSpace > 1) {
+          document.documentElement.style.setProperty('--entry-scroll-space', Math.ceil(extraSpace) + 'px');
+        }
+      }
       window.scrollBy(0, scrollDelta);
+      if (focusedControlAlignmentPasses < FOCUSED_CONTROL_MAX_ALIGNMENT_PASSES) {
+        focusedControlAlignmentPasses += 1;
+        window.requestAnimationFrame(alignFocusedControlAroundPolishFloat);
+      } else {
+        focusedControlAlignmentPasses = 0;
+      }
     }
   }
 
   function scheduleFocusedControlAlignment() {
     if (focusedControlAlignmentTimer) { window.clearTimeout(focusedControlAlignmentTimer); }
+    focusedControlAlignmentPasses = 0;
     focusedControlAlignmentTimer = window.setTimeout(alignFocusedControlAroundPolishFloat, ENTRY_NATIVE_SCROLL_SETTLE_MS);
   }
 
@@ -855,6 +880,7 @@
     if (!clickedControl) { return; }
     manualScrollIntent = false;
     if (focusedControlAlignmentTimer) { window.clearTimeout(focusedControlAlignmentTimer); }
+    focusedControlAlignmentPasses = 0;
     focusedControlClickViewportHeight = currentEntryViewportHeight();
     if (clickedControl === el.activity) {
       focusedEntryActivity = true;
@@ -873,10 +899,8 @@
       if (clickedControl === el.activity) {
         entryKeyboardShrunkAt = viewportShrunk ? Date.now() : entryKeyboardShrunkAt;
         entryAlignmentRequested = true;
-        alignEntrySubmitOnce();
-      } else {
-        alignFocusedControlAroundPolishFloat();
       }
+      alignFocusedControlAroundPolishFloat();
     }, ENTRY_NATIVE_SCROLL_SETTLE_MS);
   });
 
@@ -905,6 +929,12 @@
       window.setTimeout(function () {
         if (focusedEntryActivity) { return; }
         document.documentElement.style.setProperty('--entry-scroll-space', '0px');
+      }, 0);
+    } else if (event.target.matches('input, select, textarea')) {
+      window.setTimeout(function () {
+        if (document.activeElement !== event.target) {
+          document.documentElement.style.setProperty('--entry-scroll-space', '0px');
+        }
       }, 0);
     }
   });
