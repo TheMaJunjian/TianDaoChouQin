@@ -701,6 +701,11 @@
 
   function prepareControlNativeScroll(control) {
     if (!control || !control.matches('input, select, textarea')) { return; }
+    if (control !== el.activity) {
+      control.style.removeProperty('scroll-margin-block-start');
+      control.style.removeProperty('scroll-margin-block-end');
+      return;
+    }
     updatePolishFloat();
     if (!el.polishFloat || el.polishFloat.classList.contains('hidden')) {
       control.style.removeProperty('scroll-margin-block-start');
