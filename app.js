@@ -455,6 +455,9 @@
           // 奖励允许为负数，用于记录任务带来的点数扣减。
           rewardAttr: Math.floor(Number(item.rewardAttr)),
           rewardAchievement: Math.floor(Number(item.rewardAchievement !== undefined ? item.rewardAchievement : item.rewardContrib)),
+          completionCount: Number.isFinite(Number(item.completionCount))
+            ? Math.max(0, Math.floor(Number(item.completionCount)))
+            : (item.status === 'done' ? 1 : 0),
           hidden: item.hidden === true
         });
       }) : [];
@@ -812,7 +815,7 @@
   /* 简单校验签名：用于检测宿主是否绕过面板直接改写 localStorage 数值。 */
   function computeSignature() {
     var sideRewardSum = state.quests.side.reduce(function (sum, q) {
-      return sum + (q.status === 'done' ? q.rewardAttr + q.rewardAchievement : 0);
+      return sum + (q.rewardAttr + q.rewardAchievement) * (Number(q.completionCount) || 0);
     }, 0);
     var achPointSum = state.achievements.reduce(function (sum, a) { return sum + a.points; }, 0);
     var skillHourSum = state.skills.reduce(function (sum, s) { return sum + s.hours; }, 0);
@@ -3318,6 +3321,7 @@
   }
 
   function completeSideQuest(quest) {
+    quest.completionCount = (Number(quest.completionCount) || 0) + 1;
     quest.status = 'done';
     quest.progress = 0;
     state.points.attribute += quest.rewardAttr;
@@ -3349,7 +3353,7 @@
     state.quests.side.push({
       id: uid(), title: title, desc: desc,
       rewardAttr: rewardAttr, rewardAchievement: rewardAchievement,
-      status: 'open'
+      status: 'open', completionCount: 0
     });
     persist();
     toast('宿主已发布支线任务【' + title + '】。', { level: 'SYSTEM' });
@@ -3457,11 +3461,13 @@
 
   function renderSideQuestItem(q, isHidden) {
       var statusLabel = { open: '未接受', accepted: '进行中', done: '已完成' }[q.status];
+      var completionCount = Math.max(0, Math.floor(Number(q.completionCount) || 0));
       var actions = '';
       var reward = '奖励：属性点 +' + q.rewardAttr + ' ／ 成就点 +' + q.rewardAchievement +
         ' ／ 贡献点 +' + (q.rewardAttr + q.rewardAchievement);
-      if (q.status === 'open') {
-        actions = '<button type="button" class="btn ghost" data-accept="' + escapeHtml(q.id) + '">接受任务</button>';
+      if (q.status === 'open' || q.status === 'done') {
+        actions = '<button type="button" class="btn ghost" data-accept="' + escapeHtml(q.id) + '">' +
+          (q.status === 'done' ? '再次接受' : '接受任务') + '</button>';
       } else if (q.status === 'accepted') {
         actions = '<button type="button" class="btn" data-submit="' + escapeHtml(q.id) + '">提交任务</button>' +
           '';
@@ -3473,7 +3479,8 @@
       }
       var rewardClass = q.status === 'done' ? '' : ' quest-reward-pending';
       return '<li class="quest-item quest-' + q.status + (isHidden ? ' quest-hidden' : '') + '">' +
-        '<div class="quest-title quest-title-row"><span>' + escapeHtml(q.title) + ' <span class="quest-status">[' + statusLabel + ']</span></span>' +
+        '<div class="quest-title quest-title-row"><span>' + escapeHtml(q.title) + ' <span class="quest-status">[' + statusLabel + ']</span>' +
+        (completionCount > 0 ? ' <span class="quest-completion-count">[已完成 ' + completionCount + ' 次]</span>' : '') + '</span>' +
         '<span class="quest-reward quest-reward-inline' + rewardClass + '">' + reward + '</span></div>' +
         (q.desc ? '<div class="quest-desc">' + escapeHtml(q.desc) + '</div>' : '') +
         '<div class="quest-actions">' + actions + '</div></li>';
