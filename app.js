@@ -683,134 +683,52 @@
 
   /* 仅在复写页填写「作为」时，通过一次页面滚动把提交按钮移到浮动条上方。 */
   var ENTRY_FLOAT_GAP = 8;
-  var ENTRY_ALIGNMENT_SETTLE_MS = 120;
-  var ENTRY_NATIVE_SCROLL_SETTLE_MS = 250;
-  var ENTRY_CLICK_ALIGNMENT_WINDOW_MS = 700;
-  var focusedEntryActivity = false;
-  var entryAutoScrollClearTimer = null;
-  var entryAutoScrollPending = false;
-  var entryAlignmentRequested = false;
-  var entryActivityClickedAt = 0;
-  var entryKeyboardShrunkAt = 0;
-  var entryClickViewportHeight = 0;
-  var entryScrollAnimationFrame = null;
-  var ENTRY_SCROLL_ANIMATION_MS = 700;
-  var entryScrollCorrectionPasses = 0;
-  var ENTRY_SCROLL_MAX_CORRECTION_PASSES = 3;
+  var nativeScrollCorrectionTimer = null;
+  var nativeScrollCorrectionFrame = null;
+  var NATIVE_SCROLL_CORRECTION_DELAY_MS = 250;
+  var NATIVE_SCROLL_CORRECTION_DURATION_MS = 700;
 
-  function cancelEntryScrollAnimation() {
-    if (entryScrollAnimationFrame !== null) {
-      window.cancelAnimationFrame(entryScrollAnimationFrame);
-      entryScrollAnimationFrame = null;
+  function cancelNativeScrollCorrection() {
+    if (nativeScrollCorrectionTimer !== null) {
+      window.clearTimeout(nativeScrollCorrectionTimer);
+      nativeScrollCorrectionTimer = null;
+    }
+    if (nativeScrollCorrectionFrame !== null) {
+      window.cancelAnimationFrame(nativeScrollCorrectionFrame);
+      nativeScrollCorrectionFrame = null;
     }
   }
 
-  function scrollEntryBy(delta, settle) {
-    if (Math.abs(delta) <= 1) { return; }
-    cancelEntryScrollAnimation();
-    var startY = window.scrollY || window.pageYOffset || 0;
-    var targetY = Math.max(0, startY + delta);
-    var startedAt = null;
-    function animate(timestamp) {
-      if (startedAt === null) { startedAt = timestamp; }
-      var progress = Math.min(1, (timestamp - startedAt) / ENTRY_SCROLL_ANIMATION_MS);
-      var easedProgress = 1 - Math.pow(1 - progress, 3);
-      window.scrollTo(0, startY + (targetY - startY) * easedProgress);
-      if (progress < 1) {
-        entryScrollAnimationFrame = window.requestAnimationFrame(animate);
-      } else {
-        entryScrollAnimationFrame = null;
-        if (settle) {
-          window.requestAnimationFrame(function () {
-            if (!focusedEntryActivity || entryScrollCorrectionPasses >= ENTRY_SCROLL_MAX_CORRECTION_PASSES) {
-              entryScrollCorrectionPasses = 0;
-              return;
-            }
-            entryScrollCorrectionPasses += 1;
-            entryAlignmentRequested = true;
-            entryKeyboardShrunkAt = Date.now();
-            alignEntrySubmitOnce();
-          });
-        }
-      }
+  function prepareControlNativeScroll(control) {
+    if (!control || !control.matches('input, select, textarea')) { return; }
+    updatePolishFloat();
+    if (!el.polishFloat || el.polishFloat.classList.contains('hidden')) {
+      control.style.removeProperty('scroll-margin-block-start');
+      control.style.removeProperty('scroll-margin-block-end');
+      return;
     }
-    entryScrollAnimationFrame = window.requestAnimationFrame(animate);
+    var floatHeight = el.polishFloat.getBoundingClientRect().height;
+    if (floatHeight <= 0) { return; }
+    var margin = floatHeight + ENTRY_FLOAT_GAP;
+    if (control === el.activity && el.entrySubmit.isConnected) {
+      var controlRect = control.getBoundingClientRect();
+      var submitRect = el.entrySubmit.getBoundingClientRect();
+      margin += Math.max(0, submitRect.bottom - controlRect.bottom);
+    }
+    control.style.scrollMarginBlockStart = margin + 'px';
+    control.style.scrollMarginBlockEnd = margin + 'px';
   }
 
-  function currentEntryViewportHeight() {
-    var viewport = window.visualViewport;
-    return viewport ? viewport.height : window.innerHeight;
-  }
-
-  function alignEntrySubmitOnce() {
-    if (!focusedEntryActivity || document.activeElement !== el.activity || !el.entrySubmit.isConnected) { return; }
-
-    var viewport = window.visualViewport;
-    var viewportTop = viewport ? viewport.offsetTop : 0;
-    var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
-    var activityRect = el.activity.getBoundingClientRect();
-    var submitRect = el.entrySubmit.getBoundingClientRect();
-    var controlTop = Math.min(activityRect.top, submitRect.top);
-    var controlBottom = Math.max(activityRect.bottom, submitRect.bottom);
-    var scrollDelta = 0;
-    if (!el.polishFloat.classList.contains('hidden')) {
-      var progressRect = el.polishFloat.getBoundingClientRect();
-      if (progressRect.height > 0
-        && progressRect.bottom > viewportTop
-        && progressRect.top < viewportBottom) {
-        if (el.polishFloat.classList.contains('at-bottom') && controlBottom > progressRect.top) {
-          scrollDelta = controlBottom - (progressRect.top - ENTRY_FLOAT_GAP);
-        } else if (el.polishFloat.classList.contains('at-top') && controlTop < progressRect.bottom) {
-          scrollDelta = controlTop - (progressRect.bottom + ENTRY_FLOAT_GAP);
-        }
-      }
-    }
-    if (scrollDelta > 1) {
-      var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight - window.scrollY);
-      var extraSpace = Math.max(0, scrollDelta - maxScroll);
-      if (extraSpace > 1) {
-        document.documentElement.style.setProperty('--entry-scroll-space', Math.ceil(extraSpace) + 'px');
-        scrollEntryBy(scrollDelta, true);
-        entryAlignmentRequested = false;
-        return;
-      }
-    }
-    if (Math.abs(scrollDelta) > 1) {
-      entryAutoScrollPending = true;
-      if (entryAutoScrollClearTimer) { window.clearTimeout(entryAutoScrollClearTimer); }
-      entryAutoScrollClearTimer = window.setTimeout(function () {
-        entryAutoScrollClearTimer = null;
-        entryAutoScrollPending = false;
-      }, ENTRY_ALIGNMENT_SETTLE_MS * 2);
-      // 整个输入控件组如果需要向上或向下避让浮动条，都沿同一方向缓动。
-      scrollEntryBy(scrollDelta, true);
-    } else if (entryAutoScrollPending) {
-      entryAutoScrollPending = false;
-      if (entryAutoScrollClearTimer) { window.clearTimeout(entryAutoScrollClearTimer); }
-      entryAutoScrollClearTimer = null;
-    }
-    entryAlignmentRequested = false;
-  }
-
-  var focusedControlAlignmentTimer = null;
-  var focusedControlClickViewportHeight = 0;
-  var focusedControlAlignmentPasses = 0;
-  var FOCUSED_CONTROL_MAX_ALIGNMENT_PASSES = 3;
-  var manualScrollIntent = false;
-
-  function alignFocusedControlAroundPolishFloat() {
-    focusedControlAlignmentTimer = null;
+  function correctFocusedControlAfterNativeScroll() {
+    nativeScrollCorrectionTimer = null;
     if (!isNarrowScreen()) { return; }
     var focusedControl = document.activeElement;
-    if (!focusedControl || !focusedControl.matches('input, select, textarea, button, [contenteditable="true"]')) { return; }
+    if (!focusedControl || !focusedControl.matches('input, select, textarea')) { return; }
+    updatePolishFloat();
     if (!el.polishFloat || el.polishFloat.classList.contains('hidden')) { return; }
 
-    var viewport = window.visualViewport;
-    var viewportTop = viewport ? viewport.offsetTop : 0;
-    var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
     var floatRect = el.polishFloat.getBoundingClientRect();
-    if (floatRect.height <= 0 || floatRect.bottom <= viewportTop || floatRect.top >= viewportBottom) { return; }
-
+    if (floatRect.height <= 0) { return; }
     var controlRect = focusedControl.getBoundingClientRect();
     var controlTop = controlRect.top;
     var controlBottom = controlRect.bottom;
@@ -819,128 +737,74 @@
       controlTop = Math.min(controlTop, submitRect.top);
       controlBottom = Math.max(controlBottom, submitRect.bottom);
     }
-    var effectiveControlTop = controlTop - floatRect.height;
-    var effectiveControlBottom = controlBottom + floatRect.height;
+
     var scrollDelta = 0;
     if (el.polishFloat.classList.contains('at-bottom')) {
       var bottomTarget = floatRect.top - ENTRY_FLOAT_GAP;
-      if (effectiveControlBottom <= bottomTarget) { return; }
-      scrollDelta = effectiveControlBottom - bottomTarget;
+      if (controlBottom > bottomTarget) { scrollDelta = controlBottom - bottomTarget; }
     } else if (el.polishFloat.classList.contains('at-top')) {
       var topTarget = floatRect.bottom + ENTRY_FLOAT_GAP;
-      if (effectiveControlTop >= topTarget) { return; }
-      scrollDelta = effectiveControlTop - topTarget;
-    } else {
-      return;
+      if (controlTop < topTarget) { scrollDelta = controlTop - topTarget; }
     }
-    if (focusedControl === el.activity) {
-      scrollEntryBy(scrollDelta, false);
-    } else {
-      if (scrollDelta > 1) {
-        var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight - window.scrollY);
-        var extraSpace = Math.max(0, scrollDelta - maxScroll);
-        if (extraSpace > 1) {
-          document.documentElement.style.setProperty('--entry-scroll-space', Math.ceil(extraSpace) + 'px');
-        }
+    if (Math.abs(scrollDelta) <= 1) { return; }
+
+    if (scrollDelta > 0) {
+      var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight - window.scrollY);
+      var extraSpace = Math.max(0, scrollDelta - maxScroll);
+      if (extraSpace > 1) {
+        document.documentElement.style.setProperty('--entry-scroll-space', Math.ceil(extraSpace) + 'px');
       }
-      window.scrollBy(0, scrollDelta);
-      if (focusedControlAlignmentPasses < FOCUSED_CONTROL_MAX_ALIGNMENT_PASSES) {
-        focusedControlAlignmentPasses += 1;
-        window.requestAnimationFrame(alignFocusedControlAroundPolishFloat);
+    }
+
+    var startY = window.scrollY || window.pageYOffset || 0;
+    var targetY = Math.max(0, startY + scrollDelta);
+    var startedAt = null;
+    function animate(timestamp) {
+      if (startedAt === null) { startedAt = timestamp; }
+      var progress = Math.min(1, (timestamp - startedAt) / NATIVE_SCROLL_CORRECTION_DURATION_MS);
+      var easedProgress = 1 - Math.pow(1 - progress, 3);
+      window.scrollTo(0, startY + (targetY - startY) * easedProgress);
+      if (progress < 1 && document.activeElement === focusedControl) {
+        nativeScrollCorrectionFrame = window.requestAnimationFrame(animate);
       } else {
-        focusedControlAlignmentPasses = 0;
+        nativeScrollCorrectionFrame = null;
       }
     }
+    nativeScrollCorrectionFrame = window.requestAnimationFrame(animate);
   }
 
-  function scheduleFocusedControlAlignment() {
-    if (focusedControlAlignmentTimer) { window.clearTimeout(focusedControlAlignmentTimer); }
-    focusedControlAlignmentPasses = 0;
-    focusedControlAlignmentTimer = window.setTimeout(alignFocusedControlAroundPolishFloat, ENTRY_NATIVE_SCROLL_SETTLE_MS);
+  function scheduleNativeScrollCorrection() {
+    cancelNativeScrollCorrection();
+    nativeScrollCorrectionTimer = window.setTimeout(correctFocusedControlAfterNativeScroll, NATIVE_SCROLL_CORRECTION_DELAY_MS);
   }
 
-  function cancelPendingFocusAlignment() {
-    cancelEntryScrollAnimation();
-    if (focusedControlAlignmentTimer) { window.clearTimeout(focusedControlAlignmentTimer); }
-    focusedControlAlignmentTimer = null;
-    if (entryAutoScrollClearTimer) { window.clearTimeout(entryAutoScrollClearTimer); }
-    entryAutoScrollClearTimer = null;
-    entryAutoScrollPending = false;
-    entryAlignmentRequested = false;
-  }
-
-  document.addEventListener('touchstart', function () {
-    manualScrollIntent = false;
-    cancelEntryScrollAnimation();
-  }, { passive: true });
-
-  document.addEventListener('touchmove', function () {
-    manualScrollIntent = true;
+  document.addEventListener('touchstart', function (event) {
+    if (!isNarrowScreen()) { return; }
+    var control = event.target.closest && event.target.closest('input, select, textarea');
+    cancelNativeScrollCorrection();
+    prepareControlNativeScroll(control);
   }, { passive: true });
 
   document.addEventListener('click', function (event) {
     if (!isNarrowScreen()) { return; }
-    var clickedControl = event.target.closest && event.target.closest('input, textarea, select');
-    if (!clickedControl) { return; }
-    manualScrollIntent = false;
-    if (focusedControlAlignmentTimer) { window.clearTimeout(focusedControlAlignmentTimer); }
-    focusedControlAlignmentPasses = 0;
-    focusedControlClickViewportHeight = currentEntryViewportHeight();
-    if (clickedControl === el.activity) {
-      focusedEntryActivity = true;
-      entryActivityClickedAt = Date.now();
-      entryClickViewportHeight = focusedControlClickViewportHeight;
-      entryKeyboardShrunkAt = 0;
-      entryScrollCorrectionPasses = 0;
-    }
-    focusedControlAlignmentTimer = window.setTimeout(function () {
-      focusedControlAlignmentTimer = null;
-      if (document.activeElement !== clickedControl) { return; }
-      var viewportHeight = clickedControl === el.activity
-        ? entryClickViewportHeight
-        : focusedControlClickViewportHeight;
-      var viewportShrunk = viewportHeight - currentEntryViewportHeight() > 80;
-      if (clickedControl === el.activity) {
-        entryKeyboardShrunkAt = viewportShrunk ? Date.now() : entryKeyboardShrunkAt;
-        entryAlignmentRequested = true;
-      }
-      alignFocusedControlAroundPolishFloat();
-    }, ENTRY_NATIVE_SCROLL_SETTLE_MS);
+    var control = event.target.closest && event.target.closest('input, select, textarea');
+    if (!control) { return; }
+    prepareControlNativeScroll(control);
+    scheduleNativeScrollCorrection();
   });
-
-  window.addEventListener('scroll', function () {
-    if (!manualScrollIntent) { return; }
-    manualScrollIntent = false;
-    cancelPendingFocusAlignment();
-  }, { passive: true });
 
   document.addEventListener('focusin', function (event) {
     if (!isNarrowScreen() || !event.target.matches('input, select, textarea')) { return; }
-    if (event.target === el.activity) {
-      focusedEntryActivity = true;
-    }
-    scheduleFocusedControlAlignment();
+    prepareControlNativeScroll(event.target);
+    scheduleNativeScrollCorrection();
   });
+
   document.addEventListener('focusout', function (event) {
-    if (event.target === el.activity) {
-      focusedEntryActivity = false;
-      if (entryAutoScrollClearTimer) { window.clearTimeout(entryAutoScrollClearTimer); }
-      entryAutoScrollClearTimer = null;
-      entryAutoScrollPending = false;
-      entryAlignmentRequested = false;
-      entryKeyboardShrunkAt = 0;
-      entryClickViewportHeight = 0;
-      window.setTimeout(function () {
-        if (focusedEntryActivity) { return; }
-        document.documentElement.style.setProperty('--entry-scroll-space', '0px');
-      }, 0);
-    } else if (event.target.matches('input, select, textarea')) {
-      window.setTimeout(function () {
-        if (document.activeElement !== event.target) {
-          document.documentElement.style.setProperty('--entry-scroll-space', '0px');
-        }
-      }, 0);
-    }
+    if (!event.target.matches('input, select, textarea')) { return; }
+    cancelNativeScrollCorrection();
+    event.target.style.removeProperty('scroll-margin-block-start');
+    event.target.style.removeProperty('scroll-margin-block-end');
+    document.documentElement.style.setProperty('--entry-scroll-space', '0px');
   });
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
