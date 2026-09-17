@@ -754,7 +754,9 @@
     var controlRect = focusedControl.getBoundingClientRect();
     var submitRect = group.submit.getBoundingClientRect();
     var viewport = window.visualViewport;
+    var viewportTop = viewport ? viewport.offsetTop : 0;
     var viewportHeight = viewport ? viewport.height : window.innerHeight;
+    var viewportBottom = viewportTop + viewportHeight;
     var groupTop = Math.min(groupStartRect.top, controlRect.top);
     var groupBottom = Math.max(submitRect.bottom, controlRect.bottom);
     var floatHeight = floatRect ? floatRect.height : 0;
@@ -766,15 +768,11 @@
     if (!floatRect || el.polishFloat.classList.contains('at-bottom')) {
       var bottomTarget = floatRect
         ? floatRect.top - ENTRY_FLOAT_GAP
-        : (viewport ? viewport.offsetTop + viewport.height : window.innerHeight) - ENTRY_FLOAT_GAP;
-      var keyboardBottomTarget = viewport
-        ? viewport.offsetTop + viewport.height - ENTRY_FLOAT_GAP
-        : window.innerHeight - ENTRY_FLOAT_GAP;
-      scrollDelta = Math.max(submitBottom - bottomTarget, controlRect.bottom - keyboardBottomTarget);
+        : viewportBottom - ENTRY_FLOAT_GAP;
+      scrollDelta = submitBottom - bottomTarget;
     } else if (el.polishFloat.classList.contains('at-top')) {
       var topTarget = floatRect.bottom + ENTRY_FLOAT_GAP;
-      var keyboardTopTarget = viewport ? viewport.offsetTop + ENTRY_FLOAT_GAP : ENTRY_FLOAT_GAP;
-      scrollDelta = Math.min(controlTop - topTarget, controlRect.top - keyboardTopTarget);
+      scrollDelta = controlTop - topTarget;
     }
     if (Math.abs(scrollDelta) <= 1) { return; }
 
