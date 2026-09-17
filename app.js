@@ -1742,7 +1742,6 @@
       }
       persist();
       refreshAll();
-      el.entrySubmit.blur();
       return;
     }
 
@@ -2217,6 +2216,7 @@
         notifySkillLevelUp(skill, previousSkillHours, currentSkillHours);
       }
       refreshAll();
+      el.entrySubmit.blur();
     }
 
     if (conflicts.length) {
