@@ -685,6 +685,7 @@
   var ENTRY_FLOAT_GAP = 8;
   var nativeScrollCorrectionTimer = null;
   var nativeScrollCorrectionFrame = null;
+  var nativeScrollCorrectionRequested = false;
   var NATIVE_SCROLL_CORRECTION_DELAY_MS = 500;
   var NATIVE_SCROLL_CORRECTION_DURATION_MS = 700;
 
@@ -749,62 +750,77 @@
 
   function correctFocusedControlAfterNativeScroll() {
     nativeScrollCorrectionTimer = null;
+    nativeScrollCorrectionRequested = false;
     if (!isNarrowScreen()) { return; }
     var focusedControl = document.activeElement;
     if (!focusedControl || !focusedControl.matches('input, select, textarea')) { return; }
     var group = getControlScrollGroup(focusedControl);
     if (!group || !group.submit) { return; }
     updatePolishFloat();
-    var floatVisible = el.polishFloat && !el.polishFloat.classList.contains('hidden');
-    var floatRect = floatVisible ? el.polishFloat.getBoundingClientRect() : null;
-    var groupStartRect = group.start.getBoundingClientRect();
-    var controlRect = focusedControl.getBoundingClientRect();
-    var submitRect = group.submit.getBoundingClientRect();
-    var viewport = window.visualViewport;
-    var viewportTop = viewport ? viewport.offsetTop : 0;
-    var viewportHeight = viewport ? viewport.height : window.innerHeight;
-    var viewportBottom = viewportTop + viewportHeight;
-    var groupTop = Math.min(groupStartRect.top, controlRect.top);
-    var groupBottom = Math.max(submitRect.bottom, controlRect.bottom);
-    var groupFitsViewport = groupBottom - groupTop <= viewportHeight;
-    var controlTop = groupFitsViewport ? groupTop : controlRect.top;
-    var submitBottom = groupFitsViewport ? groupBottom : controlRect.bottom;
-
-    var scrollDelta = 0;
-    if (!floatRect || el.polishFloat.classList.contains('at-bottom')) {
-      var bottomTarget = floatRect
-        ? floatRect.top - ENTRY_FLOAT_GAP
-        : viewportBottom - ENTRY_FLOAT_GAP;
-      scrollDelta = submitBottom - bottomTarget;
-    } else if (el.polishFloat.classList.contains('at-top')) {
-      var topTarget = floatRect.bottom + ENTRY_FLOAT_GAP;
-      scrollDelta = controlTop - topTarget;
-    }
-    if (Math.abs(scrollDelta) <= 1) { return; }
-
-    if (scrollDelta > 0) {
-      var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight - window.scrollY);
-      var extraSpace = Math.max(0, scrollDelta - maxScroll);
-      if (extraSpace > 1) {
-        document.documentElement.style.setProperty('--entry-scroll-space', Math.ceil(extraSpace) + 'px');
+    var correctionPasses = 0;
+    function getScrollDelta() {
+      updatePolishFloat();
+      var floatVisible = el.polishFloat && !el.polishFloat.classList.contains('hidden');
+      var floatRect = floatVisible ? el.polishFloat.getBoundingClientRect() : null;
+      var groupStartRect = group.start.getBoundingClientRect();
+      var controlRect = focusedControl.getBoundingClientRect();
+      var submitRect = group.submit.getBoundingClientRect();
+      var viewport = window.visualViewport;
+      var viewportTop = viewport ? viewport.offsetTop : 0;
+      var viewportHeight = viewport ? viewport.height : window.innerHeight;
+      var viewportBottom = viewportTop + viewportHeight;
+      var groupTop = Math.min(groupStartRect.top, controlRect.top);
+      var groupBottom = Math.max(submitRect.bottom, controlRect.bottom);
+      var groupFitsViewport = groupBottom - groupTop <= viewportHeight;
+      var controlTop = groupFitsViewport ? groupTop : controlRect.top;
+      var submitBottom = groupFitsViewport ? groupBottom : controlRect.bottom;
+      if (!floatRect || el.polishFloat.classList.contains('at-bottom')) {
+        var bottomTarget = floatRect ? floatRect.top - ENTRY_FLOAT_GAP : viewportBottom - ENTRY_FLOAT_GAP;
+        return submitBottom - bottomTarget;
       }
+      if (el.polishFloat.classList.contains('at-top')) {
+        return controlTop - (floatRect.bottom + ENTRY_FLOAT_GAP);
+      }
+      return 0;
     }
 
-    var startY = window.scrollY || window.pageYOffset || 0;
-    var targetY = Math.max(0, startY + scrollDelta);
-    var startedAt = null;
-    function animate(timestamp) {
-      if (startedAt === null) { startedAt = timestamp; }
-      var progress = Math.min(1, (timestamp - startedAt) / NATIVE_SCROLL_CORRECTION_DURATION_MS);
-      var easedProgress = 1 - Math.pow(1 - progress, 3);
-      window.scrollTo(0, startY + (targetY - startY) * easedProgress);
-      if (progress < 1 && document.activeElement === focusedControl) {
-        nativeScrollCorrectionFrame = window.requestAnimationFrame(animate);
-      } else {
+    function animateCorrection() {
+      if (document.activeElement !== focusedControl || correctionPasses >= 6) {
         nativeScrollCorrectionFrame = null;
+        return;
       }
+      var scrollDelta = getScrollDelta();
+      if (Math.abs(scrollDelta) <= 1) {
+        nativeScrollCorrectionFrame = null;
+        return;
+      }
+      correctionPasses += 1;
+      if (scrollDelta > 0) {
+        var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight - window.scrollY);
+        var extraSpace = Math.max(0, scrollDelta - maxScroll);
+        if (extraSpace > 1) {
+          document.documentElement.style.setProperty('--entry-scroll-space', Math.ceil(extraSpace) + 'px');
+        }
+      }
+      var startY = window.scrollY || window.pageYOffset || 0;
+      var targetY = Math.max(0, startY + scrollDelta);
+      var startedAt = null;
+      function animate(timestamp) {
+        if (startedAt === null) { startedAt = timestamp; }
+        var progress = Math.min(1, (timestamp - startedAt) / NATIVE_SCROLL_CORRECTION_DURATION_MS);
+        var easedProgress = 1 - Math.pow(1 - progress, 3);
+        window.scrollTo(0, startY + (targetY - startY) * easedProgress);
+        if (progress < 1 && document.activeElement === focusedControl) {
+          nativeScrollCorrectionFrame = window.requestAnimationFrame(animate);
+        } else if (document.activeElement === focusedControl) {
+          nativeScrollCorrectionFrame = window.requestAnimationFrame(animateCorrection);
+        } else {
+          nativeScrollCorrectionFrame = null;
+        }
+      }
+      nativeScrollCorrectionFrame = window.requestAnimationFrame(animate);
     }
-    nativeScrollCorrectionFrame = window.requestAnimationFrame(animate);
+    animateCorrection();
   }
 
   function scheduleNativeScrollCorrection() {
@@ -824,18 +840,21 @@
     var control = event.target.closest && event.target.closest('input, select, textarea');
     if (!control) { return; }
     prepareControlNativeScroll(control);
-    if (getControlScrollGroup(control)) { scheduleNativeScrollCorrection(); }
+    if (getControlScrollGroup(control)) {
+      nativeScrollCorrectionRequested = true;
+      scheduleNativeScrollCorrection();
+    }
   });
 
   document.addEventListener('focusin', function (event) {
     if (!isNarrowScreen() || !event.target.matches('input, select, textarea')) { return; }
     prepareControlNativeScroll(event.target);
-    if (getControlScrollGroup(event.target)) { scheduleNativeScrollCorrection(); }
   });
 
   document.addEventListener('focusout', function (event) {
     if (!event.target.matches('input, select, textarea')) { return; }
     cancelNativeScrollCorrection();
+    nativeScrollCorrectionRequested = false;
     event.target.style.removeProperty('scroll-margin-block-start');
     event.target.style.removeProperty('scroll-margin-block-end');
     document.documentElement.style.setProperty('--entry-scroll-space', '0px');
@@ -843,8 +862,6 @@
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
       updatePolishFloat();
-      var focusedControl = document.activeElement;
-      if (getControlScrollGroup(focusedControl)) { scheduleNativeScrollCorrection(); }
     });
     window.visualViewport.addEventListener('scroll', function () {
       updatePolishFloat();
