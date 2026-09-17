@@ -710,8 +710,14 @@
     var floatHeight = el.polishFloat.getBoundingClientRect().height;
     if (floatHeight <= 0) { return; }
     var margin = floatHeight + ENTRY_FLOAT_GAP;
+    var endMargin = margin;
+    if (control === el.activity && el.entrySubmit.isConnected) {
+      var controlRect = control.getBoundingClientRect();
+      var submitRect = el.entrySubmit.getBoundingClientRect();
+      endMargin += Math.max(0, submitRect.bottom - controlRect.bottom);
+    }
     control.style.scrollMarginBlockStart = margin + 'px';
-    control.style.scrollMarginBlockEnd = margin + 'px';
+    control.style.scrollMarginBlockEnd = endMargin + 'px';
   }
 
   function correctFocusedControlAfterNativeScroll() {
@@ -727,16 +733,18 @@
     var controlRect = focusedControl.getBoundingClientRect();
     var controlTop = controlRect.top;
     var controlBottom = controlRect.bottom;
+    var submitBottom = controlBottom;
     if (focusedControl === el.activity && el.entrySubmit.isConnected) {
       var submitRect = el.entrySubmit.getBoundingClientRect();
       controlTop = Math.min(controlTop, submitRect.top);
       controlBottom = Math.max(controlBottom, submitRect.bottom);
+      submitBottom = submitRect.bottom;
     }
 
     var scrollDelta = 0;
     if (el.polishFloat.classList.contains('at-bottom')) {
       var bottomTarget = floatRect.top - ENTRY_FLOAT_GAP;
-      scrollDelta = controlBottom - bottomTarget;
+      scrollDelta = (focusedControl === el.activity ? submitBottom : controlBottom) - bottomTarget;
     } else if (el.polishFloat.classList.contains('at-top')) {
       var topTarget = floatRect.bottom + ENTRY_FLOAT_GAP;
       scrollDelta = controlTop - topTarget;
