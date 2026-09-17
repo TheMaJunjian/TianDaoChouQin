@@ -3661,9 +3661,7 @@
   });
 
   el.eggBoost.addEventListener('click', function () {
-    // 加速 (当前值 + 1) 秒：无论当前是 6 还是 60，都会瞬间越过 0 来到 -1，随后继续正常递减。
-    // （这里刻意用 eggValue - (eggValue + 1) 而不是直接写 -1，是为了保留“加速 N 秒”的叙事逻辑。）
-    eggValue = eggValue - (eggValue + 1); // 恒等于 -1，属于设计彩蛋而非笔误
+    eggValue = eggValue >= 0 ? -1 : eggValue - 100;
     el.eggCount.textContent = eggValue;
     el.eggCount.classList.add('negative');
     if (!eggTimer) { startEggTimer(); }
