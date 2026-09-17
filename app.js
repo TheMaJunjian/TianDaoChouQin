@@ -796,7 +796,7 @@
     }
 
     function animateCorrection() {
-      if (document.activeElement !== focusedControl || correctionPasses >= 6) {
+      if (!focusedControl.isConnected || correctionPasses >= 6) {
         nativeScrollCorrectionFrame = null;
         return;
       }
@@ -821,9 +821,9 @@
         var progress = Math.min(1, (timestamp - startedAt) / NATIVE_SCROLL_CORRECTION_DURATION_MS);
         var easedProgress = 1 - Math.pow(1 - progress, 3);
         window.scrollTo(0, startY + (targetY - startY) * easedProgress);
-        if (progress < 1 && document.activeElement === focusedControl) {
+        if (progress < 1 && focusedControl.isConnected) {
           nativeScrollCorrectionFrame = window.requestAnimationFrame(animate);
-        } else if (document.activeElement === focusedControl) {
+        } else if (focusedControl.isConnected) {
           nativeScrollCorrectionFrame = window.requestAnimationFrame(animateCorrection);
         } else {
           nativeScrollCorrectionFrame = null;
@@ -1742,6 +1742,7 @@
       }
       persist();
       refreshAll();
+      el.entrySubmit.blur();
       return;
     }
 
