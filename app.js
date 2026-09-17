@@ -95,7 +95,7 @@
         mainRevealed: 0,   // 已解锁的主线线索数
         mainCompleted: 0,  // 已提交完成的主线线索数
         mainProgress: 0,
-        mainAccepted: false, // 当前线索是否已「接受」
+        mainAccepted: false, // 当前线索是否已「领取」
         lastSeenAppVersion: '0.0',
         side: []
       },
@@ -3262,7 +3262,7 @@
         actions = '<div class="quest-actions">' +
           (state.quests.mainAccepted
             ? '<button type="button" class="btn" id="questSubmit">提交任务</button>'
-            : '<button type="button" class="btn" id="questAccept">接受任务</button>') +
+            : '<button type="button" class="btn" id="questAccept">领取任务</button>') +
           '<button type="button" class="btn ghost" id="questGuide">查看指引</button>' +
           '<div class="quest-current-progress">当前进展：' + (Number(state.quests.mainProgress) || 0) + '%</div>' +
           '</div>';
@@ -3291,7 +3291,7 @@
         state.quests.mainAccepted = true;
         persist();
         var blessing = MAIN_QUEST_BLESSINGS[Math.floor(Math.random() * MAIN_QUEST_BLESSINGS.length)];
-        toast('已接受主线任务线索 ' + (completed + 1) + '，祝宿主' + blessing + '。', { level: 'SYSTEM' });
+        toast('已领取主线任务线索 ' + (completed + 1) + '，祝宿主' + blessing + '。', { level: 'SYSTEM' });
         renderMainQuest();
       });
     }
@@ -3377,7 +3377,7 @@
       quest.status = 'accepted';
       persist();
       var blessing = SIDE_QUEST_BLESSINGS[Math.floor(Math.random() * SIDE_QUEST_BLESSINGS.length)];
-      toast('已接受支线任务【' + quest.title + '】，祝宿主' + blessing + '。', { level: 'SYSTEM' });
+      toast('已领取支线任务【' + quest.title + '】，祝宿主' + blessing + '。', { level: 'SYSTEM' });
     } else if (target.hasAttribute('data-submit') && quest.status === 'accepted') {
       openTaskSubmitModal({ kind: 'side', title: quest.title, desc: quest.desc, progress: quest.progress, quest: quest });
       return;
@@ -3416,7 +3416,7 @@
       quest.status = 'accepted';
       persist();
       var hiddenBlessing = SIDE_QUEST_BLESSINGS[Math.floor(Math.random() * SIDE_QUEST_BLESSINGS.length)];
-      toast('已接受支线任务【' + quest.title + '】，祝宿主' + hiddenBlessing + '。', { level: 'SYSTEM' });
+      toast('已领取支线任务【' + quest.title + '】，祝宿主' + hiddenBlessing + '。', { level: 'SYSTEM' });
     } else if (target.hasAttribute('data-submit') && quest.status === 'accepted') {
       openTaskSubmitModal({ kind: 'side', title: quest.title, desc: quest.desc, progress: quest.progress, quest: quest });
       return;
@@ -3460,14 +3460,14 @@
   }
 
   function renderSideQuestItem(q, isHidden) {
-      var statusLabel = { open: '未接受', accepted: '进行中', done: '已完成' }[q.status];
+      var statusLabel = { open: '未领取', accepted: '进行中', done: '已完成' }[q.status];
       var completionCount = Math.max(0, Math.floor(Number(q.completionCount) || 0));
       var actions = '';
       var reward = '奖励：属性点 +' + q.rewardAttr + ' ／ 成就点 +' + q.rewardAchievement +
         ' ／ 贡献点 +' + (q.rewardAttr + q.rewardAchievement);
       if (q.status === 'open' || q.status === 'done') {
         actions = '<button type="button" class="btn ghost" data-accept="' + escapeHtml(q.id) + '">' +
-          (q.status === 'done' ? '再次接受' : '接受任务') + '</button>';
+          (q.status === 'done' ? '重新领取' : '领取任务') + '</button>';
       } else if (q.status === 'accepted') {
         actions = '<button type="button" class="btn" data-submit="' + escapeHtml(q.id) + '">提交任务</button>' +
           '';
