@@ -839,6 +839,8 @@
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
       updatePolishFloat();
+      var focusedControl = document.activeElement;
+      if (getControlScrollGroup(focusedControl)) { scheduleNativeScrollCorrection(); }
     });
     window.visualViewport.addEventListener('scroll', function () {
       updatePolishFloat();
