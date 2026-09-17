@@ -685,7 +685,7 @@
   var ENTRY_FLOAT_GAP = 8;
   var nativeScrollCorrectionTimer = null;
   var nativeScrollCorrectionFrame = null;
-  var NATIVE_SCROLL_CORRECTION_DELAY_MS = 250;
+  var NATIVE_SCROLL_CORRECTION_DELAY_MS = 500;
   var NATIVE_SCROLL_CORRECTION_DURATION_MS = 700;
 
   function cancelNativeScrollCorrection() {
@@ -731,7 +731,7 @@
     var groupBottom = Math.max(submitRect.bottom, controlRect.bottom);
     var viewport = window.visualViewport;
     var viewportHeight = viewport ? viewport.height : window.innerHeight;
-    var groupFitsViewport = control.form.getBoundingClientRect().height <= viewportHeight;
+    var groupFitsViewport = groupBottom - groupTop <= viewportHeight;
     control.style.scrollMarginBlockStart = groupFitsViewport
       ? margin + Math.max(0, controlRect.top - groupTop) + 'px'
       : margin + 'px';
@@ -759,8 +759,7 @@
     var viewportBottom = viewportTop + viewportHeight;
     var groupTop = Math.min(groupStartRect.top, controlRect.top);
     var groupBottom = Math.max(submitRect.bottom, controlRect.bottom);
-    var floatHeight = floatRect ? floatRect.height : 0;
-    var groupFitsViewport = focusedControl.form.getBoundingClientRect().height <= viewportHeight;
+    var groupFitsViewport = groupBottom - groupTop <= viewportHeight;
     var controlTop = groupFitsViewport ? groupTop : controlRect.top;
     var submitBottom = groupFitsViewport ? groupBottom : controlRect.bottom;
 
