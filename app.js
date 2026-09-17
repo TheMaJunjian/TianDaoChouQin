@@ -703,7 +703,7 @@
     if (!control || !control.form) { return null; }
     var groupStart = null;
     if (control.form.id === 'skillForm') { groupStart = el.skillName; }
-    if (control.form.id === 'entryForm' && control === el.activity) { groupStart = el.activity; }
+    if (control.form.id === 'entryForm') { groupStart = el.startDate; }
     if (control.form.id === 'sideQuestForm') { groupStart = el.sideTitle; }
     if (!groupStart) { return null; }
     return {
@@ -760,11 +760,13 @@
     var groupStartRect = group.start.getBoundingClientRect();
     var controlRect = focusedControl.getBoundingClientRect();
     var submitRect = group.submit.getBoundingClientRect();
-    var controlTop = Math.min(groupStartRect.top, controlRect.top);
-    var submitBottom = Math.max(submitRect.bottom, controlRect.bottom);
     var viewport = window.visualViewport;
     var viewportHeight = viewport ? viewport.height : window.innerHeight;
-    if (submitBottom - controlTop + floatRect.height * 2 > viewportHeight) { return; }
+    var groupTop = Math.min(groupStartRect.top, controlRect.top);
+    var groupBottom = Math.max(submitRect.bottom, controlRect.bottom);
+    var groupFitsViewport = groupBottom - groupTop + floatRect.height * 2 <= viewportHeight;
+    var controlTop = groupFitsViewport ? groupTop : controlRect.top;
+    var submitBottom = groupFitsViewport ? groupBottom : controlRect.bottom;
 
     var scrollDelta = 0;
     if (el.polishFloat.classList.contains('at-bottom')) {
