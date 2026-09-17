@@ -701,6 +701,11 @@
 
   function prepareControlNativeScroll(control) {
     if (!control || !control.matches('input, select, textarea')) { return; }
+    if (control !== el.activity) {
+      control.style.removeProperty('scroll-margin-block-start');
+      control.style.removeProperty('scroll-margin-block-end');
+      return;
+    }
     updatePolishFloat();
     if (!el.polishFloat || el.polishFloat.classList.contains('hidden')) {
       control.style.removeProperty('scroll-margin-block-start');
@@ -793,13 +798,13 @@
     var control = event.target.closest && event.target.closest('input, select, textarea');
     if (!control) { return; }
     prepareControlNativeScroll(control);
-    scheduleNativeScrollCorrection();
+    if (control === el.activity) { scheduleNativeScrollCorrection(); }
   });
 
   document.addEventListener('focusin', function (event) {
     if (!isNarrowScreen() || !event.target.matches('input, select, textarea')) { return; }
     prepareControlNativeScroll(event.target);
-    scheduleNativeScrollCorrection();
+    if (event.target === el.activity) { scheduleNativeScrollCorrection(); }
   });
 
   document.addEventListener('focusout', function (event) {
