@@ -793,13 +793,13 @@
     var control = event.target.closest && event.target.closest('input, select, textarea');
     if (!control) { return; }
     prepareControlNativeScroll(control);
-    scheduleNativeScrollCorrection();
+    if (control === el.activity) { scheduleNativeScrollCorrection(); }
   });
 
   document.addEventListener('focusin', function (event) {
     if (!isNarrowScreen() || !event.target.matches('input, select, textarea')) { return; }
     prepareControlNativeScroll(event.target);
-    scheduleNativeScrollCorrection();
+    if (event.target === el.activity) { scheduleNativeScrollCorrection(); }
   });
 
   document.addEventListener('focusout', function (event) {
