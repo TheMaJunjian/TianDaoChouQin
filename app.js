@@ -744,26 +744,27 @@
 
   function alignEntrySubmitOnce() {
     if (!focusedEntryActivity || document.activeElement !== el.activity || !el.entrySubmit.isConnected) { return; }
-    var recentlyClickedActivity = Date.now() - entryActivityClickedAt <= ENTRY_CLICK_ALIGNMENT_WINDOW_MS;
-    var recentlyShrunkViewport = Date.now() - entryKeyboardShrunkAt <= ENTRY_CLICK_ALIGNMENT_WINDOW_MS;
-    if (!recentlyShrunkViewport || (!recentlyClickedActivity && !entryAlignmentRequested)) {
-      return;
-    }
 
     var viewport = window.visualViewport;
     var viewportTop = viewport ? viewport.offsetTop : 0;
     var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
-    var targetSubmitBottom = viewportBottom - 16;
+    var activityRect = el.activity.getBoundingClientRect();
+    var submitRect = el.entrySubmit.getBoundingClientRect();
+    var controlTop = Math.min(activityRect.top, submitRect.top);
+    var controlBottom = Math.max(activityRect.bottom, submitRect.bottom);
+    var scrollDelta = 0;
     if (!el.polishFloat.classList.contains('hidden')) {
       var progressRect = el.polishFloat.getBoundingClientRect();
       if (progressRect.height > 0
         && progressRect.bottom > viewportTop
         && progressRect.top < viewportBottom) {
-        targetSubmitBottom = progressRect.top - ENTRY_FLOAT_GAP;
+        if (el.polishFloat.classList.contains('at-bottom') && controlBottom > progressRect.top) {
+          scrollDelta = controlBottom - (progressRect.top - ENTRY_FLOAT_GAP);
+        } else if (el.polishFloat.classList.contains('at-top') && controlTop < progressRect.bottom) {
+          scrollDelta = controlTop - (progressRect.bottom + ENTRY_FLOAT_GAP);
+        }
       }
     }
-    var submitRect = el.entrySubmit.getBoundingClientRect();
-    var scrollDelta = submitRect.bottom - targetSubmitBottom;
     if (scrollDelta > 1) {
       var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight - window.scrollY);
       var extraSpace = Math.max(0, scrollDelta - maxScroll);
@@ -781,7 +782,7 @@
         entryAutoScrollClearTimer = null;
         entryAutoScrollPending = false;
       }, ENTRY_ALIGNMENT_SETTLE_MS * 2);
-      // 视口变化后如果差值为负，scrollDelta 会带符号地把多余滚动反向抵消。
+      // 整个输入控件组如果需要向上或向下避让浮动条，都沿同一方向缓动。
       scrollEntryBy(scrollDelta, true);
     } else if (entryAutoScrollPending) {
       entryAutoScrollPending = false;
@@ -870,12 +871,9 @@
         : focusedControlClickViewportHeight;
       var viewportShrunk = viewportHeight - currentEntryViewportHeight() > 80;
       if (clickedControl === el.activity) {
-        alignFocusedControlAroundPolishFloat();
-        if (viewportShrunk) {
-          entryKeyboardShrunkAt = Date.now();
-          entryAlignmentRequested = true;
-          alignEntrySubmitOnce();
-        }
+        entryKeyboardShrunkAt = viewportShrunk ? Date.now() : entryKeyboardShrunkAt;
+        entryAlignmentRequested = true;
+        alignEntrySubmitOnce();
       } else {
         alignFocusedControlAroundPolishFloat();
       }
