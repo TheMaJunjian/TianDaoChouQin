@@ -686,6 +686,7 @@
   var nativeScrollCorrectionTimer = null;
   var nativeScrollCorrectionFrame = null;
   var nativeScrollCorrectionRequested = false;
+  var nativeScrollCorrectionControl = null;
   var NATIVE_SCROLL_CORRECTION_DELAY_MS = 500;
   var NATIVE_SCROLL_CORRECTION_DURATION_MS = 700;
 
@@ -761,7 +762,8 @@
     nativeScrollCorrectionTimer = null;
     nativeScrollCorrectionRequested = false;
     if (!isNarrowScreen()) { return; }
-    var focusedControl = document.activeElement;
+    var focusedControl = nativeScrollCorrectionControl || document.activeElement;
+    nativeScrollCorrectionControl = null;
     if (!focusedControl || !focusedControl.matches('input, select, textarea, button[type="submit"]')) { return; }
     var group = getControlScrollGroup(focusedControl);
     if (!group || !group.submit) { return; }
@@ -851,6 +853,7 @@
     prepareControlNativeScroll(control);
     if (getControlScrollGroup(control)) {
       nativeScrollCorrectionRequested = true;
+      nativeScrollCorrectionControl = control;
       scheduleNativeScrollCorrection();
     }
   });
@@ -864,6 +867,7 @@
     if (!event.target.matches('input, select, textarea')) { return; }
     cancelNativeScrollCorrection();
     nativeScrollCorrectionRequested = false;
+    nativeScrollCorrectionControl = null;
     event.target.style.removeProperty('scroll-margin-block-start');
     event.target.style.removeProperty('scroll-margin-block-end');
     document.documentElement.style.setProperty('--entry-scroll-space', '0px');
