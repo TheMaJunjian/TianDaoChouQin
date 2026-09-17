@@ -887,8 +887,11 @@
   }, { passive: true });
 
   document.addEventListener('focusin', function (event) {
-    if (event.target !== el.activity || !isNarrowScreen()) { return; }
-    focusedEntryActivity = true;
+    if (!isNarrowScreen() || !event.target.matches('input, select, textarea')) { return; }
+    if (event.target === el.activity) {
+      focusedEntryActivity = true;
+    }
+    scheduleFocusedControlAlignment();
   });
   document.addEventListener('focusout', function (event) {
     if (event.target === el.activity) {
