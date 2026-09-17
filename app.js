@@ -701,13 +701,20 @@
 
   function getControlScrollGroup(control) {
     if (!control || !control.form) { return null; }
-    var groupStart = null;
-    if (control.form.id === 'skillForm') { groupStart = el.skillName; }
-    if (control.form.id === 'entryForm') { groupStart = el.startDate; }
-    if (control.form.id === 'sideQuestForm') { groupStart = el.sideTitle; }
-    if (!groupStart) { return null; }
+    if (control.form.id === 'entryForm') {
+      var dateTimeControls = [el.startDate, el.startTime, el.endDate, el.endTime];
+      if (dateTimeControls.indexOf(control) >= 0) {
+        return { start: el.startDate, submit: el.endTime };
+      }
+      var entryGroupControls = [el.category, el.activity, el.level];
+      if (entryGroupControls.indexOf(control) >= 0) {
+        return { start: el.category, submit: el.entrySubmit };
+      }
+      return null;
+    }
+    if (['skillForm', 'sideQuestForm'].indexOf(control.form.id) < 0) { return null; }
     return {
-      start: groupStart,
+      start: control,
       submit: control.form.querySelector('button[type="submit"]')
     };
   }
