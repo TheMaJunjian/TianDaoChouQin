@@ -881,7 +881,12 @@
     });
   }
   document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'hidden') { flushState(); }
+    if (document.visibilityState === 'hidden') {
+      cancelNativeScrollCorrection();
+      nativeScrollCorrectionRequested = false;
+      nativeScrollCorrectionControl = null;
+      flushState();
+    }
   });
 
   function requestPersistentStorage() {
