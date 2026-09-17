@@ -721,13 +721,8 @@
       return;
     }
     updatePolishFloat();
-    if (!el.polishFloat || el.polishFloat.classList.contains('hidden')) {
-      control.style.removeProperty('scroll-margin-block-start');
-      control.style.removeProperty('scroll-margin-block-end');
-      return;
-    }
-    var floatHeight = el.polishFloat.getBoundingClientRect().height;
-    if (floatHeight <= 0) { return; }
+    var floatVisible = el.polishFloat && !el.polishFloat.classList.contains('hidden');
+    var floatHeight = floatVisible ? el.polishFloat.getBoundingClientRect().height : 0;
     var margin = floatHeight + ENTRY_FLOAT_GAP;
     var controlRect = control.getBoundingClientRect();
     var groupStartRect = group.start.getBoundingClientRect();
@@ -753,10 +748,8 @@
     var group = getControlScrollGroup(focusedControl);
     if (!group || !group.submit) { return; }
     updatePolishFloat();
-    if (!el.polishFloat || el.polishFloat.classList.contains('hidden')) { return; }
-
-    var floatRect = el.polishFloat.getBoundingClientRect();
-    if (floatRect.height <= 0) { return; }
+    var floatVisible = el.polishFloat && !el.polishFloat.classList.contains('hidden');
+    var floatRect = floatVisible ? el.polishFloat.getBoundingClientRect() : null;
     var groupStartRect = group.start.getBoundingClientRect();
     var controlRect = focusedControl.getBoundingClientRect();
     var submitRect = group.submit.getBoundingClientRect();
@@ -764,17 +757,24 @@
     var viewportHeight = viewport ? viewport.height : window.innerHeight;
     var groupTop = Math.min(groupStartRect.top, controlRect.top);
     var groupBottom = Math.max(submitRect.bottom, controlRect.bottom);
-    var groupFitsViewport = groupBottom - groupTop + floatRect.height * 2 <= viewportHeight;
+    var floatHeight = floatRect ? floatRect.height : 0;
+    var groupFitsViewport = groupBottom - groupTop + floatHeight * 2 <= viewportHeight;
     var controlTop = groupFitsViewport ? groupTop : controlRect.top;
     var submitBottom = groupFitsViewport ? groupBottom : controlRect.bottom;
 
     var scrollDelta = 0;
-    if (el.polishFloat.classList.contains('at-bottom')) {
-      var bottomTarget = floatRect.top - ENTRY_FLOAT_GAP;
-      scrollDelta = submitBottom - bottomTarget;
+    if (!floatRect || el.polishFloat.classList.contains('at-bottom')) {
+      var bottomTarget = floatRect
+        ? floatRect.top - ENTRY_FLOAT_GAP
+        : (viewport ? viewport.offsetTop + viewport.height : window.innerHeight) - ENTRY_FLOAT_GAP;
+      var keyboardBottomTarget = viewport
+        ? viewport.offsetTop + viewport.height - ENTRY_FLOAT_GAP
+        : window.innerHeight - ENTRY_FLOAT_GAP;
+      scrollDelta = Math.max(submitBottom - bottomTarget, controlRect.bottom - keyboardBottomTarget);
     } else if (el.polishFloat.classList.contains('at-top')) {
       var topTarget = floatRect.bottom + ENTRY_FLOAT_GAP;
-      scrollDelta = controlTop - topTarget;
+      var keyboardTopTarget = viewport ? viewport.offsetTop + ENTRY_FLOAT_GAP : ENTRY_FLOAT_GAP;
+      scrollDelta = Math.min(controlTop - topTarget, controlRect.top - keyboardTopTarget);
     }
     if (Math.abs(scrollDelta) <= 1) { return; }
 
