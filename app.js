@@ -699,9 +699,23 @@
     }
   }
 
+  function getControlScrollGroup(control) {
+    if (!control || !control.form) { return null; }
+    var groupStart = null;
+    if (control.form.id === 'skillForm') { groupStart = el.skillName; }
+    if (control.form.id === 'entryForm' && control === el.activity) { groupStart = el.activity; }
+    if (control.form.id === 'sideQuestForm') { groupStart = el.sideTitle; }
+    if (!groupStart) { return null; }
+    return {
+      start: groupStart,
+      submit: control.form.querySelector('button[type="submit"]')
+    };
+  }
+
   function prepareControlNativeScroll(control) {
     if (!control || !control.matches('input, select, textarea')) { return; }
-    if (control !== el.activity) {
+    var group = getControlScrollGroup(control);
+    if (!group || !group.submit) {
       control.style.removeProperty('scroll-margin-block-start');
       control.style.removeProperty('scroll-margin-block-end');
       return;
@@ -715,14 +729,20 @@
     var floatHeight = el.polishFloat.getBoundingClientRect().height;
     if (floatHeight <= 0) { return; }
     var margin = floatHeight + ENTRY_FLOAT_GAP;
-    var endMargin = margin;
-    if (control === el.activity && el.entrySubmit.isConnected) {
-      var controlRect = control.getBoundingClientRect();
-      var submitRect = el.entrySubmit.getBoundingClientRect();
-      endMargin += Math.max(0, submitRect.bottom - controlRect.bottom);
-    }
-    control.style.scrollMarginBlockStart = margin + 'px';
-    control.style.scrollMarginBlockEnd = endMargin + 'px';
+    var controlRect = control.getBoundingClientRect();
+    var groupStartRect = group.start.getBoundingClientRect();
+    var submitRect = group.submit.getBoundingClientRect();
+    var groupTop = Math.min(groupStartRect.top, controlRect.top);
+    var groupBottom = Math.max(submitRect.bottom, controlRect.bottom);
+    var viewport = window.visualViewport;
+    var viewportHeight = viewport ? viewport.height : window.innerHeight;
+    var groupFitsViewport = groupBottom - groupTop + margin * 2 <= viewportHeight;
+    control.style.scrollMarginBlockStart = groupFitsViewport
+      ? margin + Math.max(0, controlRect.top - groupTop) + 'px'
+      : margin + 'px';
+    control.style.scrollMarginBlockEnd = groupFitsViewport
+      ? margin + Math.max(0, groupBottom - controlRect.bottom) + 'px'
+      : margin + 'px';
   }
 
   function correctFocusedControlAfterNativeScroll() {
@@ -730,26 +750,26 @@
     if (!isNarrowScreen()) { return; }
     var focusedControl = document.activeElement;
     if (!focusedControl || !focusedControl.matches('input, select, textarea')) { return; }
+    var group = getControlScrollGroup(focusedControl);
+    if (!group || !group.submit) { return; }
     updatePolishFloat();
     if (!el.polishFloat || el.polishFloat.classList.contains('hidden')) { return; }
 
     var floatRect = el.polishFloat.getBoundingClientRect();
     if (floatRect.height <= 0) { return; }
+    var groupStartRect = group.start.getBoundingClientRect();
     var controlRect = focusedControl.getBoundingClientRect();
-    var controlTop = controlRect.top;
-    var controlBottom = controlRect.bottom;
-    var submitBottom = controlBottom;
-    if (focusedControl === el.activity && el.entrySubmit.isConnected) {
-      var submitRect = el.entrySubmit.getBoundingClientRect();
-      controlTop = Math.min(controlTop, submitRect.top);
-      controlBottom = Math.max(controlBottom, submitRect.bottom);
-      submitBottom = submitRect.bottom;
-    }
+    var submitRect = group.submit.getBoundingClientRect();
+    var controlTop = Math.min(groupStartRect.top, controlRect.top);
+    var submitBottom = Math.max(submitRect.bottom, controlRect.bottom);
+    var viewport = window.visualViewport;
+    var viewportHeight = viewport ? viewport.height : window.innerHeight;
+    if (submitBottom - controlTop + floatRect.height * 2 > viewportHeight) { return; }
 
     var scrollDelta = 0;
     if (el.polishFloat.classList.contains('at-bottom')) {
       var bottomTarget = floatRect.top - ENTRY_FLOAT_GAP;
-      scrollDelta = (focusedControl === el.activity ? submitBottom : controlBottom) - bottomTarget;
+      scrollDelta = submitBottom - bottomTarget;
     } else if (el.polishFloat.classList.contains('at-top')) {
       var topTarget = floatRect.bottom + ENTRY_FLOAT_GAP;
       scrollDelta = controlTop - topTarget;
@@ -798,13 +818,13 @@
     var control = event.target.closest && event.target.closest('input, select, textarea');
     if (!control) { return; }
     prepareControlNativeScroll(control);
-    if (control === el.activity) { scheduleNativeScrollCorrection(); }
+    if (getControlScrollGroup(control)) { scheduleNativeScrollCorrection(); }
   });
 
   document.addEventListener('focusin', function (event) {
     if (!isNarrowScreen() || !event.target.matches('input, select, textarea')) { return; }
     prepareControlNativeScroll(event.target);
-    if (event.target === el.activity) { scheduleNativeScrollCorrection(); }
+    if (getControlScrollGroup(event.target)) { scheduleNativeScrollCorrection(); }
   });
 
   document.addEventListener('focusout', function (event) {
