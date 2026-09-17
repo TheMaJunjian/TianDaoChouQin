@@ -880,12 +880,28 @@
       updatePolishFloat();
     });
   }
+  function cancelDeferredSavesBeforeBackground() {
+    [pageScrollSaveTimer, saveTimer, draftSaveTimer, sigTimer].forEach(function (timer) {
+      if (timer !== null) { window.clearTimeout(timer); }
+    });
+    pageScrollSaveTimer = null;
+    saveTimer = null;
+    draftSaveTimer = null;
+    sigTimer = null;
+  }
+
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'hidden') {
       cancelNativeScrollCorrection();
       nativeScrollCorrectionRequested = false;
       nativeScrollCorrectionControl = null;
+      cancelDeferredSavesBeforeBackground();
       flushState();
+      if (sigTimer !== null) {
+        window.clearTimeout(sigTimer);
+        sigTimer = null;
+      }
+      renderTamperSignature();
     }
   });
 
