@@ -821,7 +821,11 @@
     } else {
       return;
     }
-    window.scrollBy(0, scrollDelta);
+    if (focusedControl === el.activity) {
+      scrollEntryBy(scrollDelta, false);
+    } else {
+      window.scrollBy(0, scrollDelta);
+    }
   }
 
   function scheduleFocusedControlAlignment() {
@@ -864,11 +868,14 @@
       var viewportHeight = clickedControl === el.activity
         ? entryClickViewportHeight
         : focusedControlClickViewportHeight;
-      if (viewportHeight - currentEntryViewportHeight() <= 80) { return; }
+      var viewportShrunk = viewportHeight - currentEntryViewportHeight() > 80;
       if (clickedControl === el.activity) {
-        entryKeyboardShrunkAt = Date.now();
-        entryAlignmentRequested = true;
-        alignEntrySubmitOnce();
+        alignFocusedControlAroundPolishFloat();
+        if (viewportShrunk) {
+          entryKeyboardShrunkAt = Date.now();
+          entryAlignmentRequested = true;
+          alignEntrySubmitOnce();
+        }
       } else {
         alignFocusedControlAroundPolishFloat();
       }
