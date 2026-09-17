@@ -685,10 +685,12 @@
   var ENTRY_FLOAT_GAP = 8;
   var ENTRY_ALIGNMENT_SETTLE_MS = 120;
   var ENTRY_NATIVE_SCROLL_SETTLE_MS = 250;
+  var ENTRY_POST_SCROLL_RECHECK_MS = 180;
   var ENTRY_CLICK_ALIGNMENT_WINDOW_MS = 700;
   var focusedEntryActivity = false;
   var entryAlignmentTimer = null;
   var entryAutoScrollClearTimer = null;
+  var entryPostScrollTimer = null;
   var entryAutoScrollPending = false;
   var entryAlignmentRequested = false;
   var entryClickAlignmentTimer = null;
@@ -706,7 +708,7 @@
     if (!focusedEntryActivity || document.activeElement !== el.activity || !el.entrySubmit.isConnected) { return; }
     var recentlyClickedActivity = Date.now() - entryActivityClickedAt <= ENTRY_CLICK_ALIGNMENT_WINDOW_MS;
     var recentlyShrunkViewport = Date.now() - entryKeyboardShrunkAt <= ENTRY_CLICK_ALIGNMENT_WINDOW_MS;
-    if (!recentlyShrunkViewport || !recentlyClickedActivity) {
+    if (!recentlyShrunkViewport || (!recentlyClickedActivity && !entryAlignmentRequested)) {
       return;
     }
 
@@ -743,6 +745,7 @@
       }, ENTRY_ALIGNMENT_SETTLE_MS * 2);
       // 视口变化后如果差值为负，scrollDelta 会带符号地把多余滚动反向抵消。
       window.scrollBy(0, scrollDelta);
+      scheduleEntryPostScrollRecheck();
     } else if (entryAutoScrollPending) {
       entryAutoScrollPending = false;
       if (entryAutoScrollClearTimer) { window.clearTimeout(entryAutoScrollClearTimer); }
@@ -755,6 +758,52 @@
     if (entryAlignmentTimer) { window.clearTimeout(entryAlignmentTimer); }
     entryAlignmentTimer = window.setTimeout(alignEntrySubmitOnce, delay || 0);
   }
+
+  function scheduleEntryPostScrollRecheck() {
+    if (entryPostScrollTimer) { window.clearTimeout(entryPostScrollTimer); }
+    entryPostScrollTimer = window.setTimeout(function () {
+      entryPostScrollTimer = null;
+      scheduleEntryAlignment(0);
+    }, ENTRY_POST_SCROLL_RECHECK_MS);
+  }
+
+  var focusedControlAlignmentTimer = null;
+  var focusedControlClickViewportHeight = 0;
+
+  function alignFocusedControlAroundPolishFloat() {
+    focusedControlAlignmentTimer = null;
+    if (!isNarrowScreen()) { return; }
+    var focusedControl = document.activeElement;
+    if (!focusedControl || !focusedControl.matches('input, select, textarea, button, [contenteditable="true"]')) { return; }
+    if (!el.polishFloat || el.polishFloat.classList.contains('hidden')) { return; }
+
+    var viewport = window.visualViewport;
+    var viewportTop = viewport ? viewport.offsetTop : 0;
+    var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
+    var floatRect = el.polishFloat.getBoundingClientRect();
+    if (floatRect.height <= 0 || floatRect.bottom <= viewportTop || floatRect.top >= viewportBottom) { return; }
+
+    var controlRect = focusedControl.getBoundingClientRect();
+    var scrollDelta = 0;
+    if (floatRect.top > viewportTop && controlRect.bottom > floatRect.top) {
+      scrollDelta = controlRect.bottom - floatRect.top + ENTRY_FLOAT_GAP;
+    } else if (floatRect.bottom < viewportBottom && controlRect.top < floatRect.bottom) {
+      scrollDelta = controlRect.top - floatRect.bottom - ENTRY_FLOAT_GAP;
+    }
+    if (Math.abs(scrollDelta) > 1) { window.scrollBy(0, scrollDelta); }
+  }
+
+  function scheduleFocusedControlAlignment() {
+    if (focusedControlAlignmentTimer) { window.clearTimeout(focusedControlAlignmentTimer); }
+    focusedControlAlignmentTimer = window.setTimeout(alignFocusedControlAroundPolishFloat, ENTRY_POST_SCROLL_RECHECK_MS);
+  }
+
+  document.addEventListener('click', function (event) {
+    if (!isNarrowScreen() || event.target === el.activity) { return; }
+    var clickedControl = event.target.closest && event.target.closest('input, textarea, select');
+    if (!clickedControl) { return; }
+    focusedControlClickViewportHeight = currentEntryViewportHeight();
+  });
 
   document.addEventListener('focusin', function (event) {
     if (event.target !== el.activity || !isNarrowScreen()) { return; }
@@ -769,6 +818,8 @@
       entryClickAlignmentTimer = null;
       if (entryAutoScrollClearTimer) { window.clearTimeout(entryAutoScrollClearTimer); }
       entryAutoScrollClearTimer = null;
+      if (entryPostScrollTimer) { window.clearTimeout(entryPostScrollTimer); }
+      entryPostScrollTimer = null;
       entryAutoScrollPending = false;
       entryAlignmentRequested = false;
       entryKeyboardShrunkAt = 0;
@@ -793,11 +844,24 @@
       entryKeyboardShrunkAt = Date.now();
       entryAlignmentRequested = true;
       scheduleEntryAlignment(ENTRY_ALIGNMENT_SETTLE_MS);
+      scheduleEntryPostScrollRecheck();
     }, ENTRY_NATIVE_SCROLL_SETTLE_MS);
   });
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
       updatePolishFloat();
+      if (!isNarrowScreen()) { return; }
+      var activeViewportHeight = document.activeElement === el.activity
+        ? entryClickViewportHeight
+        : focusedControlClickViewportHeight;
+      if (activeViewportHeight - currentEntryViewportHeight() <= 80) { return; }
+      scheduleFocusedControlAlignment();
+      if (focusedEntryActivity && document.activeElement === el.activity) {
+        entryKeyboardShrunkAt = Date.now();
+        entryAlignmentRequested = true;
+        scheduleEntryAlignment(ENTRY_ALIGNMENT_SETTLE_MS);
+        scheduleEntryPostScrollRecheck();
+      }
     });
     window.visualViewport.addEventListener('scroll', function () {
       updatePolishFloat();
