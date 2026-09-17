@@ -51,6 +51,18 @@
     '',
     ''
   ];
+  /* 主线祝福：偏向修行最终达到的境界、成就与结果。 */
+  var MAIN_QUEST_BLESSINGS = [
+    '大道长青', '仙道永昌', '长生久视', '早证混元', '法脉绵延', '道统永存',
+    '香火鼎盛', '万世不衰', '气运如龙', '鸿运齐天', '造化无穷',
+    '威震八荒', '名动九州', '万法不侵', '脚踏星河'
+  ];
+
+  /* 支线祝福：偏向执行任务过程中的状态、机缘与顺利。 */
+  var SIDE_QUEST_BLESSINGS = [
+    '道运绵长', '道心通明', '道途坦荡', '心魔退散', '灵台清明', '机缘不断', '福缘深厚',
+    '逢凶化吉', '遇难成祥', '武运昌隆', '战无不胜', '所向披靡', '诸邪避退'
+  ];
 
   var ZONE_HINTS = [
     { max: 0.2, text: '系统面板顶部：此处显示宿主的系统等级与三种点数，全部由任务与成就结算而来。' },
@@ -3275,7 +3287,8 @@
       acceptBtn.addEventListener('click', function () {
         state.quests.mainAccepted = true;
         persist();
-        toast('已接受主线任务线索 ' + (completed + 1) + '，祝宿主武运昌隆。', { level: 'SYSTEM' });
+        var blessing = MAIN_QUEST_BLESSINGS[Math.floor(Math.random() * MAIN_QUEST_BLESSINGS.length)];
+        toast('已接受主线任务线索 ' + (completed + 1) + '，祝宿主' + blessing + '。', { level: 'SYSTEM' });
         renderMainQuest();
       });
     }
@@ -3359,7 +3372,8 @@
     if (target.hasAttribute('data-accept')) {
       quest.status = 'accepted';
       persist();
-      toast('已接受支线任务【' + quest.title + '】。', { level: 'SYSTEM' });
+      var blessing = SIDE_QUEST_BLESSINGS[Math.floor(Math.random() * SIDE_QUEST_BLESSINGS.length)];
+      toast('已接受支线任务【' + quest.title + '】，祝宿主' + blessing + '。', { level: 'SYSTEM' });
     } else if (target.hasAttribute('data-submit') && quest.status === 'accepted') {
       openTaskSubmitModal({ kind: 'side', title: quest.title, desc: quest.desc, progress: quest.progress, quest: quest });
       return;
@@ -3397,7 +3411,8 @@
     if (target.hasAttribute('data-accept')) {
       quest.status = 'accepted';
       persist();
-      toast('已接受支线任务【' + quest.title + '】。', { level: 'SYSTEM' });
+      var hiddenBlessing = SIDE_QUEST_BLESSINGS[Math.floor(Math.random() * SIDE_QUEST_BLESSINGS.length)];
+      toast('已接受支线任务【' + quest.title + '】，祝宿主' + hiddenBlessing + '。', { level: 'SYSTEM' });
     } else if (target.hasAttribute('data-submit') && quest.status === 'accepted') {
       openTaskSubmitModal({ kind: 'side', title: quest.title, desc: quest.desc, progress: quest.progress, quest: quest });
       return;
