@@ -695,6 +695,8 @@
   var entryClickViewportHeight = 0;
   var entryScrollAnimationFrame = null;
   var ENTRY_SCROLL_ANIMATION_MS = 700;
+  var entryScrollCorrectionPasses = 0;
+  var ENTRY_SCROLL_MAX_CORRECTION_PASSES = 3;
 
   function cancelEntryScrollAnimation() {
     if (entryScrollAnimationFrame !== null) {
@@ -703,7 +705,7 @@
     }
   }
 
-  function scrollEntryBy(delta) {
+  function scrollEntryBy(delta, settle) {
     if (Math.abs(delta) <= 1) { return; }
     cancelEntryScrollAnimation();
     var startY = window.scrollY || window.pageYOffset || 0;
@@ -718,6 +720,18 @@
         entryScrollAnimationFrame = window.requestAnimationFrame(animate);
       } else {
         entryScrollAnimationFrame = null;
+        if (settle) {
+          window.requestAnimationFrame(function () {
+            if (!focusedEntryActivity || entryScrollCorrectionPasses >= ENTRY_SCROLL_MAX_CORRECTION_PASSES) {
+              entryScrollCorrectionPasses = 0;
+              return;
+            }
+            entryScrollCorrectionPasses += 1;
+            entryAlignmentRequested = true;
+            entryKeyboardShrunkAt = Date.now();
+            alignEntrySubmitOnce();
+          });
+        }
       }
     }
     entryScrollAnimationFrame = window.requestAnimationFrame(animate);
@@ -755,7 +769,7 @@
       var extraSpace = Math.max(0, scrollDelta - maxScroll);
       if (extraSpace > 1) {
         document.documentElement.style.setProperty('--entry-scroll-space', Math.ceil(extraSpace) + 'px');
-        scrollEntryBy(scrollDelta);
+        scrollEntryBy(scrollDelta, true);
         entryAlignmentRequested = false;
         return;
       }
@@ -768,7 +782,7 @@
         entryAutoScrollPending = false;
       }, ENTRY_ALIGNMENT_SETTLE_MS * 2);
       // 视口变化后如果差值为负，scrollDelta 会带符号地把多余滚动反向抵消。
-      scrollEntryBy(scrollDelta);
+      scrollEntryBy(scrollDelta, true);
     } else if (entryAutoScrollPending) {
       entryAutoScrollPending = false;
       if (entryAutoScrollClearTimer) { window.clearTimeout(entryAutoScrollClearTimer); }
@@ -842,6 +856,7 @@
       entryActivityClickedAt = Date.now();
       entryClickViewportHeight = focusedControlClickViewportHeight;
       entryKeyboardShrunkAt = 0;
+      entryScrollCorrectionPasses = 0;
     }
     focusedControlAlignmentTimer = window.setTimeout(function () {
       focusedControlAlignmentTimer = null;
