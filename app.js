@@ -870,8 +870,12 @@
   }
 
   document.addEventListener('touchstart', function () {
-    manualScrollIntent = true;
+    manualScrollIntent = false;
     cancelEntryScrollAnimation();
+  }, { passive: true });
+
+  document.addEventListener('touchmove', function () {
+    manualScrollIntent = true;
   }, { passive: true });
 
   document.addEventListener('click', function (event) {
