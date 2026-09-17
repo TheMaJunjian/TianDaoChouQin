@@ -676,44 +676,14 @@
   var entryAutoScrollClearTimer = null;
   var entryAutoScrollPending = false;
   var entryAlignmentRequested = false;
-  var entryKeyboardStableHeight = 0;
-  var entryKeyboardVisible = false;
-  var entryViewportStabilityTimer = null;
   var entryClickAlignmentTimer = null;
   var entryActivityClickedAt = 0;
   var entryKeyboardShrunkAt = 0;
+  var entryClickViewportHeight = 0;
 
   function currentEntryViewportHeight() {
     var viewport = window.visualViewport;
     return viewport ? viewport.height : window.innerHeight;
-  }
-
-  entryKeyboardStableHeight = currentEntryViewportHeight();
-
-  function scheduleEntryViewportStability() {
-    if (entryViewportStabilityTimer) { window.clearTimeout(entryViewportStabilityTimer); }
-    var observedHeight = currentEntryViewportHeight();
-    entryViewportStabilityTimer = window.setTimeout(function checkStableViewport() {
-      entryViewportStabilityTimer = null;
-      var stableHeight = currentEntryViewportHeight();
-      if (Math.abs(stableHeight - observedHeight) > 1) {
-        scheduleEntryViewportStability();
-        return;
-      }
-      var previousStableHeight = entryKeyboardStableHeight || stableHeight;
-      var stableHeightDelta = stableHeight - previousStableHeight;
-      entryKeyboardStableHeight = stableHeight;
-      if (stableHeightDelta < -80) {
-        entryKeyboardVisible = true;
-        entryKeyboardShrunkAt = Date.now();
-      }
-      var recentlyClickedActivity = Date.now() - entryActivityClickedAt <= ENTRY_CLICK_ALIGNMENT_WINDOW_MS;
-      var recentlyShrunkViewport = Date.now() - entryKeyboardShrunkAt <= ENTRY_CLICK_ALIGNMENT_WINDOW_MS;
-      if (recentlyShrunkViewport && recentlyClickedActivity && focusedEntryActivity
-        && (entryAlignmentRequested || entryAutoScrollPending)) {
-        scheduleEntryAlignment(entryAutoScrollPending ? 0 : ENTRY_ALIGNMENT_SETTLE_MS);
-      }
-    }, ENTRY_ALIGNMENT_SETTLE_MS);
   }
 
   function alignEntrySubmitOnce() {
@@ -774,7 +744,6 @@
   document.addEventListener('focusin', function (event) {
     if (event.target !== el.activity || !isNarrowScreen()) { return; }
     focusedEntryActivity = true;
-    scheduleEntryViewportStability();
   });
   document.addEventListener('focusout', function (event) {
     if (event.target === el.activity) {
@@ -787,10 +756,8 @@
       entryAutoScrollClearTimer = null;
       entryAutoScrollPending = false;
       entryAlignmentRequested = false;
-      entryKeyboardVisible = false;
       entryKeyboardShrunkAt = 0;
-      if (entryViewportStabilityTimer) { window.clearTimeout(entryViewportStabilityTimer); }
-      entryViewportStabilityTimer = null;
+      entryClickViewportHeight = 0;
       window.setTimeout(function () {
         if (focusedEntryActivity) { return; }
         document.documentElement.style.setProperty('--entry-scroll-space', '0px');
@@ -801,10 +768,14 @@
     if (!isNarrowScreen() || document.activeElement !== el.activity) { return; }
     focusedEntryActivity = true;
     entryActivityClickedAt = Date.now();
+    entryClickViewportHeight = currentEntryViewportHeight();
+    entryKeyboardShrunkAt = 0;
     if (entryClickAlignmentTimer) { window.clearTimeout(entryClickAlignmentTimer); }
     entryClickAlignmentTimer = window.setTimeout(function () {
       entryClickAlignmentTimer = null;
       if (document.activeElement !== el.activity) { return; }
+      if (entryClickViewportHeight - currentEntryViewportHeight() <= 80) { return; }
+      entryKeyboardShrunkAt = Date.now();
       entryAlignmentRequested = true;
       scheduleEntryAlignment(ENTRY_ALIGNMENT_SETTLE_MS);
     }, ENTRY_NATIVE_SCROLL_SETTLE_MS);
@@ -812,7 +783,6 @@
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
       updatePolishFloat();
-      scheduleEntryViewportStability();
     });
     window.visualViewport.addEventListener('scroll', function () {
       updatePolishFloat();
@@ -3101,7 +3071,6 @@
   }, { passive: true });
   window.addEventListener('resize', function () {
     updatePolishFloat();
-    scheduleEntryViewportStability();
   });
 
   /* ---------- 积分展示 ---------- */
