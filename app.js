@@ -710,11 +710,6 @@
     var floatHeight = el.polishFloat.getBoundingClientRect().height;
     if (floatHeight <= 0) { return; }
     var margin = floatHeight + ENTRY_FLOAT_GAP;
-    if (control === el.activity && el.entrySubmit.isConnected) {
-      var controlRect = control.getBoundingClientRect();
-      var submitRect = el.entrySubmit.getBoundingClientRect();
-      margin += Math.max(0, submitRect.bottom - controlRect.bottom);
-    }
     control.style.scrollMarginBlockStart = margin + 'px';
     control.style.scrollMarginBlockEnd = margin + 'px';
   }
@@ -741,10 +736,10 @@
     var scrollDelta = 0;
     if (el.polishFloat.classList.contains('at-bottom')) {
       var bottomTarget = floatRect.top - ENTRY_FLOAT_GAP;
-      if (controlBottom > bottomTarget) { scrollDelta = controlBottom - bottomTarget; }
+      scrollDelta = controlBottom - bottomTarget;
     } else if (el.polishFloat.classList.contains('at-top')) {
       var topTarget = floatRect.bottom + ENTRY_FLOAT_GAP;
-      if (controlTop < topTarget) { scrollDelta = controlTop - topTarget; }
+      scrollDelta = controlTop - topTarget;
     }
     if (Math.abs(scrollDelta) <= 1) { return; }
 
