@@ -1288,7 +1288,7 @@
     var moduleLabel = isSkillEnhancement ? '技能' : label;
     toast('强化目标：' + label + '。本次强化需要消耗 ' + cost + ' ' + pointType + '。', { level: 'INFO' });
     toast('系统等级不足：' + moduleLabel + '强化模块尚未解锁。请宿主完成主线任务以解锁对应强化模块。', { level: 'WARN' });
-    if (isSkillEnhancement && hasCompletedPublishedMainQuests()) {
+    if (hasCompletedPublishedMainQuests()) {
       toast('检测到宿主已完成全部主线任务，系统正在寻找新的线索……', { level: 'WARN' });
     }
   });
