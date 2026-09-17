@@ -702,6 +702,15 @@
 
   function getControlScrollGroup(control) {
     if (!control || !control.form) { return null; }
+    if (control.matches('button[type="submit"]')) {
+      if (control.form.id === 'entryForm' && control === el.entrySubmit) {
+        return { start: el.category, submit: el.entrySubmit };
+      }
+      if (['skillForm', 'sideQuestForm'].indexOf(control.form.id) >= 0) {
+        return { start: control.form.querySelector('input, select, textarea'), submit: control };
+      }
+      return null;
+    }
     if (control.form.id === 'entryForm') {
       var dateTimeControls = [el.startDate, el.startTime, el.endDate, el.endTime];
       if (dateTimeControls.indexOf(control) >= 0) {
@@ -721,7 +730,7 @@
   }
 
   function prepareControlNativeScroll(control) {
-    if (!control || !control.matches('input, select, textarea')) { return; }
+    if (!control || !control.matches('input, select, textarea, button[type="submit"]')) { return; }
     var group = getControlScrollGroup(control);
     if (!group || !group.submit) {
       control.style.removeProperty('scroll-margin-block-start');
@@ -753,7 +762,7 @@
     nativeScrollCorrectionRequested = false;
     if (!isNarrowScreen()) { return; }
     var focusedControl = document.activeElement;
-    if (!focusedControl || !focusedControl.matches('input, select, textarea')) { return; }
+    if (!focusedControl || !focusedControl.matches('input, select, textarea, button[type="submit"]')) { return; }
     var group = getControlScrollGroup(focusedControl);
     if (!group || !group.submit) { return; }
     updatePolishFloat();
@@ -837,7 +846,7 @@
 
   document.addEventListener('click', function (event) {
     if (!isNarrowScreen()) { return; }
-    var control = event.target.closest && event.target.closest('input, select, textarea');
+    var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
     if (!control) { return; }
     prepareControlNativeScroll(control);
     if (getControlScrollGroup(control)) {
