@@ -685,15 +685,11 @@
   var ENTRY_FLOAT_GAP = 8;
   var ENTRY_ALIGNMENT_SETTLE_MS = 120;
   var ENTRY_NATIVE_SCROLL_SETTLE_MS = 250;
-  var ENTRY_POST_SCROLL_RECHECK_MS = 180;
   var ENTRY_CLICK_ALIGNMENT_WINDOW_MS = 700;
   var focusedEntryActivity = false;
-  var entryAlignmentTimer = null;
   var entryAutoScrollClearTimer = null;
-  var entryPostScrollTimer = null;
   var entryAutoScrollPending = false;
   var entryAlignmentRequested = false;
-  var entryClickAlignmentTimer = null;
   var entryActivityClickedAt = 0;
   var entryKeyboardShrunkAt = 0;
   var entryClickViewportHeight = 0;
@@ -704,7 +700,6 @@
   }
 
   function alignEntrySubmitOnce() {
-    entryAlignmentTimer = null;
     if (!focusedEntryActivity || document.activeElement !== el.activity || !el.entrySubmit.isConnected) { return; }
     var recentlyClickedActivity = Date.now() - entryActivityClickedAt <= ENTRY_CLICK_ALIGNMENT_WINDOW_MS;
     var recentlyShrunkViewport = Date.now() - entryKeyboardShrunkAt <= ENTRY_CLICK_ALIGNMENT_WINDOW_MS;
@@ -731,8 +726,8 @@
       var extraSpace = Math.max(0, scrollDelta - maxScroll);
       if (extraSpace > 1) {
         document.documentElement.style.setProperty('--entry-scroll-space', Math.ceil(extraSpace) + 'px');
+        window.scrollBy(0, scrollDelta);
         entryAlignmentRequested = false;
-        scheduleEntryAlignment(0);
         return;
       }
     }
@@ -745,7 +740,6 @@
       }, ENTRY_ALIGNMENT_SETTLE_MS * 2);
       // 视口变化后如果差值为负，scrollDelta 会带符号地把多余滚动反向抵消。
       window.scrollBy(0, scrollDelta);
-      scheduleEntryPostScrollRecheck();
     } else if (entryAutoScrollPending) {
       entryAutoScrollPending = false;
       if (entryAutoScrollClearTimer) { window.clearTimeout(entryAutoScrollClearTimer); }
@@ -754,21 +748,9 @@
     entryAlignmentRequested = false;
   }
 
-  function scheduleEntryAlignment(delay) {
-    if (entryAlignmentTimer) { window.clearTimeout(entryAlignmentTimer); }
-    entryAlignmentTimer = window.setTimeout(alignEntrySubmitOnce, delay || 0);
-  }
-
-  function scheduleEntryPostScrollRecheck() {
-    if (entryPostScrollTimer) { window.clearTimeout(entryPostScrollTimer); }
-    entryPostScrollTimer = window.setTimeout(function () {
-      entryPostScrollTimer = null;
-      scheduleEntryAlignment(0);
-    }, ENTRY_POST_SCROLL_RECHECK_MS);
-  }
-
   var focusedControlAlignmentTimer = null;
   var focusedControlClickViewportHeight = 0;
+  var manualScrollIntent = false;
 
   function alignFocusedControlAroundPolishFloat() {
     focusedControlAlignmentTimer = null;
@@ -785,25 +767,73 @@
 
     var controlRect = focusedControl.getBoundingClientRect();
     var scrollDelta = 0;
-    if (floatRect.top > viewportTop && controlRect.bottom > floatRect.top) {
-      scrollDelta = controlRect.bottom - floatRect.top + ENTRY_FLOAT_GAP;
-    } else if (floatRect.bottom < viewportBottom && controlRect.top < floatRect.bottom) {
-      scrollDelta = controlRect.top - floatRect.bottom - ENTRY_FLOAT_GAP;
+    if (el.polishFloat.classList.contains('at-bottom')) {
+      var bottomTarget = floatRect.top - ENTRY_FLOAT_GAP;
+      if (controlRect.bottom <= bottomTarget) { return; }
+      scrollDelta = controlRect.bottom - bottomTarget;
+    } else if (el.polishFloat.classList.contains('at-top')) {
+      var topTarget = floatRect.bottom + ENTRY_FLOAT_GAP;
+      if (controlRect.top >= topTarget) { return; }
+      scrollDelta = controlRect.top - topTarget;
+    } else {
+      return;
     }
     if (Math.abs(scrollDelta) > 1) { window.scrollBy(0, scrollDelta); }
   }
 
   function scheduleFocusedControlAlignment() {
     if (focusedControlAlignmentTimer) { window.clearTimeout(focusedControlAlignmentTimer); }
-    focusedControlAlignmentTimer = window.setTimeout(alignFocusedControlAroundPolishFloat, ENTRY_POST_SCROLL_RECHECK_MS);
+    focusedControlAlignmentTimer = window.setTimeout(alignFocusedControlAroundPolishFloat, ENTRY_NATIVE_SCROLL_SETTLE_MS);
   }
 
+  function cancelPendingFocusAlignment() {
+    if (focusedControlAlignmentTimer) { window.clearTimeout(focusedControlAlignmentTimer); }
+    focusedControlAlignmentTimer = null;
+    if (entryAutoScrollClearTimer) { window.clearTimeout(entryAutoScrollClearTimer); }
+    entryAutoScrollClearTimer = null;
+    entryAutoScrollPending = false;
+    entryAlignmentRequested = false;
+  }
+
+  document.addEventListener('touchstart', function () {
+    manualScrollIntent = true;
+  }, { passive: true });
+
   document.addEventListener('click', function (event) {
-    if (!isNarrowScreen() || event.target === el.activity) { return; }
+    if (!isNarrowScreen()) { return; }
     var clickedControl = event.target.closest && event.target.closest('input, textarea, select');
     if (!clickedControl) { return; }
+    manualScrollIntent = false;
+    if (focusedControlAlignmentTimer) { window.clearTimeout(focusedControlAlignmentTimer); }
     focusedControlClickViewportHeight = currentEntryViewportHeight();
+    if (clickedControl === el.activity) {
+      focusedEntryActivity = true;
+      entryActivityClickedAt = Date.now();
+      entryClickViewportHeight = focusedControlClickViewportHeight;
+      entryKeyboardShrunkAt = 0;
+    }
+    focusedControlAlignmentTimer = window.setTimeout(function () {
+      focusedControlAlignmentTimer = null;
+      if (document.activeElement !== clickedControl) { return; }
+      var viewportHeight = clickedControl === el.activity
+        ? entryClickViewportHeight
+        : focusedControlClickViewportHeight;
+      if (viewportHeight - currentEntryViewportHeight() <= 80) { return; }
+      if (clickedControl === el.activity) {
+        entryKeyboardShrunkAt = Date.now();
+        entryAlignmentRequested = true;
+        alignEntrySubmitOnce();
+      } else {
+        alignFocusedControlAroundPolishFloat();
+      }
+    }, ENTRY_NATIVE_SCROLL_SETTLE_MS);
   });
+
+  window.addEventListener('scroll', function () {
+    if (!manualScrollIntent) { return; }
+    manualScrollIntent = false;
+    cancelPendingFocusAlignment();
+  }, { passive: true });
 
   document.addEventListener('focusin', function (event) {
     if (event.target !== el.activity || !isNarrowScreen()) { return; }
@@ -812,14 +842,8 @@
   document.addEventListener('focusout', function (event) {
     if (event.target === el.activity) {
       focusedEntryActivity = false;
-      if (entryAlignmentTimer) { window.clearTimeout(entryAlignmentTimer); }
-      entryAlignmentTimer = null;
-      if (entryClickAlignmentTimer) { window.clearTimeout(entryClickAlignmentTimer); }
-      entryClickAlignmentTimer = null;
       if (entryAutoScrollClearTimer) { window.clearTimeout(entryAutoScrollClearTimer); }
       entryAutoScrollClearTimer = null;
-      if (entryPostScrollTimer) { window.clearTimeout(entryPostScrollTimer); }
-      entryPostScrollTimer = null;
       entryAutoScrollPending = false;
       entryAlignmentRequested = false;
       entryKeyboardShrunkAt = 0;
@@ -830,38 +854,9 @@
       }, 0);
     }
   });
-  el.activity.addEventListener('click', function () {
-    if (!isNarrowScreen() || document.activeElement !== el.activity) { return; }
-    focusedEntryActivity = true;
-    entryActivityClickedAt = Date.now();
-    entryClickViewportHeight = currentEntryViewportHeight();
-    entryKeyboardShrunkAt = 0;
-    if (entryClickAlignmentTimer) { window.clearTimeout(entryClickAlignmentTimer); }
-    entryClickAlignmentTimer = window.setTimeout(function () {
-      entryClickAlignmentTimer = null;
-      if (document.activeElement !== el.activity) { return; }
-      if (entryClickViewportHeight - currentEntryViewportHeight() <= 80) { return; }
-      entryKeyboardShrunkAt = Date.now();
-      entryAlignmentRequested = true;
-      scheduleEntryAlignment(ENTRY_ALIGNMENT_SETTLE_MS);
-      scheduleEntryPostScrollRecheck();
-    }, ENTRY_NATIVE_SCROLL_SETTLE_MS);
-  });
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
       updatePolishFloat();
-      if (!isNarrowScreen()) { return; }
-      var activeViewportHeight = document.activeElement === el.activity
-        ? entryClickViewportHeight
-        : focusedControlClickViewportHeight;
-      if (activeViewportHeight - currentEntryViewportHeight() <= 80) { return; }
-      scheduleFocusedControlAlignment();
-      if (focusedEntryActivity && document.activeElement === el.activity) {
-        entryKeyboardShrunkAt = Date.now();
-        entryAlignmentRequested = true;
-        scheduleEntryAlignment(ENTRY_ALIGNMENT_SETTLE_MS);
-        scheduleEntryPostScrollRecheck();
-      }
     });
     window.visualViewport.addEventListener('scroll', function () {
       updatePolishFloat();
