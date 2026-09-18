@@ -688,8 +688,8 @@
   var nativeScrollCorrectionRequested = false;
   var nativeScrollCorrectionControl = null;
   var nativeScrollCorrectionEpoch = 0;
-  var NATIVE_SCROLL_CORRECTION_DELAY_MS = 100;
-  var NATIVE_SCROLL_CORRECTION_DURATION_MS = 150;
+  var NATIVE_SCROLL_CORRECTION_DELAY_MS = 500;
+  var NATIVE_SCROLL_CORRECTION_DURATION_MS = 10;
 
   function cancelNativeScrollCorrection() {
     nativeScrollCorrectionEpoch += 1;
