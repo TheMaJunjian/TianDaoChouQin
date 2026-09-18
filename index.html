@@ -29,6 +29,7 @@
   <button type="button" class="tab-btn" data-tab="timeline" role="tab">结算</button>
   <button type="button" class="tab-btn" data-tab="quest" role="tab">任务</button>
   <button type="button" class="tab-btn" data-tab="notice" role="tab">提示</button>
+  <button type="button" class="tab-btn hidden" data-tab="debug" role="tab" id="debugTab">调试</button>
 </nav>
 
 <main class="layout">
@@ -257,6 +258,18 @@
         <button type="button" class="btn ghost danger" id="clearNotices">清空提示记录</button>
       </div>
       <div class="log-view" id="noticeView"></div>
+    </section>
+  </section>
+
+  <!-- ========== 调试 ========== -->
+  <section class="tab-panel hidden" id="tab-debug" data-tab-panel="debug">
+    <section class="card">
+      <h2>调试数据</h2>
+      <div class="log-actions">
+        <button type="button" class="btn ghost danger" id="debugClear">清空调试记录</button>
+        <button type="button" class="btn ghost" id="debugCopy">复制调试记录</button>
+      </div>
+      <pre class="debug-view" id="debugView">等待调试记录……</pre>
     </section>
   </section>
 

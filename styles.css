@@ -30,6 +30,19 @@ body {
 
 .hidden { display: none !important; }
 
+.debug-view {
+  max-height: 60vh;
+  margin: 12px 0 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: rgba(6, 18, 27, 0.72);
+  color: var(--text);
+  font: 11px/1.5 "Consolas", "Menlo", "Courier New", "Microsoft YaHei", monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .scanline {
   position: fixed;
   inset: 0;

@@ -120,6 +120,11 @@
   }
 
   var state = loadState();
+  var DEBUG_HOST_NAME = '马军健';
+  var debugEnabled = state.host.name === DEBUG_HOST_NAME;
+  var debugRecords = [];
+  var debugRecordIndex = 0;
+  var debugSessionStartedAt = performance.now();
   var persistedSnapshot = cloneState(state);
   var skillListCollapsed = false;
   var hiddenSkillListCollapsed = false;
@@ -176,7 +181,7 @@
 
   var el = {};
   [
-    'toastStack', 'userVersion', 'pAch', 'pContrib', 'pAttr', 'tabbar',
+    'toastStack', 'userVersion', 'pAch', 'pContrib', 'pAttr', 'tabbar', 'debugTab', 'debugView', 'debugClear', 'debugCopy',
     'polishFloat', 'polishFloatLabel', 'polishFloatFill', 'polishFloatPercent', 'polishBlock',
     'attrSkillSummary', 'attrAchSummary', 'skillListToggle', 'achListToggle', 'skillCard', 'achCard',
     'hostName', 'todayFilled', 'todayMissing', 'totalHours', 'skillCount', 'focusCategory',
@@ -200,6 +205,107 @@
     'eggMask', 'eggCount', 'eggClose', 'eggPause', 'eggBoost'
   ].forEach(function (id) {
     el[id] = document.getElementById(id);
+  });
+
+  function debugDetails(details) {
+    if (details === undefined || details === null) { return ''; }
+    if (typeof details === 'string') { return details; }
+    try { return JSON.stringify(details); } catch (e) { return String(details); }
+  }
+
+  function debugOutputText() {
+    if (!debugRecords.length) { return '等待调试记录……'; }
+    return debugRecords.map(function (record) {
+      var details = debugDetails(record.details);
+      return '#' + record.index + ' +' + record.elapsed.toFixed(1) + ' ms ' +
+        record.label + ' [' + record.duration.toFixed(2) + ' ms]' +
+        (details ? ' ' + details : '');
+    }).join('\n');
+  }
+
+  function renderDebugPanel() {
+    if (!debugEnabled || !el.debugView) { return; }
+    el.debugView.textContent = debugOutputText();
+    el.debugView.scrollTop = el.debugView.scrollHeight;
+  }
+
+  function debugStepStart() {
+    return debugEnabled ? performance.now() : 0;
+  }
+
+  function debugStepEnd(label, startedAt, details) {
+    if (!debugEnabled || !startedAt) { return; }
+    var now = performance.now();
+    debugRecords.push({
+      index: ++debugRecordIndex,
+      elapsed: now - debugSessionStartedAt,
+      label: label,
+      duration: now - startedAt,
+      details: details
+    });
+    renderDebugPanel();
+  }
+
+  function debugEvent(label, details) {
+    if (!debugEnabled) { return; }
+    var now = performance.now();
+    debugRecords.push({
+      index: ++debugRecordIndex,
+      elapsed: now - debugSessionStartedAt,
+      label: label,
+      duration: 0,
+      details: details
+    });
+    renderDebugPanel();
+  }
+
+  function syncDebugAccess() {
+    var enabled = state.host.name === DEBUG_HOST_NAME;
+    if (enabled && !debugEnabled) {
+      debugRecords = [];
+      debugRecordIndex = 0;
+      debugSessionStartedAt = performance.now();
+    }
+    debugEnabled = enabled;
+    el.debugTab.classList.toggle('hidden', !enabled);
+    document.getElementById('tab-debug').classList.toggle('hidden', !enabled);
+    if (!enabled && state.ui.activeTab === 'debug') {
+      state.ui.activeTab = 'attr';
+      applyActiveTabView('attr');
+    }
+    if (enabled) { renderDebugPanel(); }
+  }
+
+  el.debugClear.addEventListener('click', function () {
+    if (!debugEnabled) { return; }
+    debugRecords = [];
+    debugRecordIndex = 0;
+    debugSessionStartedAt = performance.now();
+    renderDebugPanel();
+  });
+
+  el.debugCopy.addEventListener('click', function () {
+    if (!debugEnabled) { return; }
+    var text = debugOutputText();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        toast('调试记录已复制。', { level: 'SYSTEM' });
+      }).catch(function () {
+        toast('复制失败，请手动选择调试记录。', { level: 'WARN' });
+      });
+      return;
+    }
+    var copyArea = document.createElement('textarea');
+    copyArea.value = text;
+    copyArea.setAttribute('readonly', 'readonly');
+    copyArea.style.position = 'fixed';
+    copyArea.style.opacity = '0';
+    document.body.appendChild(copyArea);
+    copyArea.select();
+    var copied = false;
+    try { copied = document.execCommand('copy'); } catch (e) { copied = false; }
+    document.body.removeChild(copyArea);
+    toast(copied ? '调试记录已复制。' : '复制失败，请手动选择调试记录。', { level: copied ? 'SYSTEM' : 'WARN' });
   });
 
   /* ---------- 自定义下拉：保留原生 select 作为真实值源 ---------- */
@@ -611,6 +717,7 @@
   var sigTimer = null;
   var storageErrorShown = false;
   function persist(forceReplace) {
+    var debugStart = debugStepStart();
     var serialized;
     try {
       if (!forceReplace) {
@@ -634,11 +741,13 @@
         console.error('[storage] FAILED', e);
         toast('存储模块异常，本次记录可能无法持久化保存。', { level: 'ERROR' });
       }
+      debugStepEnd('persist.failed', debugStart, { message: String(e && e.message || e) });
       return;
     }
     // 签名计算涉及多次数组遍历，防抖到空闲时统一计算一次，避免频繁操作（如逐字输入）时反复重算。
     if (sigTimer) { window.clearTimeout(sigTimer); }
     sigTimer = window.setTimeout(renderTamperSignature, 300);
+    debugStepEnd('persist', debugStart, { bytes: serialized.length, forceReplace: forceReplace === true });
   }
 
   window.addEventListener('storage', function (event) {
@@ -689,8 +798,8 @@
   var nativeScrollCorrectionRequested = false;
   var nativeScrollCorrectionControl = null;
   var nativeScrollCorrectionEpoch = 0;
-  var NATIVE_SCROLL_CORRECTION_DELAY_MS = 200;
-  var NATIVE_SCROLL_CORRECTION_DURATION_MS = 800;
+  var NATIVE_SCROLL_CORRECTION_DELAY_MS = 500;
+  var NATIVE_SCROLL_CORRECTION_DURATION_MS = 700;
 
   function cancelNativeScrollCorrection() {
     nativeScrollCorrectionEpoch += 1;
@@ -842,6 +951,7 @@
   }
 
   function scheduleNativeScrollCorrection() {
+    debugEvent('nativeScroll.schedule', { control: nativeScrollCorrectionControl && nativeScrollCorrectionControl.id });
     cancelNativeScrollCorrection();
     var epoch = nativeScrollCorrectionEpoch;
     nativeScrollCorrectionTimerIndex = 1 - nativeScrollCorrectionTimerIndex;
@@ -855,6 +965,7 @@
   document.addEventListener('touchstart', function (event) {
     if (!isNarrowScreen()) { return; }
     var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
+    debugEvent('touchstart', { control: control && control.id });
     cancelNativeScrollCorrection();
     if (control) {
       control.style.removeProperty('scroll-margin-block-start');
@@ -865,6 +976,7 @@
   document.addEventListener('click', function (event) {
     if (!isNarrowScreen()) { return; }
     var control = event.target.closest && event.target.closest('input, textarea, button[type="submit"]');
+    debugEvent('click.scroll-handler', { control: control && control.id });
     if (!control) { return; }
     var group = getControlScrollGroup(control);
     if (group && group.submit) {
@@ -876,6 +988,7 @@
 
   document.addEventListener('focusout', function (event) {
     if (!event.target.matches('input, select, textarea')) { return; }
+    debugEvent('focusout', { control: event.target.id });
     cancelNativeScrollCorrection();
     nativeScrollCorrectionRequested = false;
     nativeScrollCorrectionControl = null;
@@ -884,12 +997,19 @@
     document.documentElement.style.setProperty('--entry-scroll-space', '0px');
   });
   var polishFloatUpdateFrame = null;
-  function schedulePolishFloatUpdate() {
-    if (document.visibilityState === 'hidden' || polishFloatUpdateFrame !== null) { return; }
+  function schedulePolishFloatUpdate(source) {
+    var debugStart = debugStepStart();
+    if (document.visibilityState === 'hidden' || polishFloatUpdateFrame !== null) {
+      debugEvent('polishFloat.schedule.skip', { source: source, hidden: document.visibilityState === 'hidden', pending: polishFloatUpdateFrame !== null });
+      return;
+    }
     polishFloatUpdateFrame = window.requestAnimationFrame(function () {
       polishFloatUpdateFrame = null;
+      var updateStart = debugStepStart();
       if (document.visibilityState !== 'hidden') { updatePolishFloat(); }
+      debugStepEnd('polishFloat.update.' + source, updateStart, { scrollY: window.scrollY });
     });
+    debugStepEnd('polishFloat.schedule.' + source, debugStart);
   }
 
   function cancelPolishFloatUpdate() {
@@ -901,10 +1021,10 @@
 
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
-      schedulePolishFloatUpdate();
+      schedulePolishFloatUpdate('visualViewport.resize');
     });
     window.visualViewport.addEventListener('scroll', function () {
-      schedulePolishFloatUpdate();
+      schedulePolishFloatUpdate('visualViewport.scroll');
     });
   }
 
@@ -919,6 +1039,7 @@
   }
 
   document.addEventListener('visibilitychange', function () {
+    debugEvent('visibilitychange', { state: document.visibilityState });
     if (document.visibilityState === 'hidden') {
       cancelNativeScrollCorrection();
       cancelPolishFloatUpdate();
@@ -1454,7 +1575,9 @@
   });
 
   function setActiveTab(tab) {
-    if (['attr', 'entry', 'timeline', 'quest', 'notice'].indexOf(tab) < 0) { tab = 'attr'; }
+    var debugStart = debugStepStart();
+    if (['attr', 'entry', 'timeline', 'quest', 'notice'].indexOf(tab) < 0 &&
+      !(tab === 'debug' && debugEnabled)) { tab = 'attr'; }
     state.ui.activeTab = tab;
     applyActiveTabView(tab);
     if (tab === 'timeline') { el.logView.scrollTop = state.ui.logScrollTop; }
@@ -1467,6 +1590,7 @@
       updateNoticeBadge();
     }
     persist();
+    debugStepEnd('setActiveTab.' + tab, debugStart);
   }
 
   function applyActiveTabView(tab) {
@@ -3217,10 +3341,14 @@
   }
 
   window.addEventListener('scroll', function () {
+    var debugStart = debugStepStart();
     updatePolishFloat();
+    debugStepEnd('window.scroll.updatePolishFloat', debugStart, { scrollY: window.scrollY });
   }, { passive: true });
   window.addEventListener('resize', function () {
+    var debugStart = debugStepStart();
     updatePolishFloat();
+    debugStepEnd('window.resize.updatePolishFloat', debugStart, { width: window.innerWidth, height: window.innerHeight });
   });
 
   /* ---------- 积分展示 ---------- */
@@ -3767,20 +3895,64 @@
 
   /* 任何数据变更后统一调用：所有面板即时刷新，不依赖切换标签页。 */
   function refreshAll() {
+    var refreshStart = debugStepStart();
+    syncDebugAccess();
+    var stepStart = debugStepStart();
     el.hostName.textContent = state.host.name;
+    debugStepEnd('refresh.hostName', stepStart);
+
+    stepStart = debugStepStart();
     render();
+    debugStepEnd('refresh.render', stepStart);
+
+    stepStart = debugStepStart();
     renderSkills();
+    debugStepEnd('refresh.renderSkills', stepStart);
+
+    stepStart = debugStepStart();
     renderHiddenSkills();
+    debugStepEnd('refresh.renderHiddenSkills', stepStart);
+
+    stepStart = debugStepStart();
     renderSkillListToggle();
+    debugStepEnd('refresh.renderSkillListToggle', stepStart);
+
+    stepStart = debugStepStart();
     renderAchievements();
+    debugStepEnd('refresh.renderAchievements', stepStart);
+
+    stepStart = debugStepStart();
     renderHiddenAchievements();
+    debugStepEnd('refresh.renderHiddenAchievements', stepStart);
+
+    stepStart = debugStepStart();
     renderPolish();
+    debugStepEnd('refresh.renderPolish', stepStart);
+
+    stepStart = debugStepStart();
     renderPoints();
+    debugStepEnd('refresh.renderPoints', stepStart);
+
+    stepStart = debugStepStart();
     renderVersion();
+    debugStepEnd('refresh.renderVersion', stepStart);
+
+    stepStart = debugStepStart();
     renderMainQuest();
+    debugStepEnd('refresh.renderMainQuest', stepStart);
+
+    stepStart = debugStepStart();
     renderSideQuests();
+    debugStepEnd('refresh.renderSideQuests', stepStart);
+
+    stepStart = debugStepStart();
     updateQuestBadge();
+    debugStepEnd('refresh.updateQuestBadge', stepStart);
+
+    stepStart = debugStepStart();
     syncCustomSelects();
+    debugStepEnd('refresh.syncCustomSelects', stepStart);
+    debugStepEnd('refreshAll.total', refreshStart, { activeTab: state.ui.activeTab });
   }
 
   function fullRender() {
@@ -3799,17 +3971,44 @@
 
   /* ---------- 初始化 ---------- */
   function init() {
+    var initStart = debugStepStart();
+    var stepStart = debugStepStart();
     fillSkillLevelSelect();
+    debugStepEnd('init.fillSkillLevelSelect', stepStart);
+
+    stepStart = debugStepStart();
     requestPersistentStorage();
+    debugStepEnd('init.requestPersistentStorage', stepStart);
+
+    stepStart = debugStepStart();
     checkTamperOnBoot();
+    debugStepEnd('init.checkTamperOnBoot', stepStart);
+
+    stepStart = debugStepStart();
     syncMainQuestAvailability();
+    debugStepEnd('init.syncMainQuestAvailability', stepStart);
+
+    stepStart = debugStepStart();
     setActiveTab(state.ui.activeTab || 'attr');
+    debugStepEnd('init.setActiveTab', stepStart);
+
+    stepStart = debugStepStart();
     fullRender();
+    debugStepEnd('init.fullRender', stepStart);
+
+    stepStart = debugStepStart();
     window.setTimeout(function () {
       window.scrollTo(0, state.ui.pageScrollTop || 0);
     }, 0);
+    debugStepEnd('init.restoreScroll.schedule', stepStart);
+
+    stepStart = debugStepStart();
     setupClickHints();
+    debugStepEnd('init.setupClickHints', stepStart);
+
+    stepStart = debugStepStart();
     updatePolishFloat();
+    debugStepEnd('init.updatePolishFloat', stepStart);
 
     if (state.firstRun && !state.notifications.length) {
       state.firstRun = false;
@@ -3827,6 +4026,8 @@
           total.toFixed(1) + ' h。', { level: 'SYSTEM' });
       }
     }
+    debugStepEnd('init.total', initStart, { activeTab: state.ui.activeTab });
+    renderDebugPanel();
   }
 
   init();
