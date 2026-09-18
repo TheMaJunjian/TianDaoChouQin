@@ -732,14 +732,20 @@
     }
   }
 
+  function getControlLayoutElement(control) {
+    if (!control || !control.matches('select')) { return control; }
+    var shell = control.closest('.custom-select');
+    return shell ? shell.querySelector('.custom-select-trigger') : control;
+  }
+
   function getControlScrollGroup(control) {
     if (!control || !control.form) { return null; }
     if (control.matches('button[type="submit"]')) {
       if (control.form.id === 'entryForm' && control === el.entrySubmit) {
-        return { start: el.category, submit: el.entrySubmit };
+        return { start: getControlLayoutElement(el.category), submit: el.entrySubmit };
       }
       if (['skillForm', 'sideQuestForm'].indexOf(control.form.id) >= 0) {
-        return { start: control.form.querySelector('input, select, textarea'), submit: control };
+        return { start: getControlLayoutElement(control.form.querySelector('input, select, textarea')), submit: control };
       }
       return null;
     }
@@ -750,7 +756,7 @@
       }
       var entryGroupControls = [el.category, el.activity, el.level];
       if (entryGroupControls.indexOf(control) >= 0) {
-        return { start: el.category, submit: el.entrySubmit };
+        return { start: getControlLayoutElement(el.category), submit: el.entrySubmit };
       }
       return null;
     }
@@ -759,6 +765,33 @@
       start: control,
       submit: control.form.querySelector('button[type="submit"]')
     };
+  }
+
+  function scrollControlGroupIntoNativeViewport(group, margin) {
+    if (!group || !group.start || !group.submit) { return; }
+    var viewport = window.visualViewport;
+    var viewportTop = viewport ? viewport.offsetTop : 0;
+    var viewportHeight = viewport ? viewport.height : window.innerHeight;
+    var viewportBottom = viewportTop + viewportHeight;
+    var floatVisible = el.polishFloat && !el.polishFloat.classList.contains('hidden');
+    var floatRect = floatVisible ? el.polishFloat.getBoundingClientRect() : null;
+    var safeTop = viewportTop + margin;
+    var safeBottom = viewportBottom - margin;
+    if (floatRect && el.polishFloat.classList.contains('at-top')) {
+      safeTop = floatRect.bottom + ENTRY_FLOAT_GAP;
+    }
+    if (floatRect && el.polishFloat.classList.contains('at-bottom')) {
+      safeBottom = floatRect.top - ENTRY_FLOAT_GAP;
+    }
+    var groupStartRect = group.start.getBoundingClientRect();
+    var submitRect = group.submit.getBoundingClientRect();
+    if (submitRect.bottom > safeBottom) {
+      group.submit.style.scrollMarginBlockEnd = margin + ENTRY_FLOAT_GAP + 'px';
+      group.submit.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'auto' });
+    } else if (groupStartRect.top < safeTop) {
+      group.start.style.scrollMarginBlockStart = margin + ENTRY_FLOAT_GAP + 'px';
+      group.start.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'auto' });
+    }
   }
 
   function prepareControlNativeScroll(control) {
@@ -787,6 +820,9 @@
     control.style.scrollMarginBlockEnd = groupFitsViewport
       ? margin + Math.max(0, groupBottom - controlRect.bottom) + 'px'
       : margin + 'px';
+    if (groupFitsViewport) {
+      scrollControlGroupIntoNativeViewport(group, margin);
+    }
   }
 
   function correctFocusedControlAfterNativeScroll(epoch) {
@@ -811,8 +847,8 @@
       var viewportTop = viewport ? viewport.offsetTop : 0;
       var viewportHeight = viewport ? viewport.height : window.innerHeight;
       var viewportBottom = viewportTop + viewportHeight;
-      var groupTop = Math.min(groupStartRect.top, controlRect.top);
-      var groupBottom = Math.max(submitRect.bottom, controlRect.bottom);
+      var groupTop = groupStartRect.top;
+      var groupBottom = submitRect.bottom;
       var groupFitsViewport = groupBottom - groupTop <= viewportHeight;
       var controlTop = groupFitsViewport ? groupTop : controlRect.top;
       var submitBottom = groupFitsViewport ? groupBottom : controlRect.bottom;
