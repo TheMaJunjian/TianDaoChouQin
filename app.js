@@ -608,9 +608,19 @@
   }
 
   var saveTimer = null;
+  var persistTimer = null;
   var sigTimer = null;
   var storageErrorShown = false;
-  function persist(forceReplace) {
+
+  function schedulePersist() {
+    if (persistTimer !== null) { window.clearTimeout(persistTimer); }
+    persistTimer = window.setTimeout(function () {
+      persistTimer = null;
+      writeState();
+    }, 100);
+  }
+
+  function writeState(forceReplace) {
     var serialized;
     try {
       if (!forceReplace) {
@@ -641,6 +651,18 @@
     sigTimer = window.setTimeout(renderTamperSignature, 300);
   }
 
+  function persist(forceReplace) {
+    if (forceReplace) {
+      if (persistTimer !== null) {
+        window.clearTimeout(persistTimer);
+        persistTimer = null;
+      }
+      writeState(true);
+      return;
+    }
+    schedulePersist();
+  }
+
   window.addEventListener('storage', function (event) {
     if (event.key !== STORAGE_KEY) { return; }
     try {
@@ -664,9 +686,13 @@
   });
 
   function flushState() {
+    if (persistTimer !== null) {
+      window.clearTimeout(persistTimer);
+      persistTimer = null;
+    }
     state.ui.pageScrollTop = Math.max(0, window.scrollY || window.pageYOffset || 0);
     captureEntryDraft();
-    persist();
+    writeState();
   }
   window.addEventListener('pagehide', flushState);
   window.addEventListener('beforeunload', flushState);
@@ -911,11 +937,12 @@
   }
 
   function cancelDeferredSavesBeforeBackground() {
-    [pageScrollSaveTimer, saveTimer, draftSaveTimer, sigTimer].forEach(function (timer) {
+    [pageScrollSaveTimer, saveTimer, persistTimer, draftSaveTimer, sigTimer].forEach(function (timer) {
       if (timer !== null) { window.clearTimeout(timer); }
     });
     pageScrollSaveTimer = null;
     saveTimer = null;
+    persistTimer = null;
     draftSaveTimer = null;
     sigTimer = null;
   }
@@ -1458,10 +1485,10 @@
     if (tab === 'quest') { onOpenQuestTab(); }
     if (tab === 'notice') {
       state.noticeSeenCount = state.notifications.length;
-      persist();
+      schedulePersist();
       updateNoticeBadge();
     }
-    persist();
+    schedulePersist();
   }
 
   function applyActiveTabView(tab) {
