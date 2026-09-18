@@ -688,7 +688,7 @@
   var nativeScrollCorrectionRequested = false;
   var nativeScrollCorrectionControl = null;
   var nativeScrollCorrectionEpoch = 0;
-  var NATIVE_SCROLL_CORRECTION_DELAY_MS = 500;
+  var NATIVE_SCROLL_CORRECTION_DELAY_MS = 200;
   var NATIVE_SCROLL_CORRECTION_DURATION_MS = 700;
 
   function cancelNativeScrollCorrection() {
@@ -850,17 +850,20 @@
 
   document.addEventListener('touchstart', function (event) {
     if (!isNarrowScreen()) { return; }
-    var control = event.target.closest && event.target.closest('input, select, textarea');
+    var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
     cancelNativeScrollCorrection();
-    prepareControlNativeScroll(control);
+    if (control) {
+      control.style.removeProperty('scroll-margin-block-start');
+      control.style.removeProperty('scroll-margin-block-end');
+    }
   }, { passive: true });
 
   document.addEventListener('click', function (event) {
     if (!isNarrowScreen()) { return; }
     var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
     if (!control) { return; }
-    prepareControlNativeScroll(control);
-    if (getControlScrollGroup(control)) {
+    var group = getControlScrollGroup(control);
+    if (group && group.submit) {
       nativeScrollCorrectionRequested = true;
       nativeScrollCorrectionControl = control;
       scheduleNativeScrollCorrection();
@@ -869,7 +872,12 @@
 
   document.addEventListener('focusin', function (event) {
     if (!isNarrowScreen() || !event.target.matches('input, select, textarea')) { return; }
-    prepareControlNativeScroll(event.target);
+    var group = getControlScrollGroup(event.target);
+    if (group && group.submit) {
+      nativeScrollCorrectionRequested = true;
+      nativeScrollCorrectionControl = event.target;
+      scheduleNativeScrollCorrection();
+    }
   });
 
   document.addEventListener('focusout', function (event) {
@@ -3678,7 +3686,6 @@
 
   /* ---------- 异常检测彩蛋 ---------- */
   var eggTimer = null;
-  var eggAutoTimer = null;
   var eggValue = 100;
 
   function openEgg() {
@@ -3687,14 +3694,6 @@
     el.eggCount.classList.remove('negative');
     el.eggMask.classList.remove('hidden');
     startEggTimer();
-    if (eggAutoTimer) { window.clearTimeout(eggAutoTimer); }
-    eggAutoTimer = window.setTimeout(function () {
-      eggAutoTimer = null;
-      if (!el.eggMask.classList.contains('hidden')) {
-        el.eggBoost.click();
-        toast('系统已自动点击「加速」。', { level: 'SYSTEM' });
-      }
-    }, 5000);
   }
 
   function startEggTimer() {
@@ -3708,7 +3707,6 @@
 
   function stopEggTimer() {
     if (eggTimer) { window.clearInterval(eggTimer); eggTimer = null; }
-    if (eggAutoTimer) { window.clearTimeout(eggAutoTimer); eggAutoTimer = null; }
   }
 
   el.eggClose.addEventListener('click', function () {
