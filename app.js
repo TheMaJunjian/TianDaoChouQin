@@ -707,6 +707,12 @@
 
   function getControlScrollGroup(control) {
     if (!control || !control.form) { return null; }
+    var customSelect = control.closest && control.closest('.custom-select');
+    var groupControl = customSelect && control.matches('button.custom-select-trigger, button.custom-select-option')
+      ? customSelect.querySelector('select')
+      : control;
+    if (!groupControl || !groupControl.form) { return null; }
+    control = groupControl;
     if (control.matches('button[type="submit"]')) {
       if (control.form.id === 'entryForm' && control === el.entrySubmit) {
         return { start: el.category, submit: el.entrySubmit };
@@ -735,7 +741,7 @@
   }
 
   function prepareControlNativeScroll(control) {
-    if (!control || !control.matches('input, select, textarea, button[type="submit"]')) { return; }
+    if (!control || !control.matches('input, select, textarea, button[type="submit"], button.custom-select-trigger, button.custom-select-option')) { return; }
     var group = getControlScrollGroup(control);
     if (!group || !group.submit) {
       control.style.removeProperty('scroll-margin-block-start');
@@ -767,7 +773,7 @@
     if (epoch !== nativeScrollCorrectionEpoch || document.visibilityState === 'hidden' || !isNarrowScreen()) { return; }
     var focusedControl = nativeScrollCorrectionControl || document.activeElement;
     nativeScrollCorrectionControl = null;
-    if (!focusedControl || !focusedControl.matches('input, select, textarea, button[type="submit"]')) { return; }
+    if (!focusedControl || !focusedControl.matches('input, select, textarea, button[type="submit"], button.custom-select-trigger, button.custom-select-option')) { return; }
     var group = getControlScrollGroup(focusedControl);
     if (!group || !group.submit) { return; }
     updatePolishFloat();
@@ -854,7 +860,7 @@
 
   document.addEventListener('touchstart', function (event) {
     if (!isNarrowScreen()) { return; }
-    var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
+    var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"], button.custom-select-trigger, button.custom-select-option');
     cancelNativeScrollCorrection();
     if (control) {
       control.style.removeProperty('scroll-margin-block-start');
@@ -864,7 +870,7 @@
 
   document.addEventListener('click', function (event) {
     if (!isNarrowScreen()) { return; }
-    var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
+    var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"], button.custom-select-trigger, button.custom-select-option');
     if (!control) { return; }
     var group = getControlScrollGroup(control);
     if (group && group.submit) {
