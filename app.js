@@ -125,6 +125,9 @@
   var debugRecords = [];
   var debugRecordIndex = 0;
   var debugSessionStartedAt = performance.now();
+  var resumeFocusTrace = null;
+  var resumeFocusTraceTimer = null;
+  var hiddenSince = null;
   var persistedSnapshot = cloneState(state);
   var skillListCollapsed = false;
   var hiddenSkillListCollapsed = false;
@@ -257,6 +260,55 @@
       details: details
     });
     renderDebugPanel();
+  }
+
+  function resumeFocusControl(target) {
+    if (!target || !target.matches || !target.matches('input, select, textarea, button[type="submit"]')) { return null; }
+    return target.id || target.tagName.toLowerCase();
+  }
+
+  function recordResumeFocusEvent(label, event, target) {
+    if (!resumeFocusTrace) { return; }
+    var now = performance.now();
+    var control = resumeFocusControl(target);
+    var eventTimeStamp = event && Number(event.timeStamp);
+    var eventLag = Number.isFinite(eventTimeStamp) && Math.abs(eventTimeStamp - now) < 60000
+      ? now - eventTimeStamp
+      : null;
+    debugEvent('resumeFocus.' + label, {
+      control: control,
+      fromResumeMs: Number((now - resumeFocusTrace.startedAt).toFixed(1)),
+      eventTimeStamp: Number.isFinite(eventTimeStamp) ? eventTimeStamp : null,
+      eventLagMs: eventLag === null ? null : Number(eventLag.toFixed(1)),
+      visibility: document.visibilityState
+    });
+    if (label === 'focusin' && control) {
+      if (resumeFocusTraceTimer !== null) { window.clearTimeout(resumeFocusTraceTimer); }
+      resumeFocusTraceTimer = null;
+      resumeFocusTrace = null;
+    }
+  }
+
+  function startResumeFocusTrace() {
+    if (resumeFocusTraceTimer !== null) { window.clearTimeout(resumeFocusTraceTimer); }
+    var startedAt = performance.now();
+    resumeFocusTrace = { startedAt: startedAt };
+    debugEvent('resumeFocus.start', {
+      hiddenDurationMs: hiddenSince === null ? null : Number((startedAt - hiddenSince).toFixed(1)),
+      visibility: document.visibilityState
+    });
+    resumeFocusTraceTimer = window.setTimeout(function () {
+      if (!resumeFocusTrace) { return; }
+      recordResumeFocusEvent('timeout', null, null);
+      resumeFocusTrace = null;
+      resumeFocusTraceTimer = null;
+    }, 10000);
+  }
+
+  function cancelResumeFocusTrace() {
+    if (resumeFocusTraceTimer !== null) { window.clearTimeout(resumeFocusTraceTimer); }
+    resumeFocusTraceTimer = null;
+    resumeFocusTrace = null;
   }
 
   function syncDebugAccess() {
@@ -965,6 +1017,7 @@
   document.addEventListener('touchstart', function (event) {
     if (!isNarrowScreen()) { return; }
     var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
+    recordResumeFocusEvent('touchstart', event, control);
     debugEvent('touchstart', { control: control && control.id });
     cancelNativeScrollCorrection();
     if (control) {
@@ -976,6 +1029,7 @@
   document.addEventListener('click', function (event) {
     if (!isNarrowScreen()) { return; }
     var control = event.target.closest && event.target.closest('input, textarea, button[type="submit"]');
+    recordResumeFocusEvent('click', event, control);
     debugEvent('click.scroll-handler', { control: control && control.id });
     if (!control) { return; }
     var group = getControlScrollGroup(control);
@@ -984,6 +1038,17 @@
       nativeScrollCorrectionControl = control;
       scheduleNativeScrollCorrection();
     }
+  });
+
+  document.addEventListener('pointerdown', function (event) {
+    if (!isNarrowScreen()) { return; }
+    var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
+    recordResumeFocusEvent('pointerdown', event, control);
+  }, { passive: true });
+
+  document.addEventListener('focusin', function (event) {
+    if (!isNarrowScreen()) { return; }
+    recordResumeFocusEvent('focusin', event, event.target);
   });
 
   document.addEventListener('focusout', function (event) {
@@ -1041,6 +1106,8 @@
   document.addEventListener('visibilitychange', function () {
     debugEvent('visibilitychange', { state: document.visibilityState });
     if (document.visibilityState === 'hidden') {
+      hiddenSince = performance.now();
+      cancelResumeFocusTrace();
       cancelNativeScrollCorrection();
       cancelPolishFloatUpdate();
       nativeScrollCorrectionRequested = false;
@@ -1052,6 +1119,8 @@
         sigTimer = null;
       }
       renderTamperSignature();
+    } else {
+      startResumeFocusTrace();
     }
   });
   window.addEventListener('pagehide', function () {
