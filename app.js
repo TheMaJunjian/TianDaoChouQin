@@ -858,16 +858,6 @@
     }
   }, { passive: true });
 
-  document.addEventListener('click', function (event) {
-    if (!isNarrowScreen()) { return; }
-    var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
-    if (!control) { return; }
-    var group = getControlScrollGroup(control);
-    if (group && group.submit) {
-      cancelNativeScrollCorrection();
-    }
-  });
-
   document.addEventListener('focusin', function (event) {
     if (!isNarrowScreen() || !event.target.matches('input, select, textarea')) { return; }
     var group = getControlScrollGroup(event.target);
