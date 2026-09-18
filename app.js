@@ -694,12 +694,11 @@
 
   function cancelNativeScrollCorrection() {
     nativeScrollCorrectionEpoch += 1;
-    nativeScrollCorrectionTimers.forEach(function (timer, index) {
-      if (timer !== null) {
-        window.clearTimeout(timer);
-        nativeScrollCorrectionTimers[index] = null;
-      }
-    });
+    var currentTimer = nativeScrollCorrectionTimers[nativeScrollCorrectionTimerIndex];
+    if (currentTimer !== null) {
+      window.clearTimeout(currentTimer);
+      nativeScrollCorrectionTimers[nativeScrollCorrectionTimerIndex] = null;
+    }
     if (nativeScrollCorrectionFrame !== null) {
       window.cancelAnimationFrame(nativeScrollCorrectionFrame);
       nativeScrollCorrectionFrame = null;
