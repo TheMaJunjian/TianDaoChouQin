@@ -683,7 +683,8 @@
 
   /* 仅在复写页填写「作为」时，通过一次页面滚动把提交按钮移到浮动条上方。 */
   var ENTRY_FLOAT_GAP = 8;
-  var nativeScrollCorrectionTimer = null;
+  var nativeScrollCorrectionTimers = [null, null];
+  var nativeScrollCorrectionTimerIndex = 0;
   var nativeScrollCorrectionFrame = null;
   var nativeScrollCorrectionRequested = false;
   var nativeScrollCorrectionControl = null;
@@ -693,10 +694,12 @@
 
   function cancelNativeScrollCorrection() {
     nativeScrollCorrectionEpoch += 1;
-    if (nativeScrollCorrectionTimer !== null) {
-      window.clearTimeout(nativeScrollCorrectionTimer);
-      nativeScrollCorrectionTimer = null;
-    }
+    nativeScrollCorrectionTimers.forEach(function (timer, index) {
+      if (timer !== null) {
+        window.clearTimeout(timer);
+        nativeScrollCorrectionTimers[index] = null;
+      }
+    });
     if (nativeScrollCorrectionFrame !== null) {
       window.cancelAnimationFrame(nativeScrollCorrectionFrame);
       nativeScrollCorrectionFrame = null;
@@ -761,7 +764,6 @@
   }
 
   function correctFocusedControlAfterNativeScroll(epoch) {
-    nativeScrollCorrectionTimer = null;
     nativeScrollCorrectionRequested = false;
     if (epoch !== nativeScrollCorrectionEpoch || document.visibilityState === 'hidden' || !isNarrowScreen()) { return; }
     var focusedControl = nativeScrollCorrectionControl || document.activeElement;
@@ -843,7 +845,10 @@
   function scheduleNativeScrollCorrection() {
     cancelNativeScrollCorrection();
     var epoch = nativeScrollCorrectionEpoch;
-    nativeScrollCorrectionTimer = window.setTimeout(function () {
+    nativeScrollCorrectionTimerIndex = 1 - nativeScrollCorrectionTimerIndex;
+    var timerIndex = nativeScrollCorrectionTimerIndex;
+    nativeScrollCorrectionTimers[timerIndex] = window.setTimeout(function () {
+      nativeScrollCorrectionTimers[timerIndex] = null;
       correctFocusedControlAfterNativeScroll(epoch);
     }, NATIVE_SCROLL_CORRECTION_DELAY_MS);
   }
@@ -858,12 +863,14 @@
     }
   }, { passive: true });
 
-  document.addEventListener('focusin', function (event) {
-    if (!isNarrowScreen() || !event.target.matches('input, select, textarea')) { return; }
-    var group = getControlScrollGroup(event.target);
+  document.addEventListener('click', function (event) {
+    if (!isNarrowScreen()) { return; }
+    var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
+    if (!control) { return; }
+    var group = getControlScrollGroup(control);
     if (group && group.submit) {
       nativeScrollCorrectionRequested = true;
-      nativeScrollCorrectionControl = event.target;
+      nativeScrollCorrectionControl = control;
       scheduleNativeScrollCorrection();
     }
   });
