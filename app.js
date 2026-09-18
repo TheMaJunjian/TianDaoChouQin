@@ -864,6 +864,12 @@
     }
   }, { passive: true });
 
+  document.addEventListener('pointerdown', function (event) {
+    if (!isNarrowScreen()) { return; }
+    var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
+    if (control) { prepareControlNativeScroll(control); }
+  }, { passive: true });
+
   document.addEventListener('click', function (event) {
     if (!ENABLE_NATIVE_SCROLL_CORRECTION) { return; }
     if (!isNarrowScreen()) { return; }
