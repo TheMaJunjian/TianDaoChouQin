@@ -689,7 +689,8 @@
   var nativeScrollCorrectionRequested = false;
   var nativeScrollCorrectionControl = null;
   var nativeScrollCorrectionEpoch = 0;
-  var NATIVE_SCROLL_CORRECTION_DELAY_MS = 100;
+  var ENABLE_NATIVE_SCROLL_CORRECTION = false;
+  var NATIVE_SCROLL_CORRECTION_DELAY_MS = 500;
   var NATIVE_SCROLL_CORRECTION_DURATION_MS = 700;
 
   function cancelNativeScrollCorrection() {
@@ -764,6 +765,7 @@
 
   function correctFocusedControlAfterNativeScroll(epoch) {
     nativeScrollCorrectionRequested = false;
+    if (!ENABLE_NATIVE_SCROLL_CORRECTION) { return; }
     if (epoch !== nativeScrollCorrectionEpoch || document.visibilityState === 'hidden' || !isNarrowScreen()) { return; }
     var focusedControl = nativeScrollCorrectionControl || document.activeElement;
     nativeScrollCorrectionControl = null;
@@ -842,6 +844,7 @@
   }
 
   function scheduleNativeScrollCorrection() {
+    if (!ENABLE_NATIVE_SCROLL_CORRECTION) { return; }
     cancelNativeScrollCorrection();
     var epoch = nativeScrollCorrectionEpoch;
     nativeScrollCorrectionTimerIndex = 1 - nativeScrollCorrectionTimerIndex;
@@ -863,6 +866,7 @@
   }, { passive: true });
 
   document.addEventListener('click', function (event) {
+    if (!ENABLE_NATIVE_SCROLL_CORRECTION) { return; }
     if (!isNarrowScreen()) { return; }
     var control = event.target.closest && event.target.closest('input, textarea, button[type="submit"]');
     if (!control) { return; }
