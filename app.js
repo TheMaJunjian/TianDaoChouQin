@@ -863,7 +863,7 @@
     var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
     if (!control) { return; }
     var group = getControlScrollGroup(control);
-    if (group && group.submit) {
+    if (group && group.submit && nativeScrollCorrectionControl !== control) {
       cancelNativeScrollCorrection();
       nativeScrollCorrectionRequested = false;
       nativeScrollCorrectionControl = null;
