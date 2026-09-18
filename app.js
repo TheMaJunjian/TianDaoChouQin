@@ -715,7 +715,7 @@
   var nativeScrollCorrectionRequested = false;
   var nativeScrollCorrectionControl = null;
   var nativeScrollCorrectionEpoch = 0;
-  var ENABLE_NATIVE_SCROLL_CORRECTION = false;
+  var ENABLE_NATIVE_SCROLL_CORRECTION = true;
   var NATIVE_SCROLL_CORRECTION_DELAY_MS = 500;
   var NATIVE_SCROLL_CORRECTION_DURATION_MS = 700;
 
@@ -765,64 +765,6 @@
       start: control,
       submit: control.form.querySelector('button[type="submit"]')
     };
-  }
-
-  function scrollControlGroupIntoNativeViewport(group, margin) {
-    if (!group || !group.start || !group.submit) { return; }
-    var viewport = window.visualViewport;
-    var viewportTop = viewport ? viewport.offsetTop : 0;
-    var viewportHeight = viewport ? viewport.height : window.innerHeight;
-    var viewportBottom = viewportTop + viewportHeight;
-    var floatVisible = el.polishFloat && !el.polishFloat.classList.contains('hidden');
-    var floatRect = floatVisible ? el.polishFloat.getBoundingClientRect() : null;
-    var safeTop = viewportTop + margin;
-    var safeBottom = viewportBottom - margin;
-    if (floatRect && el.polishFloat.classList.contains('at-top')) {
-      safeTop = floatRect.bottom + ENTRY_FLOAT_GAP;
-    }
-    if (floatRect && el.polishFloat.classList.contains('at-bottom')) {
-      safeBottom = floatRect.top - ENTRY_FLOAT_GAP;
-    }
-    var groupStartRect = group.start.getBoundingClientRect();
-    var submitRect = group.submit.getBoundingClientRect();
-    if (submitRect.bottom > safeBottom) {
-      group.submit.style.scrollMarginBlockEnd = margin + ENTRY_FLOAT_GAP + 'px';
-      group.submit.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'auto' });
-    } else if (groupStartRect.top < safeTop) {
-      group.start.style.scrollMarginBlockStart = margin + ENTRY_FLOAT_GAP + 'px';
-      group.start.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'auto' });
-    }
-  }
-
-  function prepareControlNativeScroll(control) {
-    if (!control || !control.matches('input, select, textarea, button[type="submit"]')) { return; }
-    var group = getControlScrollGroup(control);
-    if (!group || !group.submit) {
-      control.style.removeProperty('scroll-margin-block-start');
-      control.style.removeProperty('scroll-margin-block-end');
-      return;
-    }
-    updatePolishFloat();
-    var floatVisible = el.polishFloat && !el.polishFloat.classList.contains('hidden');
-    var floatHeight = floatVisible ? el.polishFloat.getBoundingClientRect().height : 0;
-    var margin = floatHeight + ENTRY_FLOAT_GAP;
-    var controlRect = control.getBoundingClientRect();
-    var groupStartRect = group.start.getBoundingClientRect();
-    var submitRect = group.submit.getBoundingClientRect();
-    var groupTop = groupStartRect.top;
-    var groupBottom = submitRect.bottom;
-    var viewport = window.visualViewport;
-    var viewportHeight = viewport ? viewport.height : window.innerHeight;
-    var groupFitsViewport = groupBottom - groupTop <= viewportHeight;
-    control.style.scrollMarginBlockStart = groupFitsViewport
-      ? margin + Math.max(0, controlRect.top - groupTop) + 'px'
-      : margin + 'px';
-    control.style.scrollMarginBlockEnd = groupFitsViewport
-      ? margin + Math.max(0, groupBottom - controlRect.bottom) + 'px'
-      : margin + 'px';
-    if (groupFitsViewport) {
-      scrollControlGroupIntoNativeViewport(group, margin);
-    }
   }
 
   function correctFocusedControlAfterNativeScroll(epoch) {
@@ -919,17 +861,7 @@
 
   document.addEventListener('touchstart', function (event) {
     if (!isNarrowScreen()) { return; }
-    var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
     cancelNativeScrollCorrection();
-    if (control) {
-      prepareControlNativeScroll(control);
-    }
-  }, { passive: true });
-
-  document.addEventListener('pointerdown', function (event) {
-    if (!isNarrowScreen()) { return; }
-    var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
-    if (control) { prepareControlNativeScroll(control); }
   }, { passive: true });
 
   document.addEventListener('click', function (event) {
@@ -950,8 +882,6 @@
     cancelNativeScrollCorrection();
     nativeScrollCorrectionRequested = false;
     nativeScrollCorrectionControl = null;
-    event.target.style.removeProperty('scroll-margin-block-start');
-    event.target.style.removeProperty('scroll-margin-block-end');
     document.documentElement.style.setProperty('--entry-scroll-space', '0px');
   });
   var polishFloatUpdateFrame = null;
