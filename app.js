@@ -689,8 +689,8 @@
   var nativeScrollCorrectionRequested = false;
   var nativeScrollCorrectionControl = null;
   var nativeScrollCorrectionEpoch = 0;
-  var NATIVE_SCROLL_CORRECTION_DELAY_MS = 100;
-  var NATIVE_SCROLL_CORRECTION_DURATION_MS = 700;
+  var NATIVE_SCROLL_CORRECTION_DELAY_MS = 200;
+  var NATIVE_SCROLL_CORRECTION_DURATION_MS = 800;
 
   function cancelNativeScrollCorrection() {
     nativeScrollCorrectionEpoch += 1;
@@ -892,6 +892,13 @@
     });
   }
 
+  function cancelPolishFloatUpdate() {
+    if (polishFloatUpdateFrame !== null) {
+      window.cancelAnimationFrame(polishFloatUpdateFrame);
+      polishFloatUpdateFrame = null;
+    }
+  }
+
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
       schedulePolishFloatUpdate();
@@ -914,6 +921,7 @@
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'hidden') {
       cancelNativeScrollCorrection();
+      cancelPolishFloatUpdate();
       nativeScrollCorrectionRequested = false;
       nativeScrollCorrectionControl = null;
       cancelDeferredSavesBeforeBackground();
@@ -925,8 +933,14 @@
       renderTamperSignature();
     }
   });
-  window.addEventListener('pagehide', cancelNativeScrollCorrection);
-  window.addEventListener('freeze', cancelNativeScrollCorrection);
+  window.addEventListener('pagehide', function () {
+    cancelNativeScrollCorrection();
+    cancelPolishFloatUpdate();
+  });
+  window.addEventListener('freeze', function () {
+    cancelNativeScrollCorrection();
+    cancelPolishFloatUpdate();
+  });
 
   function requestPersistentStorage() {
     if (!navigator.storage || !navigator.storage.persist) { return; }
