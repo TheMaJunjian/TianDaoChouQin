@@ -864,6 +864,7 @@
     if (!control) { return; }
     var group = getControlScrollGroup(control);
     if (group && group.submit) {
+      cancelNativeScrollCorrection();
       nativeScrollCorrectionRequested = true;
       nativeScrollCorrectionControl = control;
       scheduleNativeScrollCorrection();
