@@ -608,19 +608,9 @@
   }
 
   var saveTimer = null;
-  var persistTimer = null;
   var sigTimer = null;
   var storageErrorShown = false;
-
-  function schedulePersist() {
-    if (persistTimer !== null) { window.clearTimeout(persistTimer); }
-    persistTimer = window.setTimeout(function () {
-      persistTimer = null;
-      writeState();
-    }, 100);
-  }
-
-  function writeState(forceReplace) {
+  function persist(forceReplace) {
     var serialized;
     try {
       if (!forceReplace) {
@@ -651,18 +641,6 @@
     sigTimer = window.setTimeout(renderTamperSignature, 300);
   }
 
-  function persist(forceReplace) {
-    if (forceReplace) {
-      if (persistTimer !== null) {
-        window.clearTimeout(persistTimer);
-        persistTimer = null;
-      }
-      writeState(true);
-      return;
-    }
-    schedulePersist();
-  }
-
   window.addEventListener('storage', function (event) {
     if (event.key !== STORAGE_KEY) { return; }
     try {
@@ -686,13 +664,9 @@
   });
 
   function flushState() {
-    if (persistTimer !== null) {
-      window.clearTimeout(persistTimer);
-      persistTimer = null;
-    }
     state.ui.pageScrollTop = Math.max(0, window.scrollY || window.pageYOffset || 0);
     captureEntryDraft();
-    writeState();
+    persist();
   }
   window.addEventListener('pagehide', flushState);
   window.addEventListener('beforeunload', flushState);
@@ -715,8 +689,7 @@
   var nativeScrollCorrectionRequested = false;
   var nativeScrollCorrectionControl = null;
   var nativeScrollCorrectionEpoch = 0;
-  var ENABLE_NATIVE_SCROLL_CORRECTION = true;
-  var NATIVE_SCROLL_CORRECTION_DELAY_MS = 500;
+  var NATIVE_SCROLL_CORRECTION_DELAY_MS = 100;
   var NATIVE_SCROLL_CORRECTION_DURATION_MS = 700;
 
   function cancelNativeScrollCorrection() {
@@ -732,20 +705,14 @@
     }
   }
 
-  function getControlLayoutElement(control) {
-    if (!control || !control.matches('select')) { return control; }
-    var shell = control.closest('.custom-select');
-    return shell ? shell.querySelector('.custom-select-trigger') : control;
-  }
-
   function getControlScrollGroup(control) {
     if (!control || !control.form) { return null; }
     if (control.matches('button[type="submit"]')) {
       if (control.form.id === 'entryForm' && control === el.entrySubmit) {
-        return { start: getControlLayoutElement(el.category), submit: el.entrySubmit };
+        return { start: el.category, submit: el.entrySubmit };
       }
       if (['skillForm', 'sideQuestForm'].indexOf(control.form.id) >= 0) {
-        return { start: getControlLayoutElement(control.form.querySelector('input, select, textarea')), submit: control };
+        return { start: control.form.querySelector('input, select, textarea'), submit: control };
       }
       return null;
     }
@@ -756,7 +723,7 @@
       }
       var entryGroupControls = [el.category, el.activity, el.level];
       if (entryGroupControls.indexOf(control) >= 0) {
-        return { start: getControlLayoutElement(el.category), submit: el.entrySubmit };
+        return { start: el.category, submit: el.entrySubmit };
       }
       return null;
     }
@@ -767,9 +734,36 @@
     };
   }
 
+  function prepareControlNativeScroll(control) {
+    if (!control || !control.matches('input, select, textarea, button[type="submit"]')) { return; }
+    var group = getControlScrollGroup(control);
+    if (!group || !group.submit) {
+      control.style.removeProperty('scroll-margin-block-start');
+      control.style.removeProperty('scroll-margin-block-end');
+      return;
+    }
+    updatePolishFloat();
+    var floatVisible = el.polishFloat && !el.polishFloat.classList.contains('hidden');
+    var floatHeight = floatVisible ? el.polishFloat.getBoundingClientRect().height : 0;
+    var margin = floatHeight + ENTRY_FLOAT_GAP;
+    var controlRect = control.getBoundingClientRect();
+    var groupStartRect = group.start.getBoundingClientRect();
+    var submitRect = group.submit.getBoundingClientRect();
+    var groupTop = Math.min(groupStartRect.top, controlRect.top);
+    var groupBottom = Math.max(submitRect.bottom, controlRect.bottom);
+    var viewport = window.visualViewport;
+    var viewportHeight = viewport ? viewport.height : window.innerHeight;
+    var groupFitsViewport = groupBottom - groupTop <= viewportHeight;
+    control.style.scrollMarginBlockStart = groupFitsViewport
+      ? margin + Math.max(0, controlRect.top - groupTop) + 'px'
+      : margin + 'px';
+    control.style.scrollMarginBlockEnd = groupFitsViewport
+      ? margin + Math.max(0, groupBottom - controlRect.bottom) + 'px'
+      : margin + 'px';
+  }
+
   function correctFocusedControlAfterNativeScroll(epoch) {
     nativeScrollCorrectionRequested = false;
-    if (!ENABLE_NATIVE_SCROLL_CORRECTION) { return; }
     if (epoch !== nativeScrollCorrectionEpoch || document.visibilityState === 'hidden' || !isNarrowScreen()) { return; }
     var focusedControl = nativeScrollCorrectionControl || document.activeElement;
     nativeScrollCorrectionControl = null;
@@ -789,8 +783,8 @@
       var viewportTop = viewport ? viewport.offsetTop : 0;
       var viewportHeight = viewport ? viewport.height : window.innerHeight;
       var viewportBottom = viewportTop + viewportHeight;
-      var groupTop = groupStartRect.top;
-      var groupBottom = submitRect.bottom;
+      var groupTop = Math.min(groupStartRect.top, controlRect.top);
+      var groupBottom = Math.max(submitRect.bottom, controlRect.bottom);
       var groupFitsViewport = groupBottom - groupTop <= viewportHeight;
       var controlTop = groupFitsViewport ? groupTop : controlRect.top;
       var submitBottom = groupFitsViewport ? groupBottom : controlRect.bottom;
@@ -848,7 +842,6 @@
   }
 
   function scheduleNativeScrollCorrection() {
-    if (!ENABLE_NATIVE_SCROLL_CORRECTION) { return; }
     cancelNativeScrollCorrection();
     var epoch = nativeScrollCorrectionEpoch;
     nativeScrollCorrectionTimerIndex = 1 - nativeScrollCorrectionTimerIndex;
@@ -861,11 +854,15 @@
 
   document.addEventListener('touchstart', function (event) {
     if (!isNarrowScreen()) { return; }
+    var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
     cancelNativeScrollCorrection();
+    if (control) {
+      control.style.removeProperty('scroll-margin-block-start');
+      control.style.removeProperty('scroll-margin-block-end');
+    }
   }, { passive: true });
 
   document.addEventListener('click', function (event) {
-    if (!ENABLE_NATIVE_SCROLL_CORRECTION) { return; }
     if (!isNarrowScreen()) { return; }
     var control = event.target.closest && event.target.closest('input, textarea, button[type="submit"]');
     if (!control) { return; }
@@ -882,6 +879,8 @@
     cancelNativeScrollCorrection();
     nativeScrollCorrectionRequested = false;
     nativeScrollCorrectionControl = null;
+    event.target.style.removeProperty('scroll-margin-block-start');
+    event.target.style.removeProperty('scroll-margin-block-end');
     document.documentElement.style.setProperty('--entry-scroll-space', '0px');
   });
   var polishFloatUpdateFrame = null;
@@ -903,12 +902,11 @@
   }
 
   function cancelDeferredSavesBeforeBackground() {
-    [pageScrollSaveTimer, saveTimer, persistTimer, draftSaveTimer, sigTimer].forEach(function (timer) {
+    [pageScrollSaveTimer, saveTimer, draftSaveTimer, sigTimer].forEach(function (timer) {
       if (timer !== null) { window.clearTimeout(timer); }
     });
     pageScrollSaveTimer = null;
     saveTimer = null;
-    persistTimer = null;
     draftSaveTimer = null;
     sigTimer = null;
   }
@@ -1451,10 +1449,10 @@
     if (tab === 'quest') { onOpenQuestTab(); }
     if (tab === 'notice') {
       state.noticeSeenCount = state.notifications.length;
-      schedulePersist();
+      persist();
       updateNoticeBadge();
     }
-    schedulePersist();
+    persist();
   }
 
   function applyActiveTabView(tab) {
