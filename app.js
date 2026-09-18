@@ -863,10 +863,8 @@
     var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
     if (!control) { return; }
     var group = getControlScrollGroup(control);
-    if (group && group.submit && nativeScrollCorrectionControl !== control) {
+    if (group && group.submit && document.activeElement !== control) {
       cancelNativeScrollCorrection();
-      nativeScrollCorrectionRequested = false;
-      nativeScrollCorrectionControl = null;
     }
   });
 
