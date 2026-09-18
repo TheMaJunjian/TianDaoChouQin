@@ -865,9 +865,8 @@
     var group = getControlScrollGroup(control);
     if (group && group.submit) {
       cancelNativeScrollCorrection();
-      nativeScrollCorrectionRequested = true;
-      nativeScrollCorrectionControl = control;
-      scheduleNativeScrollCorrection();
+      nativeScrollCorrectionRequested = false;
+      nativeScrollCorrectionControl = null;
     }
   });
 
