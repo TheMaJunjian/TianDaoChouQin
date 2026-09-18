@@ -750,8 +750,8 @@
     var controlRect = control.getBoundingClientRect();
     var groupStartRect = group.start.getBoundingClientRect();
     var submitRect = group.submit.getBoundingClientRect();
-    var groupTop = Math.min(groupStartRect.top, controlRect.top);
-    var groupBottom = Math.max(submitRect.bottom, controlRect.bottom);
+    var groupTop = groupStartRect.top;
+    var groupBottom = submitRect.bottom;
     var viewport = window.visualViewport;
     var viewportHeight = viewport ? viewport.height : window.innerHeight;
     var groupFitsViewport = groupBottom - groupTop <= viewportHeight;
