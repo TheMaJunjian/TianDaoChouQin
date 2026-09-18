@@ -860,8 +860,7 @@
     var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
     cancelNativeScrollCorrection();
     if (control) {
-      control.style.removeProperty('scroll-margin-block-start');
-      control.style.removeProperty('scroll-margin-block-end');
+      prepareControlNativeScroll(control);
     }
   }, { passive: true });
 
