@@ -921,12 +921,6 @@
       if (!group || !group.submit) { return; }
       var anchor = prepareControlNativeScroll(control);
       if (!anchor) { return; }
-      var viewport = window.visualViewport;
-      var viewportTop = viewport ? viewport.offsetTop : 0;
-      var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
-      var anchorRect = anchor.getBoundingClientRect();
-      var margin = parseFloat(anchor.style.scrollMarginBlockEnd) || 0;
-      if (anchorRect.top >= viewportTop && anchorRect.bottom <= viewportBottom - margin) { return; }
       anchor.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
     });
   }
