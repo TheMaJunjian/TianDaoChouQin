@@ -315,7 +315,6 @@
     if (!isNarrowScreen() || state.ui.activeTab !== 'entry' || !el.activity || el.activity.disabled) { return; }
     try {
       el.activity.focus({ preventScroll: true });
-      el.activity.click();
       el.activity.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
       debugEvent('resumeEntryInput', {
         focused: document.activeElement === el.activity,
