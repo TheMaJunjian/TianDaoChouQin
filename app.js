@@ -844,6 +844,7 @@
 
   /* 让原生焦点滚动把整组控件放进键盘弹出后的视觉视口。 */
   var ENTRY_FLOAT_GAP = 18;
+  var POLISH_FLOAT_HEIGHT = 28;
   var nativeFocusScrollFrame = null;
   var pendingNativeFocusScrollControl = null;
 
@@ -884,9 +885,7 @@
       control.style.removeProperty('scroll-margin-block-end');
       return null;
     }
-    var floatVisible = el.polishFloat && !el.polishFloat.classList.contains('hidden');
-    var floatHeight = floatVisible ? el.polishFloat.getBoundingClientRect().height : 0;
-    var margin = floatHeight + ENTRY_FLOAT_GAP;
+    var margin = POLISH_FLOAT_HEIGHT + ENTRY_FLOAT_GAP;
     var controlRect = control.getBoundingClientRect();
     var groupStartRect = group.start.getBoundingClientRect();
     var submitRect = group.submit.getBoundingClientRect();
