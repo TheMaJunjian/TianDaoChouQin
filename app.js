@@ -843,8 +843,7 @@
   }, { passive: true });
 
   /* 让原生焦点滚动把整组控件放进键盘弹出后的视觉视口。 */
-  var ENTRY_FLOAT_GAP = 8;
-  var FLOAT_VIEWPORT_GAP = 8;
+  var ENTRY_FLOAT_GAP = 18;
   var nativeFocusScrollFrame = null;
   var pendingNativeFocusScrollControl = null;
 
@@ -887,21 +886,9 @@
     }
     var floatVisible = el.polishFloat && !el.polishFloat.classList.contains('hidden');
     var floatHeight = floatVisible ? el.polishFloat.getBoundingClientRect().height : 0;
-    var margin = floatHeight + FLOAT_VIEWPORT_GAP + ENTRY_FLOAT_GAP;
-    var controlRect = control.getBoundingClientRect();
-    var groupStartRect = group.start.getBoundingClientRect();
-    var submitRect = group.submit.getBoundingClientRect();
-    var groupTop = Math.min(groupStartRect.top, controlRect.top);
-    var groupBottom = Math.max(submitRect.bottom, controlRect.bottom);
-    var viewport = window.visualViewport;
-    var viewportHeight = viewport ? viewport.height : window.innerHeight;
-    var groupFitsViewport = groupBottom - groupTop <= viewportHeight;
-    control.style.scrollMarginBlockStart = groupFitsViewport
-      ? margin + Math.max(0, controlRect.top - groupTop) + 'px'
-      : margin + 'px';
-    control.style.scrollMarginBlockEnd = groupFitsViewport
-      ? margin + Math.max(0, groupBottom - controlRect.bottom) + 'px'
-      : margin + 'px';
+    var margin = floatHeight + ENTRY_FLOAT_GAP;
+    group.submit.style.scrollMarginBlockStart = '0px';
+    group.submit.style.scrollMarginBlockEnd = margin + 'px';
   }
 
   function scheduleNativeFocusScroll() {
@@ -910,10 +897,11 @@
     nativeFocusScrollFrame = window.requestAnimationFrame(function () {
       nativeFocusScrollFrame = null;
       var control = pendingNativeFocusScrollControl;
-      pendingNativeFocusScrollControl = null;
       if (document.visibilityState === 'hidden' || !control || !control.isConnected) { return; }
+      var group = getControlScrollGroup(control);
+      if (!group || !group.submit) { return; }
       prepareControlNativeScroll(control);
-      control.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
+      group.submit.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
     });
   }
 
@@ -923,6 +911,7 @@
     debugEvent('click.scroll-handler', { control: control && control.id });
     if (!control) { return; }
     pendingNativeFocusScrollControl = control;
+    scheduleNativeFocusScroll();
   });
 
   document.addEventListener('pointerdown', function (event) {
