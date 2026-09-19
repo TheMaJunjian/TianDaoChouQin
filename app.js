@@ -264,10 +264,12 @@
   }
 
   function requestResumeRecovery(source) {
-    var focusReturn = source === 'window.focus';
-    if (!resumeTrackingReady || (!resumePending && !focusReturn) || document.visibilityState === 'hidden') { return; }
+    if (!resumeTrackingReady || !resumePending || document.visibilityState === 'hidden') { return; }
     var now = performance.now();
-    if (now - lastResumeRecoveryAt < 300) { return; }
+    if (now - lastResumeRecoveryAt < 300) {
+      resumePending = false;
+      return;
+    }
     lastResumeRecoveryAt = now;
     resumePending = false;
     debugEvent('resume.recovery', { source: source });
@@ -767,7 +769,12 @@
     }
     // 签名计算涉及多次数组遍历，防抖到空闲时统一计算一次，避免频繁操作（如逐字输入）时反复重算。
     if (sigTimer) { window.clearTimeout(sigTimer); }
-    sigTimer = window.setTimeout(renderTamperSignature, 300);
+    if (document.visibilityState === 'hidden') {
+      sigTimer = null;
+      renderTamperSignature();
+    } else {
+      sigTimer = window.setTimeout(renderTamperSignature, 300);
+    }
     debugStepEnd('persist', debugStart, { bytes: serialized.length, forceReplace: forceReplace === true });
   }
 
@@ -804,6 +811,10 @@
 
   window.addEventListener('scroll', function () {
     state.ui.pageScrollTop = Math.max(0, window.scrollY || window.pageYOffset || 0);
+    if (document.visibilityState === 'hidden') {
+      persist();
+      return;
+    }
     if (pageScrollSaveTimer) { window.clearTimeout(pageScrollSaveTimer); }
     pageScrollSaveTimer = window.setTimeout(function () {
       pageScrollSaveTimer = null;
@@ -894,7 +905,7 @@
 
   function correctFocusedControlAfterNativeScroll(epoch) {
     nativeScrollCorrectionRequested = false;
-    if (epoch !== nativeScrollCorrectionEpoch || document.visibilityState === 'hidden' || !isNarrowScreen()) { return; }
+    if (epoch !== nativeScrollCorrectionEpoch || !isNarrowScreen()) { return; }
     var focusedControl = nativeScrollCorrectionControl || document.activeElement;
     nativeScrollCorrectionControl = null;
     if (!focusedControl || !focusedControl.matches('input, select, textarea, button[type="submit"]')) { return; }
@@ -929,7 +940,7 @@
     }
 
     function animateCorrection() {
-      if (epoch !== nativeScrollCorrectionEpoch || document.visibilityState === 'hidden' || !focusedControl.isConnected || correctionPasses >= 2) {
+      if (epoch !== nativeScrollCorrectionEpoch || !focusedControl.isConnected || correctionPasses >= 2) {
         nativeScrollCorrectionFrame = null;
         return;
       }
@@ -950,7 +961,7 @@
       var targetY = Math.max(0, startY + scrollDelta);
       var startedAt = null;
       function animate(timestamp) {
-        if (epoch !== nativeScrollCorrectionEpoch || document.visibilityState === 'hidden' || !focusedControl.isConnected) {
+        if (epoch !== nativeScrollCorrectionEpoch || !focusedControl.isConnected) {
           nativeScrollCorrectionFrame = null;
           return;
         }
@@ -960,7 +971,7 @@
         window.scrollTo(0, startY + (targetY - startY) * easedProgress);
         if (progress < 1 && focusedControl.isConnected) {
           nativeScrollCorrectionFrame = window.requestAnimationFrame(animate);
-        } else if (epoch === nativeScrollCorrectionEpoch && document.visibilityState !== 'hidden' && focusedControl.isConnected) {
+        } else if (epoch === nativeScrollCorrectionEpoch && focusedControl.isConnected) {
           nativeScrollCorrectionFrame = window.requestAnimationFrame(animateCorrection);
         } else {
           nativeScrollCorrectionFrame = null;
@@ -972,6 +983,7 @@
   }
 
   function scheduleNativeScrollCorrection() {
+    if (document.visibilityState === 'hidden') { return; }
     debugEvent('nativeScroll.schedule', { control: nativeScrollCorrectionControl && nativeScrollCorrectionControl.id });
     cancelNativeScrollCorrection();
     var epoch = nativeScrollCorrectionEpoch;
@@ -1027,17 +1039,10 @@
     polishFloatUpdateFrame = window.requestAnimationFrame(function () {
       polishFloatUpdateFrame = null;
       var updateStart = debugStepStart();
-      if (document.visibilityState !== 'hidden') { updatePolishFloat(); }
+      updatePolishFloat();
       debugStepEnd('polishFloat.update.' + source, updateStart, { scrollY: window.scrollY });
     });
     debugStepEnd('polishFloat.schedule.' + source, debugStart);
-  }
-
-  function cancelPolishFloatUpdate() {
-    if (polishFloatUpdateFrame !== null) {
-      window.cancelAnimationFrame(polishFloatUpdateFrame);
-      polishFloatUpdateFrame = null;
-    }
   }
 
   if (window.visualViewport) {
@@ -1049,54 +1054,27 @@
     });
   }
 
-  function cancelDeferredSavesBeforeBackground() {
-    [pageScrollSaveTimer, saveTimer, draftSaveTimer, sigTimer].forEach(function (timer) {
-      if (timer !== null) { window.clearTimeout(timer); }
-    });
-    pageScrollSaveTimer = null;
-    saveTimer = null;
-    draftSaveTimer = null;
-    sigTimer = null;
-  }
-
   document.addEventListener('visibilitychange', function () {
     debugEvent('visibilitychange', { state: document.visibilityState });
     if (document.visibilityState === 'hidden') {
       resumePending = true;
-      cancelNativeScrollCorrection();
-      cancelPolishFloatUpdate();
-      nativeScrollCorrectionRequested = false;
-      nativeScrollCorrectionControl = null;
-      cancelDeferredSavesBeforeBackground();
       flushState();
-      if (sigTimer !== null) {
-        window.clearTimeout(sigTimer);
-        sigTimer = null;
-      }
-      renderTamperSignature();
     } else {
       requestResumeRecovery('visibilitychange');
     }
-  });
-  window.addEventListener('blur', function () {
-    if (resumeTrackingReady) { resumePending = true; }
-  });
-  window.addEventListener('focus', function () {
-    requestResumeRecovery('window.focus');
   });
   window.addEventListener('pageshow', function (event) {
     if (event.persisted) { resumePending = true; }
     requestResumeRecovery('pageshow');
   });
+  document.addEventListener('resume', function () {
+    requestResumeRecovery('resume');
+  });
   window.addEventListener('pagehide', function () {
     resumePending = true;
-    cancelNativeScrollCorrection();
-    cancelPolishFloatUpdate();
   });
   window.addEventListener('freeze', function () {
     resumePending = true;
-    cancelNativeScrollCorrection();
-    cancelPolishFloatUpdate();
   });
 
   function requestPersistentStorage() {
