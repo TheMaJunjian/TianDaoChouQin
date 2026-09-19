@@ -7,6 +7,7 @@
 
   /* ---------- 常量 ---------- */
   var APP_VERSION = '0.2'; // 开发者代码版本：用于识别是否有新增主线任务
+    resumeTrackingReady = true;
   var STORAGE_KEY = 'tiandao.state.v2';
   var STORAGE_BACKUP_KEY = 'tiandao.state.v2.backup';
   var LEGACY_ENTRIES_KEY = 'tiandao.entries.v1';
@@ -128,7 +129,6 @@
   var resumePending = false;
   var resumeTrackingReady = false;
   var lastResumeRecoveryAt = 0;
-  var resumeRecoveryActiveUntil = 0;
   var persistedSnapshot = cloneState(state);
   var skillListCollapsed = false;
   var hiddenSkillListCollapsed = false;
@@ -270,38 +270,14 @@
     if (now - lastResumeRecoveryAt < 300) { return; }
     lastResumeRecoveryAt = now;
     resumePending = false;
-    resumeRecoveryActiveUntil = now + 1200;
     debugEvent('resume.recovery', { source: source });
-    window.setTimeout(function () {
-      window.requestAnimationFrame(function () {
-        if (document.visibilityState !== 'hidden') { resumeEntryInput(0); }
-      });
-    }, 80);
-  }
-
-  var resumeEntryFocusTimer = null;
-
-  function resumeEntryInput(attempt) {
-    if (!isNarrowScreen() || state.ui.activeTab !== 'entry' || !el.activity || el.activity.disabled) { return; }
-    try {
+    window.requestAnimationFrame(function () {
+      if (document.visibilityState === 'hidden' || state.ui.activeTab !== 'entry' ||
+          !isNarrowScreen() || !el.activity || el.activity.disabled) { return; }
       el.activity.focus({ preventScroll: true });
       nativeScrollCorrectionControl = el.activity;
       scheduleNativeScrollCorrection();
-      if (document.activeElement !== el.activity && attempt < 3 &&
-          document.visibilityState !== 'hidden' && performance.now() < resumeRecoveryActiveUntil) {
-        resumeEntryFocusTimer = window.setTimeout(function () {
-          resumeEntryFocusTimer = null;
-          window.requestAnimationFrame(function () { resumeEntryInput(attempt + 1); });
-        }, 120 + attempt * 120);
-      }
-      debugEvent('resumeEntryInput', {
-        focused: document.activeElement === el.activity,
-        attempt: attempt || 0,
-        specialScrollScheduled: true
-      });
-    } catch (error) {
-      debugEvent('resumeEntryInput.failed', { message: String(error && error.message || error) });
-    }
+    });
   }
 
   function syncDebugAccess() {
@@ -1034,11 +1010,6 @@
   document.addEventListener('focusout', function (event) {
     if (!event.target.matches('input, select, textarea')) { return; }
     debugEvent('focusout', { control: event.target.id });
-    if (event.target === el.activity && performance.now() < resumeRecoveryActiveUntil &&
-        resumeTrackingReady && document.visibilityState !== 'hidden') {
-      resumePending = true;
-      requestResumeRecovery('activity.focusout');
-    }
     cancelNativeScrollCorrection();
     nativeScrollCorrectionRequested = false;
     nativeScrollCorrectionControl = null;
@@ -1092,9 +1063,6 @@
     debugEvent('visibilitychange', { state: document.visibilityState });
     if (document.visibilityState === 'hidden') {
       resumePending = true;
-      resumeRecoveryActiveUntil = 0;
-      if (resumeEntryFocusTimer !== null) { window.clearTimeout(resumeEntryFocusTimer); }
-      resumeEntryFocusTimer = null;
       cancelNativeScrollCorrection();
       cancelPolishFloatUpdate();
       nativeScrollCorrectionRequested = false;
