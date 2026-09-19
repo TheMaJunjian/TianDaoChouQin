@@ -842,29 +842,11 @@
     }, 150);
   }, { passive: true });
 
-  /* 仅在复写页填写「作为」时，通过一次页面滚动把提交按钮移到浮动条上方。 */
+  /* 让原生焦点滚动把整组控件放进键盘弹出后的视觉视口。 */
   var ENTRY_FLOAT_GAP = 8;
-  var nativeScrollCorrectionTimers = [null, null];
-  var nativeScrollCorrectionTimerIndex = 0;
-  var nativeScrollCorrectionFrame = null;
-  var nativeScrollCorrectionRequested = false;
-  var nativeScrollCorrectionControl = null;
-  var nativeScrollCorrectionEpoch = 0;
-  var NATIVE_SCROLL_CORRECTION_DELAY_MS = 100;
-  var NATIVE_SCROLL_CORRECTION_DURATION_MS = 1000;
-
-  function cancelNativeScrollCorrection() {
-    nativeScrollCorrectionEpoch += 1;
-    var currentTimer = nativeScrollCorrectionTimers[nativeScrollCorrectionTimerIndex];
-    if (currentTimer !== null) {
-      window.clearTimeout(currentTimer);
-      nativeScrollCorrectionTimers[nativeScrollCorrectionTimerIndex] = null;
-    }
-    if (nativeScrollCorrectionFrame !== null) {
-      window.cancelAnimationFrame(nativeScrollCorrectionFrame);
-      nativeScrollCorrectionFrame = null;
-    }
-  }
+  var FLOAT_VIEWPORT_GAP = 8;
+  var nativeFocusScrollFrame = null;
+  var pendingNativeFocusScrollControl = null;
 
   function getControlScrollGroup(control) {
     if (!control || !control.form) { return null; }
@@ -906,7 +888,7 @@
     updatePolishFloat();
     var floatVisible = el.polishFloat && !el.polishFloat.classList.contains('hidden');
     var floatHeight = floatVisible ? el.polishFloat.getBoundingClientRect().height : 0;
-    var margin = floatHeight + ENTRY_FLOAT_GAP;
+    var margin = floatHeight + FLOAT_VIEWPORT_GAP + ENTRY_FLOAT_GAP;
     var controlRect = control.getBoundingClientRect();
     var groupStartRect = group.start.getBoundingClientRect();
     var submitRect = group.submit.getBoundingClientRect();
@@ -923,144 +905,34 @@
       : margin + 'px';
   }
 
-  function correctFocusedControlAfterNativeScroll(epoch) {
-    nativeScrollCorrectionRequested = false;
-    if (epoch !== nativeScrollCorrectionEpoch || document.visibilityState === 'hidden' || !isNarrowScreen()) { return; }
-    var focusedControl = nativeScrollCorrectionControl || document.activeElement;
-    nativeScrollCorrectionControl = null;
-    if (!focusedControl || !focusedControl.matches('input, select, textarea, button[type="submit"]')) { return; }
-    var group = getControlScrollGroup(focusedControl);
-    if (!group || !group.submit) { return; }
-    updatePolishFloat();
-    var correctionPasses = 0;
-    function getScrollDelta() {
-      updatePolishFloat();
-      var floatVisible = el.polishFloat && !el.polishFloat.classList.contains('hidden');
-      var floatRect = floatVisible ? el.polishFloat.getBoundingClientRect() : null;
-      var groupStartRect = group.start.getBoundingClientRect();
-      var controlRect = focusedControl.getBoundingClientRect();
-      var submitRect = group.submit.getBoundingClientRect();
-      var viewport = window.visualViewport;
-      var viewportTop = viewport ? viewport.offsetTop : 0;
-      var viewportHeight = viewport ? viewport.height : window.innerHeight;
-      var viewportBottom = viewportTop + viewportHeight;
-      var groupTop = Math.min(groupStartRect.top, controlRect.top);
-      var groupBottom = Math.max(submitRect.bottom, controlRect.bottom);
-      var groupFitsViewport = groupBottom - groupTop <= viewportHeight;
-      var controlTop = groupFitsViewport ? groupTop : controlRect.top;
-      var submitBottom = groupFitsViewport ? groupBottom : controlRect.bottom;
-      if (!floatRect || el.polishFloat.classList.contains('at-bottom')) {
-        var bottomTarget = floatRect ? floatRect.top - ENTRY_FLOAT_GAP : viewportBottom - ENTRY_FLOAT_GAP;
-        return submitBottom - bottomTarget;
-      }
-      if (el.polishFloat.classList.contains('at-top')) {
-        return controlTop - (floatRect.bottom + ENTRY_FLOAT_GAP);
-      }
-      return 0;
-    }
-
-    function animateCorrection() {
-      if (epoch !== nativeScrollCorrectionEpoch || document.visibilityState === 'hidden' || !focusedControl.isConnected || correctionPasses >= 2) {
-        nativeScrollCorrectionFrame = null;
-        return;
-      }
-      var scrollDelta = getScrollDelta();
-      if (Math.abs(scrollDelta) <= 1) {
-        nativeScrollCorrectionFrame = null;
-        return;
-      }
-      correctionPasses += 1;
-      if (scrollDelta > 0) {
-        var maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight - window.scrollY);
-        var extraSpace = Math.max(0, scrollDelta - maxScroll);
-        if (extraSpace > 1) {
-          document.documentElement.style.setProperty('--entry-scroll-space', Math.ceil(extraSpace) + 'px');
-        }
-      }
-      var startY = window.scrollY || window.pageYOffset || 0;
-      var targetY = Math.max(0, startY + scrollDelta);
-      var startedAt = null;
-      function animate(timestamp) {
-        if (epoch !== nativeScrollCorrectionEpoch || document.visibilityState === 'hidden' || !focusedControl.isConnected) {
-          nativeScrollCorrectionFrame = null;
-          return;
-        }
-        if (startedAt === null) { startedAt = timestamp; }
-        var progress = Math.min(1, (timestamp - startedAt) / NATIVE_SCROLL_CORRECTION_DURATION_MS);
-        var easedProgress = 1 - Math.pow(1 - progress, 3);
-        window.scrollTo(0, startY + (targetY - startY) * easedProgress);
-        if (progress < 1 && focusedControl.isConnected) {
-          nativeScrollCorrectionFrame = window.requestAnimationFrame(animate);
-        } else if (epoch === nativeScrollCorrectionEpoch && document.visibilityState !== 'hidden' && focusedControl.isConnected) {
-          nativeScrollCorrectionFrame = window.requestAnimationFrame(animateCorrection);
-        } else {
-          nativeScrollCorrectionFrame = null;
-        }
-      }
-      nativeScrollCorrectionFrame = window.requestAnimationFrame(animate);
-    }
-    animateCorrection();
+  function scheduleNativeFocusScroll() {
+    var control = pendingNativeFocusScrollControl;
+    pendingNativeFocusScrollControl = null;
+    if (!control || !control.matches('input, select, textarea, button[type="submit"]')) { return; }
+    if (nativeFocusScrollFrame !== null) { window.cancelAnimationFrame(nativeFocusScrollFrame); }
+    nativeFocusScrollFrame = window.requestAnimationFrame(function () {
+      nativeFocusScrollFrame = null;
+      if (document.visibilityState === 'hidden' || !control.isConnected) { return; }
+      prepareControlNativeScroll(control);
+      control.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
+    });
   }
-
-  function scheduleNativeScrollCorrection() {
-    debugEvent('nativeScroll.schedule', { control: nativeScrollCorrectionControl && nativeScrollCorrectionControl.id });
-    cancelNativeScrollCorrection();
-    var epoch = nativeScrollCorrectionEpoch;
-    nativeScrollCorrectionTimerIndex = 1 - nativeScrollCorrectionTimerIndex;
-    var timerIndex = nativeScrollCorrectionTimerIndex;
-    nativeScrollCorrectionTimers[timerIndex] = window.setTimeout(function () {
-      nativeScrollCorrectionTimers[timerIndex] = null;
-      correctFocusedControlAfterNativeScroll(epoch);
-    }, NATIVE_SCROLL_CORRECTION_DELAY_MS);
-  }
-
-  document.addEventListener('touchstart', function (event) {
-    if (!isNarrowScreen()) { return; }
-    var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
-    recordResumeFocusEvent('touchstart', event, control);
-    debugEvent('touchstart', { control: control && control.id });
-    cancelNativeScrollCorrection();
-    if (control) {
-      control.style.removeProperty('scroll-margin-block-start');
-      control.style.removeProperty('scroll-margin-block-end');
-    }
-  }, { passive: true });
 
   document.addEventListener('click', function (event) {
-    if (!isNarrowScreen()) { return; }
-    var control = event.target.closest && event.target.closest('input, textarea, button[type="submit"]');
+    var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
     recordResumeFocusEvent('click', event, control);
     debugEvent('click.scroll-handler', { control: control && control.id });
     if (!control) { return; }
-    var group = getControlScrollGroup(control);
-    if (group && group.submit) {
-      nativeScrollCorrectionRequested = true;
-      nativeScrollCorrectionControl = control;
-      scheduleNativeScrollCorrection();
-    }
+    pendingNativeFocusScrollControl = control;
+    scheduleNativeFocusScroll();
   });
 
   document.addEventListener('pointerdown', function (event) {
-    if (!isNarrowScreen()) { return; }
     var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
     recordResumeFocusEvent('pointerdown', event, control);
+    if (control) { pendingNativeFocusScrollControl = control; }
   }, { passive: true });
 
-  document.addEventListener('focusin', function (event) {
-    if (!isNarrowScreen()) { return; }
-    recordResumeFocusEvent('focusin', event, event.target);
-  });
-
-  document.addEventListener('focusout', function (event) {
-    if (!event.target.matches('input, select, textarea')) { return; }
-    debugEvent('focusout', { control: event.target.id });
-    cancelNativeScrollCorrection();
-    nativeScrollCorrectionRequested = false;
-    nativeScrollCorrectionControl = null;
-    event.target.style.removeProperty('scroll-margin-block-start');
-    event.target.style.removeProperty('scroll-margin-block-end');
-    document.documentElement.style.setProperty('--entry-scroll-space', '0px');
-  });
   var polishFloatUpdateFrame = null;
   function schedulePolishFloatUpdate(source) {
     var debugStart = debugStepStart();
@@ -1087,6 +959,7 @@
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
       schedulePolishFloatUpdate('visualViewport.resize');
+      scheduleNativeFocusScroll();
     });
     window.visualViewport.addEventListener('scroll', function () {
       schedulePolishFloatUpdate('visualViewport.scroll');
@@ -1108,10 +981,7 @@
     if (document.visibilityState === 'hidden') {
       hiddenSince = performance.now();
       cancelResumeFocusTrace();
-      cancelNativeScrollCorrection();
       cancelPolishFloatUpdate();
-      nativeScrollCorrectionRequested = false;
-      nativeScrollCorrectionControl = null;
       cancelDeferredSavesBeforeBackground();
       flushState();
       if (sigTimer !== null) {
@@ -1124,11 +994,9 @@
     }
   });
   window.addEventListener('pagehide', function () {
-    cancelNativeScrollCorrection();
     cancelPolishFloatUpdate();
   });
   window.addEventListener('freeze', function () {
-    cancelNativeScrollCorrection();
     cancelPolishFloatUpdate();
   });
 
