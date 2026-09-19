@@ -311,13 +311,22 @@
     resumeFocusTrace = null;
   }
 
-  function resumeEntryInput() {
+  var resumeEntryFocusTimer = null;
+
+  function resumeEntryInput(attempt) {
     if (!isNarrowScreen() || state.ui.activeTab !== 'entry' || !el.activity || el.activity.disabled) { return; }
     try {
       el.activity.focus({ preventScroll: true });
       el.activity.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      if (document.activeElement !== el.activity && attempt < 1 && document.visibilityState !== 'hidden') {
+        resumeEntryFocusTimer = window.setTimeout(function () {
+          resumeEntryFocusTimer = null;
+          window.requestAnimationFrame(function () { resumeEntryInput(attempt + 1); });
+        }, 120);
+      }
       debugEvent('resumeEntryInput', {
         focused: document.activeElement === el.activity,
+        attempt: attempt || 0,
         scrolled: true
       });
     } catch (error) {
@@ -1122,6 +1131,8 @@
     if (document.visibilityState === 'hidden') {
       hiddenSince = performance.now();
       cancelResumeFocusTrace();
+      if (resumeEntryFocusTimer !== null) { window.clearTimeout(resumeEntryFocusTimer); }
+      resumeEntryFocusTimer = null;
       cancelNativeScrollCorrection();
       cancelPolishFloatUpdate();
       nativeScrollCorrectionRequested = false;
@@ -1135,7 +1146,9 @@
       renderTamperSignature();
     } else {
       startResumeFocusTrace();
-      window.setTimeout(resumeEntryInput, 0);
+      window.requestAnimationFrame(function () {
+        if (document.visibilityState !== 'hidden') { resumeEntryInput(0); }
+      });
     }
   });
   window.addEventListener('pagehide', function () {
