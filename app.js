@@ -850,6 +850,8 @@
   var nativeFocusPointerStartX = 0;
   var nativeFocusPointerStartY = 0;
   var nativeFocusPointerMoved = false;
+  var nativeFocusTapPending = false;
+  var nativeFocusResizePending = false;
 
   function getControlScrollGroup(control) {
     if (!control || !control.form) { return null; }
@@ -929,13 +931,24 @@
     debugEvent('click.scroll-handler', { control: control && control.id });
     if (nativeFocusPointerMoved) {
       nativeFocusPointerMoved = false;
+      nativeFocusTapPending = false;
+      nativeFocusResizePending = false;
       pendingNativeFocusScrollControl = null;
       return;
     }
     if (!control) {
+      nativeFocusTapPending = false;
+      nativeFocusResizePending = false;
       pendingNativeFocusScrollControl = null;
       return;
     }
+    if (nativeFocusResizePending && nativeFocusTapPending) {
+      nativeFocusTapPending = false;
+      nativeFocusResizePending = false;
+      pendingNativeFocusScrollControl = null;
+      return;
+    }
+    nativeFocusTapPending = false;
     pendingNativeFocusScrollControl = control;
     scheduleNativeFocusScroll();
   });
@@ -947,11 +960,13 @@
     nativeFocusPointerStartX = event.clientX;
     nativeFocusPointerStartY = event.clientY;
     nativeFocusPointerMoved = false;
+    nativeFocusTapPending = !!control;
+    nativeFocusResizePending = false;
     if (nativeFocusScrollFrame !== null) {
       window.cancelAnimationFrame(nativeFocusScrollFrame);
       nativeFocusScrollFrame = null;
     }
-    pendingNativeFocusScrollControl = null;
+    pendingNativeFocusScrollControl = control;
   }, { passive: true });
 
   document.addEventListener('pointermove', function (event) {
@@ -960,6 +975,8 @@
     var movedY = event.clientY - nativeFocusPointerStartY;
     if (movedX * movedX + movedY * movedY < 64) { return; }
     nativeFocusPointerMoved = true;
+    nativeFocusTapPending = false;
+    nativeFocusResizePending = false;
     pendingNativeFocusScrollControl = null;
     if (nativeFocusScrollFrame !== null) {
       window.cancelAnimationFrame(nativeFocusScrollFrame);
@@ -979,6 +996,9 @@
     if (event.pointerId !== nativeFocusPointerId) { return; }
     nativeFocusPointerId = null;
     nativeFocusPointerMoved = false;
+    nativeFocusTapPending = false;
+    nativeFocusResizePending = false;
+    pendingNativeFocusScrollControl = null;
   }, { passive: true });
 
   var polishFloatUpdateFrame = null;
@@ -992,7 +1012,8 @@
       polishFloatUpdateFrame = null;
       var updateStart = debugStepStart();
       if (document.visibilityState !== 'hidden') { updatePolishFloat(); }
-      if (source === 'visualViewport.resize' && document.visibilityState !== 'hidden') {
+      if (source === 'visualViewport.resize' && nativeFocusTapPending && pendingNativeFocusScrollControl && document.visibilityState !== 'hidden') {
+        nativeFocusResizePending = true;
         scheduleNativeFocusScroll();
       }
       debugStepEnd('polishFloat.update.' + source, updateStart, { scrollY: window.scrollY });
