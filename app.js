@@ -125,12 +125,10 @@
   var debugRecords = [];
   var debugRecordIndex = 0;
   var debugSessionStartedAt = performance.now();
-  var resumeFocusTrace = null;
-  var resumeFocusTraceTimer = null;
-  var hiddenSince = null;
   var resumePending = false;
   var resumeTrackingReady = false;
   var lastResumeRecoveryAt = 0;
+  var resumeRecoveryActiveUntil = 0;
   var persistedSnapshot = cloneState(state);
   var skillListCollapsed = false;
   var hiddenSkillListCollapsed = false;
@@ -265,66 +263,20 @@
     renderDebugPanel();
   }
 
-  function resumeFocusControl(target) {
-    if (!target || !target.matches || !target.matches('input, select, textarea, button[type="submit"]')) { return null; }
-    return target.id || target.tagName.toLowerCase();
-  }
-
-  function recordResumeFocusEvent(label, event, target) {
-    if (!resumeFocusTrace) { return; }
-    var now = performance.now();
-    var control = resumeFocusControl(target);
-    var eventTimeStamp = event && Number(event.timeStamp);
-    var eventLag = Number.isFinite(eventTimeStamp) && Math.abs(eventTimeStamp - now) < 60000
-      ? now - eventTimeStamp
-      : null;
-    debugEvent('resumeFocus.' + label, {
-      control: control,
-      fromResumeMs: Number((now - resumeFocusTrace.startedAt).toFixed(1)),
-      eventTimeStamp: Number.isFinite(eventTimeStamp) ? eventTimeStamp : null,
-      eventLagMs: eventLag === null ? null : Number(eventLag.toFixed(1)),
-      visibility: document.visibilityState
-    });
-    if (label === 'focusin' && control) {
-      if (resumeFocusTraceTimer !== null) { window.clearTimeout(resumeFocusTraceTimer); }
-      resumeFocusTraceTimer = null;
-      resumeFocusTrace = null;
-    }
-  }
-
-  function startResumeFocusTrace() {
-    if (resumeFocusTraceTimer !== null) { window.clearTimeout(resumeFocusTraceTimer); }
-    var startedAt = performance.now();
-    resumeFocusTrace = { startedAt: startedAt };
-    debugEvent('resumeFocus.start', {
-      hiddenDurationMs: hiddenSince === null ? null : Number((startedAt - hiddenSince).toFixed(1)),
-      visibility: document.visibilityState
-    });
-    resumeFocusTraceTimer = window.setTimeout(function () {
-      if (!resumeFocusTrace) { return; }
-      recordResumeFocusEvent('timeout', null, null);
-      resumeFocusTrace = null;
-      resumeFocusTraceTimer = null;
-    }, 10000);
-  }
-
-  function cancelResumeFocusTrace() {
-    if (resumeFocusTraceTimer !== null) { window.clearTimeout(resumeFocusTraceTimer); }
-    resumeFocusTraceTimer = null;
-    resumeFocusTrace = null;
-  }
-
   function requestResumeRecovery(source) {
-    if (!resumeTrackingReady || !resumePending || document.visibilityState === 'hidden') { return; }
+    var focusReturn = source === 'window.focus';
+    if (!resumeTrackingReady || (!resumePending && !focusReturn) || document.visibilityState === 'hidden') { return; }
     var now = performance.now();
     if (now - lastResumeRecoveryAt < 300) { return; }
     lastResumeRecoveryAt = now;
     resumePending = false;
+    resumeRecoveryActiveUntil = now + 1200;
     debugEvent('resume.recovery', { source: source });
-    startResumeFocusTrace();
-    window.requestAnimationFrame(function () {
-      if (document.visibilityState !== 'hidden') { resumeEntryInput(0); }
-    });
+    window.setTimeout(function () {
+      window.requestAnimationFrame(function () {
+        if (document.visibilityState !== 'hidden') { resumeEntryInput(0); }
+      });
+    }, 80);
   }
 
   var resumeEntryFocusTimer = null;
@@ -335,11 +287,12 @@
       el.activity.focus({ preventScroll: true });
       nativeScrollCorrectionControl = el.activity;
       scheduleNativeScrollCorrection();
-      if (document.activeElement !== el.activity && attempt < 1 && document.visibilityState !== 'hidden') {
+      if (document.activeElement !== el.activity && attempt < 3 &&
+          document.visibilityState !== 'hidden' && performance.now() < resumeRecoveryActiveUntil) {
         resumeEntryFocusTimer = window.setTimeout(function () {
           resumeEntryFocusTimer = null;
           window.requestAnimationFrame(function () { resumeEntryInput(attempt + 1); });
-        }, 120);
+        }, 120 + attempt * 120);
       }
       debugEvent('resumeEntryInput', {
         focused: document.activeElement === el.activity,
@@ -1057,7 +1010,6 @@
   document.addEventListener('touchstart', function (event) {
     if (!isNarrowScreen()) { return; }
     var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
-    recordResumeFocusEvent('touchstart', event, control);
     debugEvent('touchstart', { control: control && control.id });
     cancelNativeScrollCorrection();
     if (control) {
@@ -1069,7 +1021,6 @@
   document.addEventListener('click', function (event) {
     if (!isNarrowScreen()) { return; }
     var control = event.target.closest && event.target.closest('input, textarea, button[type="submit"]');
-    recordResumeFocusEvent('click', event, control);
     debugEvent('click.scroll-handler', { control: control && control.id });
     if (!control) { return; }
     var group = getControlScrollGroup(control);
@@ -1080,20 +1031,14 @@
     }
   });
 
-  document.addEventListener('pointerdown', function (event) {
-    if (!isNarrowScreen()) { return; }
-    var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
-    recordResumeFocusEvent('pointerdown', event, control);
-  }, { passive: true });
-
-  document.addEventListener('focusin', function (event) {
-    if (!isNarrowScreen()) { return; }
-    recordResumeFocusEvent('focusin', event, event.target);
-  });
-
   document.addEventListener('focusout', function (event) {
     if (!event.target.matches('input, select, textarea')) { return; }
     debugEvent('focusout', { control: event.target.id });
+    if (event.target === el.activity && performance.now() < resumeRecoveryActiveUntil &&
+        resumeTrackingReady && document.visibilityState !== 'hidden') {
+      resumePending = true;
+      requestResumeRecovery('activity.focusout');
+    }
     cancelNativeScrollCorrection();
     nativeScrollCorrectionRequested = false;
     nativeScrollCorrectionControl = null;
@@ -1147,8 +1092,7 @@
     debugEvent('visibilitychange', { state: document.visibilityState });
     if (document.visibilityState === 'hidden') {
       resumePending = true;
-      hiddenSince = performance.now();
-      cancelResumeFocusTrace();
+      resumeRecoveryActiveUntil = 0;
       if (resumeEntryFocusTimer !== null) { window.clearTimeout(resumeEntryFocusTimer); }
       resumeEntryFocusTimer = null;
       cancelNativeScrollCorrection();
@@ -1173,7 +1117,7 @@
     requestResumeRecovery('window.focus');
   });
   window.addEventListener('pageshow', function (event) {
-    if (resumeTrackingReady) { resumePending = true; }
+    if (event.persisted) { resumePending = true; }
     requestResumeRecovery('pageshow');
   });
   window.addEventListener('pagehide', function () {
