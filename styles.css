@@ -229,6 +229,15 @@ input, select, textarea {
   width: 100%;
 }
 
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--cyan);
+  box-shadow: 0 0 8px rgba(79, 227, 255, 0.45);
+  outline: 2px solid rgba(79, 227, 255, 0.35);
+  outline-offset: 1px;
+}
+
 .current-field {
   position: relative;
   display: block;

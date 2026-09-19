@@ -317,7 +317,8 @@
     if (!isNarrowScreen() || state.ui.activeTab !== 'entry' || !el.activity || el.activity.disabled) { return; }
     try {
       el.activity.focus({ preventScroll: true });
-      el.activity.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      nativeScrollCorrectionControl = el.activity;
+      scheduleNativeScrollCorrection();
       if (document.activeElement !== el.activity && attempt < 1 && document.visibilityState !== 'hidden') {
         resumeEntryFocusTimer = window.setTimeout(function () {
           resumeEntryFocusTimer = null;
@@ -327,7 +328,7 @@
       debugEvent('resumeEntryInput', {
         focused: document.activeElement === el.activity,
         attempt: attempt || 0,
-        scrolled: true
+        specialScrollScheduled: true
       });
     } catch (error) {
       debugEvent('resumeEntryInput.failed', { message: String(error && error.message || error) });
