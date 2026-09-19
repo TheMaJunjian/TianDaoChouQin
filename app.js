@@ -311,6 +311,21 @@
     resumeFocusTrace = null;
   }
 
+  function resumeEntryInput() {
+    if (!isNarrowScreen() || state.ui.activeTab !== 'entry' || !el.activity || el.activity.disabled) { return; }
+    try {
+      el.activity.focus({ preventScroll: true });
+      el.activity.click();
+      el.activity.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      debugEvent('resumeEntryInput', {
+        focused: document.activeElement === el.activity,
+        scrolled: true
+      });
+    } catch (error) {
+      debugEvent('resumeEntryInput.failed', { message: String(error && error.message || error) });
+    }
+  }
+
   function syncDebugAccess() {
     var enabled = state.host.name === DEBUG_HOST_NAME;
     if (enabled && !debugEnabled) {
@@ -1121,6 +1136,7 @@
       renderTamperSignature();
     } else {
       startResumeFocusTrace();
+      window.setTimeout(resumeEntryInput, 0);
     }
   });
   window.addEventListener('pagehide', function () {
