@@ -909,6 +909,7 @@
     nativeFocusScrollFrame = window.requestAnimationFrame(function () {
       nativeFocusScrollFrame = null;
       var control = pendingNativeFocusScrollControl;
+      pendingNativeFocusScrollControl = null;
       if (document.visibilityState === 'hidden' || !control || !control.isConnected) { return; }
       var group = getControlScrollGroup(control);
       if (!group || !group.submit) { return; }
@@ -922,7 +923,10 @@
     var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
     recordResumeFocusEvent('click', event, control);
     debugEvent('click.scroll-handler', { control: control && control.id });
-    if (!control) { return; }
+    if (!control) {
+      pendingNativeFocusScrollControl = null;
+      return;
+    }
     pendingNativeFocusScrollControl = control;
     scheduleNativeFocusScroll();
   });
@@ -930,7 +934,11 @@
   document.addEventListener('pointerdown', function (event) {
     var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
     recordResumeFocusEvent('pointerdown', event, control);
-    if (control) { pendingNativeFocusScrollControl = control; }
+    if (nativeFocusScrollFrame !== null) {
+      window.cancelAnimationFrame(nativeFocusScrollFrame);
+      nativeFocusScrollFrame = null;
+    }
+    pendingNativeFocusScrollControl = null;
   }, { passive: true });
 
   var polishFloatUpdateFrame = null;
