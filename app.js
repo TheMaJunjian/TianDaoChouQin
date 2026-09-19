@@ -846,6 +846,10 @@
   var ENTRY_FLOAT_GAP = 18;
   var nativeFocusScrollFrame = null;
   var pendingNativeFocusScrollControl = null;
+  var nativeFocusPointerId = null;
+  var nativeFocusPointerStartX = 0;
+  var nativeFocusPointerStartY = 0;
+  var nativeFocusPointerMoved = false;
 
   function getControlScrollGroup(control) {
     if (!control || !control.form) { return null; }
@@ -923,6 +927,11 @@
     var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
     recordResumeFocusEvent('click', event, control);
     debugEvent('click.scroll-handler', { control: control && control.id });
+    if (nativeFocusPointerMoved) {
+      nativeFocusPointerMoved = false;
+      pendingNativeFocusScrollControl = null;
+      return;
+    }
     if (!control) {
       pendingNativeFocusScrollControl = null;
       return;
@@ -934,11 +943,42 @@
   document.addEventListener('pointerdown', function (event) {
     var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
     recordResumeFocusEvent('pointerdown', event, control);
+    nativeFocusPointerId = event.pointerId;
+    nativeFocusPointerStartX = event.clientX;
+    nativeFocusPointerStartY = event.clientY;
+    nativeFocusPointerMoved = false;
     if (nativeFocusScrollFrame !== null) {
       window.cancelAnimationFrame(nativeFocusScrollFrame);
       nativeFocusScrollFrame = null;
     }
     pendingNativeFocusScrollControl = null;
+  }, { passive: true });
+
+  document.addEventListener('pointermove', function (event) {
+    if (event.pointerId !== nativeFocusPointerId || nativeFocusPointerMoved) { return; }
+    var movedX = event.clientX - nativeFocusPointerStartX;
+    var movedY = event.clientY - nativeFocusPointerStartY;
+    if (movedX * movedX + movedY * movedY < 64) { return; }
+    nativeFocusPointerMoved = true;
+    pendingNativeFocusScrollControl = null;
+    if (nativeFocusScrollFrame !== null) {
+      window.cancelAnimationFrame(nativeFocusScrollFrame);
+      nativeFocusScrollFrame = null;
+    }
+  }, { passive: true });
+
+  document.addEventListener('pointerup', function (event) {
+    if (event.pointerId !== nativeFocusPointerId) { return; }
+    nativeFocusPointerId = null;
+    if (nativeFocusPointerMoved) {
+      window.setTimeout(function () { nativeFocusPointerMoved = false; }, 0);
+    }
+  }, { passive: true });
+
+  document.addEventListener('pointercancel', function (event) {
+    if (event.pointerId !== nativeFocusPointerId) { return; }
+    nativeFocusPointerId = null;
+    nativeFocusPointerMoved = false;
   }, { passive: true });
 
   var polishFloatUpdateFrame = null;
