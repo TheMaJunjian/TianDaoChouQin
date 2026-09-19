@@ -882,13 +882,25 @@
     if (!group || !group.submit) {
       control.style.removeProperty('scroll-margin-block-start');
       control.style.removeProperty('scroll-margin-block-end');
-      return;
+      return null;
     }
     var floatVisible = el.polishFloat && !el.polishFloat.classList.contains('hidden');
     var floatHeight = floatVisible ? el.polishFloat.getBoundingClientRect().height : 0;
     var margin = floatHeight + ENTRY_FLOAT_GAP;
-    group.submit.style.scrollMarginBlockStart = '0px';
-    group.submit.style.scrollMarginBlockEnd = margin + 'px';
+    var controlRect = control.getBoundingClientRect();
+    var groupStartRect = group.start.getBoundingClientRect();
+    var submitRect = group.submit.getBoundingClientRect();
+    var groupTop = Math.min(groupStartRect.top, controlRect.top);
+    var groupBottom = Math.max(submitRect.bottom, controlRect.bottom);
+    var viewport = window.visualViewport;
+    var viewportHeight = viewport ? viewport.height : window.innerHeight;
+    var anchor = groupBottom - groupTop > viewportHeight ? control : group.submit;
+    group.submit.style.removeProperty('scroll-margin-block-start');
+    group.submit.style.removeProperty('scroll-margin-block-end');
+    control.style.removeProperty('scroll-margin-block-start');
+    control.style.removeProperty('scroll-margin-block-end');
+    anchor.style.scrollMarginBlockEnd = margin + 'px';
+    return anchor;
   }
 
   function scheduleNativeFocusScroll() {
@@ -900,8 +912,9 @@
       if (document.visibilityState === 'hidden' || !control || !control.isConnected) { return; }
       var group = getControlScrollGroup(control);
       if (!group || !group.submit) { return; }
-      prepareControlNativeScroll(control);
-      group.submit.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
+      var anchor = prepareControlNativeScroll(control);
+      if (!anchor) { return; }
+      anchor.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
     });
   }
 
