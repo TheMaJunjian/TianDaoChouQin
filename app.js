@@ -128,6 +128,9 @@
   var resumeFocusTrace = null;
   var resumeFocusTraceTimer = null;
   var hiddenSince = null;
+  var resumePending = false;
+  var resumeTrackingReady = false;
+  var lastResumeRecoveryAt = 0;
   var persistedSnapshot = cloneState(state);
   var skillListCollapsed = false;
   var hiddenSkillListCollapsed = false;
@@ -309,6 +312,19 @@
     if (resumeFocusTraceTimer !== null) { window.clearTimeout(resumeFocusTraceTimer); }
     resumeFocusTraceTimer = null;
     resumeFocusTrace = null;
+  }
+
+  function requestResumeRecovery(source) {
+    if (!resumeTrackingReady || !resumePending || document.visibilityState === 'hidden') { return; }
+    var now = performance.now();
+    if (now - lastResumeRecoveryAt < 300) { return; }
+    lastResumeRecoveryAt = now;
+    resumePending = false;
+    debugEvent('resume.recovery', { source: source });
+    startResumeFocusTrace();
+    window.requestAnimationFrame(function () {
+      if (document.visibilityState !== 'hidden') { resumeEntryInput(0); }
+    });
   }
 
   var resumeEntryFocusTimer = null;
@@ -1130,6 +1146,7 @@
   document.addEventListener('visibilitychange', function () {
     debugEvent('visibilitychange', { state: document.visibilityState });
     if (document.visibilityState === 'hidden') {
+      resumePending = true;
       hiddenSince = performance.now();
       cancelResumeFocusTrace();
       if (resumeEntryFocusTimer !== null) { window.clearTimeout(resumeEntryFocusTimer); }
@@ -1146,17 +1163,26 @@
       }
       renderTamperSignature();
     } else {
-      startResumeFocusTrace();
-      window.requestAnimationFrame(function () {
-        if (document.visibilityState !== 'hidden') { resumeEntryInput(0); }
-      });
+      requestResumeRecovery('visibilitychange');
     }
   });
+  window.addEventListener('blur', function () {
+    if (resumeTrackingReady) { resumePending = true; }
+  });
+  window.addEventListener('focus', function () {
+    requestResumeRecovery('window.focus');
+  });
+  window.addEventListener('pageshow', function (event) {
+    if (resumeTrackingReady) { resumePending = true; }
+    requestResumeRecovery('pageshow');
+  });
   window.addEventListener('pagehide', function () {
+    resumePending = true;
     cancelNativeScrollCorrection();
     cancelPolishFloatUpdate();
   });
   window.addEventListener('freeze', function () {
+    resumePending = true;
     cancelNativeScrollCorrection();
     cancelPolishFloatUpdate();
   });
@@ -4126,6 +4152,7 @@
     }
     debugStepEnd('init.total', initStart, { activeTab: state.ui.activeTab });
     renderDebugPanel();
+    resumeTrackingReady = true;
   }
 
   init();
