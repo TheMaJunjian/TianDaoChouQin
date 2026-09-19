@@ -885,7 +885,6 @@
       control.style.removeProperty('scroll-margin-block-end');
       return;
     }
-    updatePolishFloat();
     var floatVisible = el.polishFloat && !el.polishFloat.classList.contains('hidden');
     var floatHeight = floatVisible ? el.polishFloat.getBoundingClientRect().height : 0;
     var margin = floatHeight + FLOAT_VIEWPORT_GAP + ENTRY_FLOAT_GAP;
@@ -906,13 +905,13 @@
   }
 
   function scheduleNativeFocusScroll() {
-    var control = pendingNativeFocusScrollControl;
-    pendingNativeFocusScrollControl = null;
-    if (!control || !control.matches('input, select, textarea, button[type="submit"]')) { return; }
+    if (!pendingNativeFocusScrollControl || !pendingNativeFocusScrollControl.matches('input, select, textarea, button[type="submit"]')) { return; }
     if (nativeFocusScrollFrame !== null) { window.cancelAnimationFrame(nativeFocusScrollFrame); }
     nativeFocusScrollFrame = window.requestAnimationFrame(function () {
       nativeFocusScrollFrame = null;
-      if (document.visibilityState === 'hidden' || !control.isConnected) { return; }
+      var control = pendingNativeFocusScrollControl;
+      pendingNativeFocusScrollControl = null;
+      if (document.visibilityState === 'hidden' || !control || !control.isConnected) { return; }
       prepareControlNativeScroll(control);
       control.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
     });
@@ -924,7 +923,6 @@
     debugEvent('click.scroll-handler', { control: control && control.id });
     if (!control) { return; }
     pendingNativeFocusScrollControl = control;
-    scheduleNativeFocusScroll();
   });
 
   document.addEventListener('pointerdown', function (event) {
@@ -944,6 +942,9 @@
       polishFloatUpdateFrame = null;
       var updateStart = debugStepStart();
       if (document.visibilityState !== 'hidden') { updatePolishFloat(); }
+      if (source === 'visualViewport.resize' && document.visibilityState !== 'hidden') {
+        scheduleNativeFocusScroll();
+      }
       debugStepEnd('polishFloat.update.' + source, updateStart, { scrollY: window.scrollY });
     });
     debugStepEnd('polishFloat.schedule.' + source, debugStart);
@@ -959,7 +960,6 @@
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
       schedulePolishFloatUpdate('visualViewport.resize');
-      scheduleNativeFocusScroll();
     });
     window.visualViewport.addEventListener('scroll', function () {
       schedulePolishFloatUpdate('visualViewport.scroll');
