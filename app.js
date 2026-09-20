@@ -852,6 +852,7 @@
   var nativeFocusResizeFrame = null;
   var nativeFocusResizeCompletedControl = null;
   var nativeFocusClickSeen = false;
+  var nativeFocusCalibrationControl = null;
   var nativeFocusStableTimer = null;
 
   function debugNativeFocusStable(anchor) {
@@ -937,14 +938,26 @@
   }
 
   function scrollNativeFocusControl() {
-    if (!pendingNativeFocusScrollControl || !pendingNativeFocusScrollControl.matches('input, select, textarea, button[type="submit"]')) { return; }
-    var control = pendingNativeFocusScrollControl;
+    var control = pendingNativeFocusScrollControl || nativeFocusCalibrationControl;
+    if (!control || !control.matches('input, select, textarea, button[type="submit"]')) { return; }
+    var isCalibration = !pendingNativeFocusScrollControl;
     pendingNativeFocusScrollControl = null;
     if (document.visibilityState === 'hidden' || !control || !control.isConnected) { return; }
     var group = getControlScrollGroup(control);
     if (!group || !group.submit) { return; }
     var anchor = prepareControlNativeScroll(control);
     if (!anchor) { return; }
+    if (isCalibration) {
+      var viewport = window.visualViewport;
+      var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
+      var anchorRect = anchor.getBoundingClientRect();
+      var margin = parseFloat(getComputedStyle(anchor).scrollMarginBlockEnd) || 0;
+      if (anchorRect.bottom <= viewportBottom - margin + 3 && anchorRect.top >= (viewport ? viewport.offsetTop : 0) - 3) {
+        debugNativeFocusStable(anchor);
+        nativeFocusCalibrationControl = null;
+        return;
+      }
+    }
     debugEvent('nativeFocus.scroll', {
       control: control.id,
       anchor: anchor.id,
@@ -953,11 +966,12 @@
     });
     anchor.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
     debugNativeFocusStable(anchor);
+    nativeFocusCalibrationControl = control;
     nativeFocusResizeCompletedControl = nativeFocusClickSeen ? null : control;
   }
 
   function scheduleNativeFocusResizeScroll() {
-    if (!pendingNativeFocusScrollControl || nativeFocusResizeFrame !== null) { return; }
+    if ((!pendingNativeFocusScrollControl && !nativeFocusCalibrationControl) || nativeFocusResizeFrame !== null) { return; }
     nativeFocusResizeFrame = window.requestAnimationFrame(function () {
       nativeFocusResizeFrame = null;
       scrollNativeFocusControl();
@@ -970,10 +984,12 @@
     if (nativeFocusPointerMoved) {
       nativeFocusPointerMoved = false;
       pendingNativeFocusScrollControl = null;
+      nativeFocusCalibrationControl = null;
       return;
     }
     if (!control) {
       pendingNativeFocusScrollControl = null;
+      nativeFocusCalibrationControl = null;
       return;
     }
     nativeFocusClickSeen = true;
@@ -982,7 +998,13 @@
       nativeFocusResizeCompletedControl = null;
       return;
     }
+    if (nativeFocusResizeFrame !== null) {
+      window.cancelAnimationFrame(nativeFocusResizeFrame);
+      nativeFocusResizeFrame = null;
+    }
+    nativeFocusCalibrationControl = null;
     pendingNativeFocusScrollControl = control;
+    scheduleNativeFocusResizeScroll();
   });
 
   document.addEventListener('pointerdown', function (event) {
@@ -994,6 +1016,7 @@
     nativeFocusPointerMoved = false;
     nativeFocusClickSeen = false;
     nativeFocusResizeCompletedControl = null;
+    nativeFocusCalibrationControl = null;
     pendingNativeFocusScrollControl = control;
     debugEvent('nativeFocus.pointerdown', {
       control: control && control.id,
@@ -1011,6 +1034,7 @@
     nativeFocusPointerMoved = true;
     pendingNativeFocusScrollControl = null;
     nativeFocusResizeCompletedControl = null;
+    nativeFocusCalibrationControl = null;
     debugEvent('nativeFocus.pointermove.cancel', { scrollY: Math.round(window.scrollY) });
     if (nativeFocusResizeFrame !== null) {
       window.cancelAnimationFrame(nativeFocusResizeFrame);
@@ -1030,6 +1054,7 @@
     pendingNativeFocusScrollControl = null;
     nativeFocusResizeCompletedControl = null;
     nativeFocusClickSeen = false;
+    nativeFocusCalibrationControl = null;
     if (nativeFocusResizeFrame !== null) {
       window.cancelAnimationFrame(nativeFocusResizeFrame);
       nativeFocusResizeFrame = null;
