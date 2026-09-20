@@ -958,20 +958,6 @@
         return;
       }
     }
-    var viewport = window.visualViewport;
-    var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
-    var submitRect = group.submit.getBoundingClientRect();
-    var targetPosition = viewportBottom - (parseFloat(getComputedStyle(anchor).scrollMarginBlockEnd) || 0);
-    if (submitRect.bottom <= targetPosition) {
-      debugEvent('nativeFocus.skipAboveTarget', {
-        control: control.id,
-        submit: group.submit.id,
-        submitBottom: Math.round(submitRect.bottom),
-        targetPosition: Math.round(targetPosition)
-      });
-      nativeFocusCalibrationControl = null;
-      return;
-    }
     debugEvent('nativeFocus.scroll', {
       control: control.id,
       anchor: anchor.id,
