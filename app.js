@@ -852,6 +852,25 @@
   var nativeFocusResizeFrame = null;
   var nativeFocusResizeCompletedControl = null;
   var nativeFocusClickSeen = false;
+  var nativeFocusStableTimer = null;
+
+  function debugNativeFocusStable(anchor) {
+    if (nativeFocusStableTimer !== null) { window.clearTimeout(nativeFocusStableTimer); }
+    nativeFocusStableTimer = window.setTimeout(function () {
+      nativeFocusStableTimer = null;
+      if (!anchor || !anchor.isConnected) { return; }
+      var rect = anchor.getBoundingClientRect();
+      var viewport = window.visualViewport;
+      var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
+      debugEvent('nativeFocus.stable', {
+        anchor: anchor.id,
+        scrollY: Math.round(window.scrollY),
+        anchorBottom: Math.round(rect.bottom),
+        viewportBottom: Math.round(viewportBottom),
+        gap: Math.round(viewportBottom - rect.bottom)
+      });
+    }, 120);
+  }
 
   function getControlScrollGroup(control) {
     if (!control || !control.form) { return null; }
@@ -906,16 +925,13 @@
     control.style.removeProperty('scroll-margin-block-start');
     control.style.removeProperty('scroll-margin-block-end');
     anchor.style.scrollMarginBlockEnd = margin + 'px';
-    debugEvent('nativeFocus.prepare', {
+    debugEvent('nativeFocus.target', {
       control: control.id,
       anchor: anchor.id,
-      scrollY: Math.round(window.scrollY),
       viewportHeight: Math.round(viewportHeight),
       viewportOffsetTop: viewport ? Math.round(viewport.offsetTop) : 0,
       groupHeight: Math.round(groupBottom - groupTop),
-      margin: Math.round(margin),
-      controlTop: Math.round(controlRect.top),
-      submitBottom: Math.round(submitRect.bottom)
+      margin: Math.round(margin)
     });
     return anchor;
   }
@@ -929,21 +945,14 @@
     if (!group || !group.submit) { return; }
     var anchor = prepareControlNativeScroll(control);
     if (!anchor) { return; }
-    debugEvent('nativeFocus.scroll.before', {
+    debugEvent('nativeFocus.scroll', {
       control: control.id,
       anchor: anchor.id,
       scrollY: Math.round(window.scrollY),
-      anchorTop: Math.round(anchor.getBoundingClientRect().top),
-      anchorBottom: Math.round(anchor.getBoundingClientRect().bottom)
+      anchorBottomBefore: Math.round(anchor.getBoundingClientRect().bottom)
     });
     anchor.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
-    debugEvent('nativeFocus.scroll.after', {
-      control: control.id,
-      anchor: anchor.id,
-      scrollY: Math.round(window.scrollY),
-      anchorTop: Math.round(anchor.getBoundingClientRect().top),
-      anchorBottom: Math.round(anchor.getBoundingClientRect().bottom)
-    });
+    debugNativeFocusStable(anchor);
     nativeFocusResizeCompletedControl = nativeFocusClickSeen ? null : control;
   }
 
@@ -958,7 +967,6 @@
   document.addEventListener('click', function (event) {
     var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
     recordResumeFocusEvent('click', event, control);
-    debugEvent('click.scroll-handler', { control: control && control.id });
     if (nativeFocusPointerMoved) {
       nativeFocusPointerMoved = false;
       pendingNativeFocusScrollControl = null;
@@ -969,12 +977,7 @@
       return;
     }
     nativeFocusClickSeen = true;
-    debugEvent('nativeFocus.click', {
-      control: control.id,
-      scrollY: Math.round(window.scrollY),
-      viewportHeight: window.visualViewport && Math.round(window.visualViewport.height),
-      pending: !!pendingNativeFocusScrollControl
-    });
+    debugEvent('nativeFocus.click', { control: control.id, scrollY: Math.round(window.scrollY) });
     if (nativeFocusResizeCompletedControl === control) {
       nativeFocusResizeCompletedControl = null;
       return;
@@ -1008,11 +1011,7 @@
     nativeFocusPointerMoved = true;
     pendingNativeFocusScrollControl = null;
     nativeFocusResizeCompletedControl = null;
-    debugEvent('nativeFocus.pointermove.cancel', {
-      scrollY: window.scrollY,
-      movedX: movedX,
-      movedY: movedY
-    });
+    debugEvent('nativeFocus.pointermove.cancel', { scrollY: Math.round(window.scrollY) });
     if (nativeFocusResizeFrame !== null) {
       window.cancelAnimationFrame(nativeFocusResizeFrame);
       nativeFocusResizeFrame = null;
@@ -1039,18 +1038,13 @@
 
   var polishFloatUpdateFrame = null;
   function schedulePolishFloatUpdate(source) {
-    var debugStart = debugStepStart();
     if (document.visibilityState === 'hidden' || polishFloatUpdateFrame !== null) {
-      debugEvent('polishFloat.schedule.skip', { source: source, hidden: document.visibilityState === 'hidden', pending: polishFloatUpdateFrame !== null });
       return;
     }
     polishFloatUpdateFrame = window.requestAnimationFrame(function () {
       polishFloatUpdateFrame = null;
-      var updateStart = debugStepStart();
       if (document.visibilityState !== 'hidden') { updatePolishFloat(); }
-      debugStepEnd('polishFloat.update.' + source, updateStart, { scrollY: window.scrollY });
     });
-    debugStepEnd('polishFloat.schedule.' + source, debugStart);
   }
 
   function cancelPolishFloatUpdate() {
