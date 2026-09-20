@@ -850,9 +850,11 @@
   var nativeFocusPointerStartY = 0;
   var nativeFocusPointerMoved = false;
   var nativeFocusResizeFrame = null;
-  var nativeFocusResizeCompletedControl = null;
-  var nativeFocusClickSeen = false;
   var nativeFocusCorrectionControl = null;
+  var nativeFocusResizePending = false;
+  var nativeFocusNativeScrollCompleted = false;
+  var nativeFocusScrollEndSupported = 'onscrollend' in document
+    || !!(window.visualViewport && 'onscrollend' in window.visualViewport);
 
   function getControlScrollGroup(control) {
     if (!control || !control.form) { return null; }
@@ -899,7 +901,6 @@
     var submitRect = group.submit.getBoundingClientRect();
     var groupTop = Math.min(groupStartRect.top, controlRect.top);
     var groupBottom = Math.max(submitRect.bottom, controlRect.bottom);
-    var viewport = window.visualViewport;
     var viewportHeight = viewport ? viewport.height : window.innerHeight;
     var anchor = groupBottom - groupTop > viewportHeight ? control : group.submit;
     group.submit.style.removeProperty('scroll-margin-block-start');
@@ -920,18 +921,29 @@
     var anchor = prepareControlNativeScroll(control);
     if (!anchor) { return; }
     anchor.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
-    nativeFocusResizeCompletedControl = nativeFocusClickSeen ? null : control;
+    nativeFocusResizePending = false;
+    nativeFocusCorrectionControl = null;
+    nativeFocusNativeScrollCompleted = false;
   }
 
   function scheduleNativeFocusResizeScroll() {
     if (!pendingNativeFocusScrollControl && nativeFocusCorrectionControl) {
       pendingNativeFocusScrollControl = nativeFocusCorrectionControl;
     }
-    if (!pendingNativeFocusScrollControl || nativeFocusResizeFrame !== null) { return; }
+    if (!pendingNativeFocusScrollControl || !nativeFocusCorrectionControl) { return; }
+    nativeFocusResizePending = true;
+    if (nativeFocusScrollEndSupported && !nativeFocusNativeScrollCompleted) { return; }
+    if (nativeFocusResizeFrame !== null) { return; }
     nativeFocusResizeFrame = window.requestAnimationFrame(function () {
       nativeFocusResizeFrame = null;
       scrollNativeFocusControl();
     });
+  }
+
+  function handleNativeFocusScrollEnd() {
+    if (!nativeFocusCorrectionControl) { return; }
+    nativeFocusNativeScrollCompleted = true;
+    if (nativeFocusResizePending) { scheduleNativeFocusResizeScroll(); }
   }
 
   document.addEventListener('click', function (event) {
@@ -946,17 +958,12 @@
     if (!control) {
       pendingNativeFocusScrollControl = null;
       nativeFocusCorrectionControl = null;
-      nativeFocusResizeCompletedControl = null;
+      nativeFocusResizePending = false;
+      nativeFocusNativeScrollCompleted = false;
       return;
     }
-    nativeFocusClickSeen = true;
     nativeFocusCorrectionControl = control;
-    if (nativeFocusResizeCompletedControl === control) {
-      nativeFocusResizeCompletedControl = null;
-      return;
-    }
     pendingNativeFocusScrollControl = control;
-    scheduleNativeFocusResizeScroll();
   });
 
   document.addEventListener('pointerdown', function (event) {
@@ -966,10 +973,14 @@
     nativeFocusPointerStartX = event.clientX;
     nativeFocusPointerStartY = event.clientY;
     nativeFocusPointerMoved = false;
-    nativeFocusClickSeen = false;
-    nativeFocusResizeCompletedControl = null;
+    nativeFocusResizePending = false;
+    nativeFocusNativeScrollCompleted = false;
     nativeFocusCorrectionControl = control;
     pendingNativeFocusScrollControl = control;
+    if (nativeFocusResizeFrame !== null) {
+      window.cancelAnimationFrame(nativeFocusResizeFrame);
+      nativeFocusResizeFrame = null;
+    }
     if (control) { prepareControlNativeScroll(control); }
   }, { passive: true });
 
@@ -981,7 +992,8 @@
     nativeFocusPointerMoved = true;
     pendingNativeFocusScrollControl = null;
     nativeFocusCorrectionControl = null;
-    nativeFocusResizeCompletedControl = null;
+    nativeFocusResizePending = false;
+    nativeFocusNativeScrollCompleted = false;
     if (nativeFocusResizeFrame !== null) {
       window.cancelAnimationFrame(nativeFocusResizeFrame);
       nativeFocusResizeFrame = null;
@@ -999,8 +1011,8 @@
     nativeFocusPointerMoved = false;
     pendingNativeFocusScrollControl = null;
     nativeFocusCorrectionControl = null;
-    nativeFocusResizeCompletedControl = null;
-    nativeFocusClickSeen = false;
+    nativeFocusResizePending = false;
+    nativeFocusNativeScrollCompleted = false;
     if (nativeFocusResizeFrame !== null) {
       window.cancelAnimationFrame(nativeFocusResizeFrame);
       nativeFocusResizeFrame = null;
@@ -1035,10 +1047,12 @@
       schedulePolishFloatUpdate('visualViewport.resize');
       scheduleNativeFocusResizeScroll();
     });
+    window.visualViewport.addEventListener('scrollend', handleNativeFocusScrollEnd);
     window.visualViewport.addEventListener('scroll', function () {
       schedulePolishFloatUpdate('visualViewport.scroll');
     });
   }
+  document.addEventListener('scrollend', handleNativeFocusScrollEnd);
 
   function cancelDeferredSavesBeforeBackground() {
     [pageScrollSaveTimer, saveTimer, draftSaveTimer, sigTimer].forEach(function (timer) {
