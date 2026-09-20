@@ -844,14 +844,14 @@
 
   /* 让原生焦点滚动把整组控件放进键盘弹出后的视觉视口。 */
   var ENTRY_FLOAT_GAP = 18;
-  var nativeFocusScrollFrame = null;
   var pendingNativeFocusScrollControl = null;
   var nativeFocusPointerId = null;
   var nativeFocusPointerStartX = 0;
   var nativeFocusPointerStartY = 0;
   var nativeFocusPointerMoved = false;
-  var nativeFocusTapPending = false;
-  var nativeFocusResizePending = false;
+  var nativeFocusResizeFrame = null;
+  var nativeFocusResizeCompletedControl = null;
+  var nativeFocusClickSeen = false;
 
   function getControlScrollGroup(control) {
     if (!control || !control.form) { return null; }
@@ -909,19 +909,24 @@
     return anchor;
   }
 
-  function scheduleNativeFocusScroll() {
+  function scrollNativeFocusControl() {
     if (!pendingNativeFocusScrollControl || !pendingNativeFocusScrollControl.matches('input, select, textarea, button[type="submit"]')) { return; }
-    if (nativeFocusScrollFrame !== null) { window.cancelAnimationFrame(nativeFocusScrollFrame); }
-    nativeFocusScrollFrame = window.requestAnimationFrame(function () {
-      nativeFocusScrollFrame = null;
-      var control = pendingNativeFocusScrollControl;
-      pendingNativeFocusScrollControl = null;
-      if (document.visibilityState === 'hidden' || !control || !control.isConnected) { return; }
-      var group = getControlScrollGroup(control);
-      if (!group || !group.submit) { return; }
-      var anchor = prepareControlNativeScroll(control);
-      if (!anchor) { return; }
-      anchor.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
+    var control = pendingNativeFocusScrollControl;
+    pendingNativeFocusScrollControl = null;
+    if (document.visibilityState === 'hidden' || !control || !control.isConnected) { return; }
+    var group = getControlScrollGroup(control);
+    if (!group || !group.submit) { return; }
+    var anchor = prepareControlNativeScroll(control);
+    if (!anchor) { return; }
+    anchor.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
+    nativeFocusResizeCompletedControl = nativeFocusClickSeen ? null : control;
+  }
+
+  function scheduleNativeFocusResizeScroll() {
+    if (!pendingNativeFocusScrollControl || nativeFocusResizeFrame !== null) { return; }
+    nativeFocusResizeFrame = window.requestAnimationFrame(function () {
+      nativeFocusResizeFrame = null;
+      scrollNativeFocusControl();
     });
   }
 
@@ -931,26 +936,19 @@
     debugEvent('click.scroll-handler', { control: control && control.id });
     if (nativeFocusPointerMoved) {
       nativeFocusPointerMoved = false;
-      nativeFocusTapPending = false;
-      nativeFocusResizePending = false;
       pendingNativeFocusScrollControl = null;
       return;
     }
     if (!control) {
-      nativeFocusTapPending = false;
-      nativeFocusResizePending = false;
       pendingNativeFocusScrollControl = null;
       return;
     }
-    if (nativeFocusResizePending && nativeFocusTapPending) {
-      nativeFocusTapPending = false;
-      nativeFocusResizePending = false;
-      pendingNativeFocusScrollControl = null;
+    nativeFocusClickSeen = true;
+    if (nativeFocusResizeCompletedControl === control) {
+      nativeFocusResizeCompletedControl = null;
       return;
     }
-    nativeFocusTapPending = false;
     pendingNativeFocusScrollControl = control;
-    scheduleNativeFocusScroll();
   });
 
   document.addEventListener('pointerdown', function (event) {
@@ -960,13 +958,10 @@
     nativeFocusPointerStartX = event.clientX;
     nativeFocusPointerStartY = event.clientY;
     nativeFocusPointerMoved = false;
-    nativeFocusTapPending = !!control;
-    nativeFocusResizePending = false;
-    if (nativeFocusScrollFrame !== null) {
-      window.cancelAnimationFrame(nativeFocusScrollFrame);
-      nativeFocusScrollFrame = null;
-    }
+    nativeFocusClickSeen = false;
+    nativeFocusResizeCompletedControl = null;
     pendingNativeFocusScrollControl = control;
+    if (control) { prepareControlNativeScroll(control); }
   }, { passive: true });
 
   document.addEventListener('pointermove', function (event) {
@@ -975,30 +970,30 @@
     var movedY = event.clientY - nativeFocusPointerStartY;
     if (movedX * movedX + movedY * movedY < 64) { return; }
     nativeFocusPointerMoved = true;
-    nativeFocusTapPending = false;
-    nativeFocusResizePending = false;
     pendingNativeFocusScrollControl = null;
-    if (nativeFocusScrollFrame !== null) {
-      window.cancelAnimationFrame(nativeFocusScrollFrame);
-      nativeFocusScrollFrame = null;
+    nativeFocusResizeCompletedControl = null;
+    if (nativeFocusResizeFrame !== null) {
+      window.cancelAnimationFrame(nativeFocusResizeFrame);
+      nativeFocusResizeFrame = null;
     }
   }, { passive: true });
 
   document.addEventListener('pointerup', function (event) {
     if (event.pointerId !== nativeFocusPointerId) { return; }
     nativeFocusPointerId = null;
-    if (nativeFocusPointerMoved) {
-      window.setTimeout(function () { nativeFocusPointerMoved = false; }, 0);
-    }
   }, { passive: true });
 
   document.addEventListener('pointercancel', function (event) {
     if (event.pointerId !== nativeFocusPointerId) { return; }
     nativeFocusPointerId = null;
     nativeFocusPointerMoved = false;
-    nativeFocusTapPending = false;
-    nativeFocusResizePending = false;
     pendingNativeFocusScrollControl = null;
+    nativeFocusResizeCompletedControl = null;
+    nativeFocusClickSeen = false;
+    if (nativeFocusResizeFrame !== null) {
+      window.cancelAnimationFrame(nativeFocusResizeFrame);
+      nativeFocusResizeFrame = null;
+    }
   }, { passive: true });
 
   var polishFloatUpdateFrame = null;
@@ -1012,10 +1007,6 @@
       polishFloatUpdateFrame = null;
       var updateStart = debugStepStart();
       if (document.visibilityState !== 'hidden') { updatePolishFloat(); }
-      if (source === 'visualViewport.resize' && nativeFocusTapPending && pendingNativeFocusScrollControl && document.visibilityState !== 'hidden') {
-        nativeFocusResizePending = true;
-        scheduleNativeFocusScroll();
-      }
       debugStepEnd('polishFloat.update.' + source, updateStart, { scrollY: window.scrollY });
     });
     debugStepEnd('polishFloat.schedule.' + source, debugStart);
@@ -1031,6 +1022,7 @@
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
       schedulePolishFloatUpdate('visualViewport.resize');
+      scheduleNativeFocusResizeScroll();
     });
     window.visualViewport.addEventListener('scroll', function () {
       schedulePolishFloatUpdate('visualViewport.scroll');
