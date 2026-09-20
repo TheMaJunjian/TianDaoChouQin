@@ -906,6 +906,17 @@
     control.style.removeProperty('scroll-margin-block-start');
     control.style.removeProperty('scroll-margin-block-end');
     anchor.style.scrollMarginBlockEnd = margin + 'px';
+    debugEvent('nativeFocus.prepare', {
+      control: control.id,
+      anchor: anchor.id,
+      scrollY: Math.round(window.scrollY),
+      viewportHeight: Math.round(viewportHeight),
+      viewportOffsetTop: viewport ? Math.round(viewport.offsetTop) : 0,
+      groupHeight: Math.round(groupBottom - groupTop),
+      margin: Math.round(margin),
+      controlTop: Math.round(controlRect.top),
+      submitBottom: Math.round(submitRect.bottom)
+    });
     return anchor;
   }
 
@@ -918,7 +929,21 @@
     if (!group || !group.submit) { return; }
     var anchor = prepareControlNativeScroll(control);
     if (!anchor) { return; }
+    debugEvent('nativeFocus.scroll.before', {
+      control: control.id,
+      anchor: anchor.id,
+      scrollY: Math.round(window.scrollY),
+      anchorTop: Math.round(anchor.getBoundingClientRect().top),
+      anchorBottom: Math.round(anchor.getBoundingClientRect().bottom)
+    });
     anchor.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
+    debugEvent('nativeFocus.scroll.after', {
+      control: control.id,
+      anchor: anchor.id,
+      scrollY: Math.round(window.scrollY),
+      anchorTop: Math.round(anchor.getBoundingClientRect().top),
+      anchorBottom: Math.round(anchor.getBoundingClientRect().bottom)
+    });
     nativeFocusResizeCompletedControl = nativeFocusClickSeen ? null : control;
   }
 
@@ -944,6 +969,12 @@
       return;
     }
     nativeFocusClickSeen = true;
+    debugEvent('nativeFocus.click', {
+      control: control.id,
+      scrollY: Math.round(window.scrollY),
+      viewportHeight: window.visualViewport && Math.round(window.visualViewport.height),
+      pending: !!pendingNativeFocusScrollControl
+    });
     if (nativeFocusResizeCompletedControl === control) {
       nativeFocusResizeCompletedControl = null;
       return;
@@ -961,6 +992,11 @@
     nativeFocusClickSeen = false;
     nativeFocusResizeCompletedControl = null;
     pendingNativeFocusScrollControl = control;
+    debugEvent('nativeFocus.pointerdown', {
+      control: control && control.id,
+      scrollY: Math.round(window.scrollY),
+      viewportHeight: window.visualViewport && Math.round(window.visualViewport.height)
+    });
     if (control) { prepareControlNativeScroll(control); }
   }, { passive: true });
 
@@ -972,6 +1008,11 @@
     nativeFocusPointerMoved = true;
     pendingNativeFocusScrollControl = null;
     nativeFocusResizeCompletedControl = null;
+    debugEvent('nativeFocus.pointermove.cancel', {
+      scrollY: window.scrollY,
+      movedX: movedX,
+      movedY: movedY
+    });
     if (nativeFocusResizeFrame !== null) {
       window.cancelAnimationFrame(nativeFocusResizeFrame);
       nativeFocusResizeFrame = null;
@@ -1021,10 +1062,22 @@
 
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
+      debugEvent('nativeFocus.visualViewport.resize', {
+        scrollY: Math.round(window.scrollY),
+        pending: pendingNativeFocusScrollControl && pendingNativeFocusScrollControl.id,
+        viewportHeight: Math.round(window.visualViewport.height),
+        viewportOffsetTop: Math.round(window.visualViewport.offsetTop)
+      });
       schedulePolishFloatUpdate('visualViewport.resize');
       scheduleNativeFocusResizeScroll();
     });
     window.visualViewport.addEventListener('scroll', function () {
+      debugEvent('nativeFocus.visualViewport.scroll', {
+        scrollY: Math.round(window.scrollY),
+        pending: pendingNativeFocusScrollControl && pendingNativeFocusScrollControl.id,
+        viewportOffsetTop: Math.round(window.visualViewport.offsetTop),
+        viewportPageTop: Math.round(window.visualViewport.pageTop)
+      });
       schedulePolishFloatUpdate('visualViewport.scroll');
     });
   }
