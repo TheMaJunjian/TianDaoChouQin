@@ -852,6 +852,7 @@
   var nativeFocusResizeFrame = null;
   var nativeFocusResizeCompletedControl = null;
   var nativeFocusClickSeen = false;
+  var nativeFocusCorrectionControl = null;
 
   function getControlScrollGroup(control) {
     if (!control || !control.form) { return null; }
@@ -923,6 +924,9 @@
   }
 
   function scheduleNativeFocusResizeScroll() {
+    if (!pendingNativeFocusScrollControl && nativeFocusCorrectionControl) {
+      pendingNativeFocusScrollControl = nativeFocusCorrectionControl;
+    }
     if (!pendingNativeFocusScrollControl || nativeFocusResizeFrame !== null) { return; }
     nativeFocusResizeFrame = window.requestAnimationFrame(function () {
       nativeFocusResizeFrame = null;
@@ -941,14 +945,18 @@
     }
     if (!control) {
       pendingNativeFocusScrollControl = null;
+      nativeFocusCorrectionControl = null;
+      nativeFocusResizeCompletedControl = null;
       return;
     }
     nativeFocusClickSeen = true;
+    nativeFocusCorrectionControl = control;
     if (nativeFocusResizeCompletedControl === control) {
       nativeFocusResizeCompletedControl = null;
       return;
     }
     pendingNativeFocusScrollControl = control;
+    scheduleNativeFocusResizeScroll();
   });
 
   document.addEventListener('pointerdown', function (event) {
@@ -960,6 +968,7 @@
     nativeFocusPointerMoved = false;
     nativeFocusClickSeen = false;
     nativeFocusResizeCompletedControl = null;
+    nativeFocusCorrectionControl = control;
     pendingNativeFocusScrollControl = control;
     if (control) { prepareControlNativeScroll(control); }
   }, { passive: true });
@@ -971,6 +980,7 @@
     if (movedX * movedX + movedY * movedY < 64) { return; }
     nativeFocusPointerMoved = true;
     pendingNativeFocusScrollControl = null;
+    nativeFocusCorrectionControl = null;
     nativeFocusResizeCompletedControl = null;
     if (nativeFocusResizeFrame !== null) {
       window.cancelAnimationFrame(nativeFocusResizeFrame);
@@ -988,6 +998,7 @@
     nativeFocusPointerId = null;
     nativeFocusPointerMoved = false;
     pendingNativeFocusScrollControl = null;
+    nativeFocusCorrectionControl = null;
     nativeFocusResizeCompletedControl = null;
     nativeFocusClickSeen = false;
     if (nativeFocusResizeFrame !== null) {
@@ -3348,6 +3359,7 @@
   window.addEventListener('resize', function () {
     var debugStart = debugStepStart();
     updatePolishFloat();
+    scheduleNativeFocusResizeScroll();
     debugStepEnd('window.resize.updatePolishFloat', debugStart, { width: window.innerWidth, height: window.innerHeight });
   });
 
