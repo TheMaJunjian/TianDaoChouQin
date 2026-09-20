@@ -952,7 +952,11 @@
       var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
       var anchorRect = anchor.getBoundingClientRect();
       var margin = parseFloat(getComputedStyle(anchor).scrollMarginBlockEnd) || 0;
-      if (anchorRect.bottom <= viewportBottom - margin + 3 && anchorRect.top >= (viewport ? viewport.offsetTop : 0) - 3) {
+      var submitRect = group.submit.getBoundingClientRect();
+      var targetPosition = viewportBottom - margin;
+      if (anchorRect.bottom <= targetPosition + 3 &&
+          anchorRect.top >= (viewport ? viewport.offsetTop : 0) - 3 &&
+          submitRect.bottom <= targetPosition + 3) {
         debugNativeFocusStable(anchor);
         nativeFocusCalibrationControl = null;
         return;
