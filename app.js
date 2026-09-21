@@ -854,6 +854,7 @@
   var nativeFocusClickSeen = false;
   var nativeFocusCalibrationControl = null;
   var nativeFocusStableTimer = null;
+  var nativeFocusFallbackTimer = null;
 
   function debugNativeFocusStable(anchor) {
     if (nativeFocusStableTimer !== null) { window.clearTimeout(nativeFocusStableTimer); }
@@ -1004,7 +1005,11 @@
     }
     nativeFocusCalibrationControl = null;
     pendingNativeFocusScrollControl = control;
-    scheduleNativeFocusResizeScroll();
+    if (nativeFocusFallbackTimer !== null) { window.clearTimeout(nativeFocusFallbackTimer); }
+    nativeFocusFallbackTimer = window.setTimeout(function () {
+      nativeFocusFallbackTimer = null;
+      scheduleNativeFocusResizeScroll();
+    }, 50);
   });
 
   document.addEventListener('pointerdown', function (event) {
@@ -1018,6 +1023,10 @@
     nativeFocusResizeCompletedControl = null;
     nativeFocusCalibrationControl = null;
     pendingNativeFocusScrollControl = control;
+    if (nativeFocusFallbackTimer !== null) {
+      window.clearTimeout(nativeFocusFallbackTimer);
+      nativeFocusFallbackTimer = null;
+    }
     debugEvent('nativeFocus.pointerdown', {
       control: control && control.id,
       scrollY: Math.round(window.scrollY),
@@ -1035,6 +1044,10 @@
     pendingNativeFocusScrollControl = null;
     nativeFocusResizeCompletedControl = null;
     nativeFocusCalibrationControl = null;
+    if (nativeFocusFallbackTimer !== null) {
+      window.clearTimeout(nativeFocusFallbackTimer);
+      nativeFocusFallbackTimer = null;
+    }
     debugEvent('nativeFocus.pointermove.cancel', { scrollY: Math.round(window.scrollY) });
     if (nativeFocusResizeFrame !== null) {
       window.cancelAnimationFrame(nativeFocusResizeFrame);
