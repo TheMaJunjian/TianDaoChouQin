@@ -897,7 +897,7 @@
   var nativeFocusFollowUpUntil = 0;
   var nativeFocusLastScroll = null;
   var nativeFocusScrollSpaceHeight = 0;
-  var nativeFocusDiagnosticEnabled = new URLSearchParams(window.location.search).get('focus-debug') === '1';
+  var nativeFocusDiagnosticEnabled = true;
   var nativeFocusDiagnosticScript = document.currentScript && document.currentScript.getAttribute('src');
   var nativeFocusDiagnosticRecords = [];
   var nativeFocusDiagnosticTimers = [];
@@ -986,13 +986,20 @@
 
   function initNativeFocusDiagnostics() {
     if (!nativeFocusDiagnosticEnabled) { return; }
-    var copyButton = document.createElement('button');
-    copyButton.type = 'button';
-    copyButton.id = 'focusDiagnosticCopy';
-    copyButton.textContent = '复制定位信息';
-    copyButton.style.cssText = 'position:fixed;top:8px;right:8px;z-index:100;padding:6px 8px;' +
-      'border:1px solid #4fe3ff;border-radius:4px;background:#06121b;color:#4fe3ff;font:14px sans-serif;';
-    document.body.appendChild(copyButton);
+    var copyButton = document.getElementById('focusDiagnosticCopy');
+    if (!copyButton) { return; }
+    function positionCopyButton() {
+      var viewport = window.visualViewport;
+      copyButton.style.setProperty('--focus-diagnostic-top', (viewport ? viewport.offsetTop : 0) + 'px');
+      var center = viewport ? viewport.offsetLeft + viewport.width / 2 : document.documentElement.clientWidth / 2;
+      copyButton.style.setProperty('--focus-diagnostic-center', center + 'px');
+    }
+    positionCopyButton();
+    if (window.visualViewport) {
+      ['resize', 'scroll'].forEach(function (type) {
+        window.visualViewport.addEventListener(type, positionCopyButton, { passive: true });
+      });
+    }
     document.addEventListener('pointerdown', function (event) {
       recordNativeFocusDiagnostic('pointerdown.before', null, event);
       if (event.target === copyButton) {
@@ -1011,7 +1018,10 @@
       }, true);
     });
     ['resize', 'scroll'].forEach(function (type) {
-      window.addEventListener(type, function () { recordNativeFocusDiagnostic('window.' + type); }, { passive: true });
+      window.addEventListener(type, function () {
+        positionCopyButton();
+        recordNativeFocusDiagnostic('window.' + type);
+      }, { passive: true });
     });
     copyButton.addEventListener('click', function () {
       var report = nativeFocusDiagnosticCopyText || nativeFocusDiagnosticReport();
