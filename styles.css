@@ -16,7 +16,8 @@
 
 body {
   margin: 0;
-  padding: 0 0 40px;
+  /* 为底部浮动条保留滚动余量，避免到达页面边界后按钮无法继续上移。 */
+  padding: 0 0 64px;
   background:
     radial-gradient(circle at 20% 0%, #0d2233 0%, transparent 55%),
     radial-gradient(circle at 90% 10%, #12283a 0%, transparent 45%),
