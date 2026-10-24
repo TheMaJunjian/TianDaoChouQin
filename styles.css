@@ -16,34 +16,18 @@
 
 body {
   margin: 0;
-  padding: calc(44px + env(safe-area-inset-top, 0px)) 0 calc(40px + var(--focus-scroll-space, 0px));
+  padding: 0 0 40px;
   background:
     radial-gradient(circle at 20% 0%, #0d2233 0%, transparent 55%),
     radial-gradient(circle at 90% 10%, #12283a 0%, transparent 45%),
     var(--bg);
   color: var(--text);
   font-family: "Consolas", "Menlo", "Courier New", "Microsoft YaHei", monospace;
-  min-height: calc(100vh + var(--focus-scroll-space, 0px));
+  min-height: 100vh;
   transition: background 0.6s ease;
 }
 
 .hidden { display: none !important; }
-
-.focus-diagnostic-copy {
-  position: fixed;
-  top: calc(var(--focus-diagnostic-top, 0px) + env(safe-area-inset-top, 0px) + 4px);
-  left: var(--focus-diagnostic-center, 50%);
-  transform: translateX(-50%);
-  z-index: 1000;
-  min-height: 34px;
-  padding: 6px 12px;
-  border: 1px solid var(--cyan);
-  border-radius: 4px;
-  background: #06121b;
-  color: var(--cyan);
-  font: 14px sans-serif;
-  white-space: nowrap;
-}
 
 .debug-view {
   max-height: 60vh;
@@ -661,7 +645,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 .polish-float.at-top { top: 8px; }
-.polish-float.at-bottom { bottom: calc(8px + var(--visual-viewport-inset, 0px)); }
+.polish-float.at-bottom { bottom: 8px; }
 .polish-float .progress-bar { flex: 1; height: 10px; }
 .polish-float-label,
 .polish-float-pct {

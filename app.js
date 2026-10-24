@@ -279,7 +279,6 @@
   }
 
   function debugEvent(label, details) {
-    if (nativeFocusDiagnosticEnabled && label.indexOf('nativeFocus.') === 0) { recordNativeFocusDiagnostic(label, details); }
     if (!debugEnabled) { return; }
     var now = performance.now();
     debugRecords.push({
@@ -893,198 +892,26 @@
   var nativeFocusClickSeen = false;
   var nativeFocusCalibrationControl = null;
   var nativeFocusStableTimer = null;
-  var nativeFocusFollowUpTimer = null;
-  var nativeFocusFollowUpUntil = 0;
-  var nativeFocusLastScroll = null;
-  var nativeFocusScrollSpaceHeight = 0;
-  var nativeFocusDiagnosticEnabled = true;
-  var nativeFocusDiagnosticScript = document.currentScript && document.currentScript.getAttribute('src');
-  var nativeFocusDiagnosticRecords = [];
-  var nativeFocusDiagnosticTimers = [];
-  var nativeFocusDiagnosticStartedAt = performance.now();
-  var nativeFocusDiagnosticDropped = 0;
-  var nativeFocusDiagnosticCopyText = null;
+  var nativeFocusFallbackTimer = null;
+  var nativeFocusDelayedTimer = null;
 
-  function nativeFocusDiagnosticRect(element) {
-    if (!element) { return null; }
-    var rect = element.getBoundingClientRect();
-    return { top: Math.round(rect.top), bottom: Math.round(rect.bottom), height: Math.round(rect.height) };
+  function cancelNativeFocusDelayedScroll() {
+    if (nativeFocusDelayedTimer !== null) { window.clearTimeout(nativeFocusDelayedTimer); }
+    nativeFocusDelayedTimer = null;
   }
 
-  function recordNativeFocusDiagnostic(label, details, event) {
-    if (!nativeFocusDiagnosticEnabled) { return; }
-    var active = document.activeElement;
-    var control = pendingNativeFocusScrollControl || nativeFocusCalibrationControl || active;
-    var group = getControlScrollGroup(control);
-    var viewport = window.visualViewport;
-    var scrollRoot = document.scrollingElement || document.documentElement;
-    var floatStyle = getComputedStyle(el.polishFloat);
-    var record = {
-      ms: Math.round(performance.now() - nativeFocusDiagnosticStartedAt),
-      event: label,
-      tab: state.ui.activeTab,
-      active: active && active.id,
-      pending: pendingNativeFocusScrollControl && pendingNativeFocusScrollControl.id,
-      calibrating: nativeFocusCalibrationControl && nativeFocusCalibrationControl.id,
-      pointerMoved: nativeFocusPointerMoved,
-      viewport: {
-        innerWidth: window.innerWidth,
-        clientWidth: document.documentElement.clientWidth,
-        width: viewport && Math.round(viewport.width),
-        innerHeight: window.innerHeight,
-        clientHeight: document.documentElement.clientHeight,
-        height: viewport && Math.round(viewport.height),
-        offsetTop: viewport && Math.round(viewport.offsetTop),
-        pageTop: viewport && Math.round(viewport.pageTop),
-        scale: viewport && viewport.scale,
-        scrollY: Math.round(window.scrollY),
-        scrollRoom: Math.round(scrollRoot.scrollHeight - scrollRoot.clientHeight - scrollRoot.scrollTop)
-      },
-      float: {
-        hidden: el.polishFloat.classList.contains('hidden'),
-        narrow: isNarrowScreen(),
-        rect: nativeFocusDiagnosticRect(el.polishFloat),
-        display: floatStyle.display,
-        visibility: floatStyle.visibility,
-        bottom: floatStyle.bottom,
-        inset: document.body.style.getPropertyValue('--visual-viewport-inset')
-      },
-      originalBar: nativeFocusDiagnosticRect(el.polishBlock),
-      control: nativeFocusDiagnosticRect(control && control.matches('input, select, textarea') ? control : null),
-      button: nativeFocusDiagnosticRect(group && group.submit),
-      scrollSpace: document.body.style.getPropertyValue('--focus-scroll-space')
-    };
-    if (details) { record.details = details; }
-    if (event) {
-      record.pointer = {
-        target: event.target && event.target.id,
-        type: event.pointerType,
-        id: event.pointerId,
-        clientY: event.clientY,
-        screenY: event.screenY
-      };
-    }
-    if (nativeFocusDiagnosticRecords.length >= 100) {
-      nativeFocusDiagnosticRecords.splice(5, 1);
-      nativeFocusDiagnosticDropped += 1;
-    }
-    nativeFocusDiagnosticRecords.push(record);
-  }
-
-  function nativeFocusDiagnosticReport() {
-    var header = {
-      script: nativeFocusDiagnosticScript,
-      userAgent: navigator.userAgent,
-      width: window.innerWidth,
-      screen: { width: window.screen.width, height: window.screen.height },
-      dropped: nativeFocusDiagnosticDropped
-    };
-    return [JSON.stringify(header)].concat(nativeFocusDiagnosticRecords.map(function (record) {
-      return JSON.stringify(record);
-    })).join('\n');
-  }
-
-  function initNativeFocusDiagnostics() {
-    if (!nativeFocusDiagnosticEnabled) { return; }
-    var copyButton = document.getElementById('focusDiagnosticCopy');
-    if (!copyButton) { return; }
-    function positionCopyButton() {
-      var viewport = window.visualViewport;
-      copyButton.style.setProperty('--focus-diagnostic-top', (viewport ? viewport.offsetTop : 0) + 'px');
-      var center = viewport ? viewport.offsetLeft + viewport.width / 2 : document.documentElement.clientWidth / 2;
-      copyButton.style.setProperty('--focus-diagnostic-center', center + 'px');
-    }
-    positionCopyButton();
-    if (window.visualViewport) {
-      ['resize', 'scroll'].forEach(function (type) {
-        window.visualViewport.addEventListener(type, positionCopyButton, { passive: true });
-      });
-    }
-    document.addEventListener('pointerdown', function (event) {
-      recordNativeFocusDiagnostic('pointerdown.before', null, event);
-      if (event.target === copyButton) {
-        // 在复制按钮使输入框失焦、键盘收起之前保存现场。
-        nativeFocusDiagnosticCopyText = nativeFocusDiagnosticReport();
-      }
-    }, true);
-    ['pointerup', 'pointermove', 'pointercancel', 'click', 'focusin', 'focusout'].forEach(function (type) {
-      document.addEventListener(type, function (event) {
-        recordNativeFocusDiagnostic(type, null, event);
-        if (type !== 'focusin' || !event.target.matches('input, select, textarea')) { return; }
-        nativeFocusDiagnosticTimers.forEach(function (timer) { window.clearTimeout(timer); });
-        nativeFocusDiagnosticTimers = [0, 100, 300, 700, 1200, 2000].map(function (delay) {
-          return window.setTimeout(function () { recordNativeFocusDiagnostic('sample.' + delay); }, delay);
-        });
-      }, true);
-    });
-    ['resize', 'scroll'].forEach(function (type) {
-      window.addEventListener(type, function () {
-        positionCopyButton();
-        recordNativeFocusDiagnostic('window.' + type);
-      }, { passive: true });
-    });
-    copyButton.addEventListener('click', function () {
-      var report = nativeFocusDiagnosticCopyText || nativeFocusDiagnosticReport();
-      function copied() { copyButton.textContent = '定位信息已复制'; }
-      function fallback() {
-        var area = document.createElement('textarea');
-        area.value = report;
-        area.readOnly = true;
-        area.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;';
-        document.body.appendChild(area);
-        area.select();
-        var success = false;
-        try { success = document.execCommand('copy'); } catch (e) { success = false; }
-        area.remove();
-        if (success) { copied(); }
-        else { window.prompt('请复制定位信息', report); }
-      }
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(report).then(copied, fallback);
-      } else { fallback(); }
-    });
-    recordNativeFocusDiagnostic('ready');
-  }
-
-  function nativeFocusViewport() {
-    var viewport = window.visualViewport;
-    var top = viewport ? viewport.offsetTop : 0;
-    var bottom = Math.min(window.innerHeight, viewport ? top + viewport.height : window.innerHeight);
-    return { top: top, bottom: bottom, height: Math.max(0, bottom - top) };
-  }
-
-  function syncNativeFocusViewport() {
-    var viewport = nativeFocusViewport();
-    var inset = Math.max(0, window.innerHeight - viewport.bottom);
-    // 浮动条始终避开键盘，与页面是否需要补充滚动空间分开处理。
-    if (inset > 0) { document.body.style.setProperty('--visual-viewport-inset', inset + 'px'); }
-    else { document.body.style.removeProperty('--visual-viewport-inset'); }
-    if (nativeFocusScrollSpaceHeight && viewport.height > nativeFocusScrollSpaceHeight + 1) {
-      document.body.style.removeProperty('--focus-scroll-space');
-      nativeFocusScrollSpaceHeight = 0;
-    }
-    return viewport;
-  }
-
-  function cancelNativeFocusFollowUp() {
-    if (nativeFocusFollowUpTimer !== null) { window.clearTimeout(nativeFocusFollowUpTimer); }
-    nativeFocusFollowUpTimer = null;
-    nativeFocusFollowUpUntil = 0;
-  }
-
-  function queueNativeFocusFollowUp() {
-    if (nativeFocusFollowUpTimer !== null || performance.now() >= nativeFocusFollowUpUntil ||
-        (!pendingNativeFocusScrollControl && !nativeFocusCalibrationControl)) { return; }
-    nativeFocusFollowUpTimer = window.setTimeout(function () {
-      nativeFocusFollowUpTimer = null;
+  function scheduleNativeFocusDelayedScroll(control) {
+    cancelNativeFocusDelayedScroll();
+    if (!getControlScrollGroup(control)) { return; }
+    nativeFocusDelayedTimer = window.setTimeout(function () {
+      nativeFocusDelayedTimer = null;
+      if (document.visibilityState === 'hidden' || !control.isConnected || nativeFocusPointerMoved) { return; }
+      if (control.matches('input, select, textarea') && document.activeElement !== control) { return; }
+      updatePolishFloat();
+      nativeFocusCalibrationControl = null;
+      pendingNativeFocusScrollControl = control;
       scheduleNativeFocusResizeScroll();
-      queueNativeFocusFollowUp();
-    }, 80);
-  }
-
-  function startNativeFocusFollowUp() {
-    nativeFocusFollowUpUntil = performance.now() + 800;
-    queueNativeFocusFollowUp();
+    }, 350);
   }
 
   function debugNativeFocusStable(anchor) {
@@ -1093,15 +920,13 @@
       nativeFocusStableTimer = null;
       if (!anchor || !anchor.isConnected) { return; }
       var rect = anchor.getBoundingClientRect();
-      var viewport = nativeFocusViewport();
-      var viewportBottom = viewport.bottom;
+      var viewport = window.visualViewport;
+      var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
       debugEvent('nativeFocus.stable', {
         anchor: anchor.id,
         scrollY: Math.round(window.scrollY),
         anchorBottom: Math.round(rect.bottom),
         viewportBottom: Math.round(viewportBottom),
-        innerHeight: Math.round(window.innerHeight),
-        visualHeight: window.visualViewport && Math.round(window.visualViewport.height),
         gap: Math.round(viewportBottom - rect.bottom)
       });
     }, 120);
@@ -1152,13 +977,9 @@
     var submitRect = group.submit.getBoundingClientRect();
     var groupTop = Math.min(groupStartRect.top, controlRect.top);
     var groupBottom = Math.max(submitRect.bottom, controlRect.bottom);
-    var viewport = nativeFocusViewport();
-    var viewportHeight = viewport.height;
-    var availableHeight = Math.max(0, viewportHeight - margin);
-    var groupFits = groupBottom - groupTop <= viewportHeight;
-    var focusedRangeFits = control.form.id === 'entryForm' && group.submit === el.entryActions &&
-      groupBottom - Math.min(controlRect.top, submitRect.top) <= availableHeight;
-    var anchor = groupFits || focusedRangeFits ? group.submit : control;
+    var viewport = window.visualViewport;
+    var viewportHeight = viewport ? viewport.height : window.innerHeight;
+    var anchor = groupBottom - groupTop > viewportHeight ? control : group.submit;
     group.submit.style.removeProperty('scroll-margin-block-start');
     group.submit.style.removeProperty('scroll-margin-block-end');
     control.style.removeProperty('scroll-margin-block-start');
@@ -1168,10 +989,8 @@
       control: control.id,
       anchor: anchor.id,
       viewportHeight: Math.round(viewportHeight),
-      viewportOffsetTop: Math.round(viewport.top),
+      viewportOffsetTop: viewport ? Math.round(viewport.offsetTop) : 0,
       groupHeight: Math.round(groupBottom - groupTop),
-      focusedRangeHeight: Math.round(groupBottom - controlRect.top),
-      innerHeight: Math.round(window.innerHeight),
       margin: Math.round(margin)
     });
     return anchor;
@@ -1181,64 +1000,33 @@
     var control = pendingNativeFocusScrollControl || nativeFocusCalibrationControl;
     if (!control || !control.matches('input, select, textarea, button[type="submit"]')) { return; }
     var isCalibration = !pendingNativeFocusScrollControl;
-    if (document.visibilityState === 'hidden' || !control.isConnected) {
-      pendingNativeFocusScrollControl = null;
-      return;
-    }
-    var group = getControlScrollGroup(control);
-    if (!group || !group.submit) {
-      pendingNativeFocusScrollControl = null;
-      return;
-    }
-    var viewport = syncNativeFocusViewport();
     pendingNativeFocusScrollControl = null;
-    updatePolishFloat();
+    if (document.visibilityState === 'hidden' || !control || !control.isConnected) { return; }
+    var group = getControlScrollGroup(control);
+    if (!group || !group.submit) { return; }
     var anchor = prepareControlNativeScroll(control);
     if (!anchor) { return; }
-    var anchorRect = anchor.getBoundingClientRect();
-    var margin = parseFloat(getComputedStyle(anchor).scrollMarginBlockEnd) || 0;
-    nativeFocusCalibrationControl = control;
-    nativeFocusResizeCompletedControl = nativeFocusClickSeen ? null : control;
-    var lastScroll = nativeFocusLastScroll;
-    if (!isCalibration || !lastScroll || lastScroll.anchor !== anchor) {
-      debugEvent('nativeFocus.scroll', {
-        control: control.id,
-        anchor: anchor.id,
-        calibration: isCalibration,
-        scrollY: Math.round(window.scrollY),
-        anchorBottomBefore: Math.round(anchorRect.bottom)
-      });
-      anchor.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
-      nativeFocusLastScroll = { anchor: anchor };
-      debugNativeFocusStable(anchor);
-      scheduleNativeFocusResizeScroll();
-      return;
+    if (isCalibration) {
+      var viewport = window.visualViewport;
+      var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
+      var anchorRect = anchor.getBoundingClientRect();
+      var margin = parseFloat(getComputedStyle(anchor).scrollMarginBlockEnd) || 0;
+      if (Math.abs(anchorRect.bottom - (viewportBottom - margin)) <= 3 && anchorRect.top >= (viewport ? viewport.offsetTop : 0) - 3) {
+        debugNativeFocusStable(anchor);
+        // 同次点击的后续 resize 仍需校准，下一次点击或手动滑动才取消目标。
+        return;
+      }
     }
-    var remaining = anchorRect.bottom - (viewport.bottom - margin);
-    // 每次按实际位置只向上补足，键盘继续变动时也不重启整组原生定位。
-    if (remaining <= 3) { return; }
-    var scrollRoot = document.scrollingElement || document.documentElement;
-    var scrollRoom = Math.max(0, scrollRoot.scrollHeight - scrollRoot.clientHeight - scrollRoot.scrollTop);
-    var addedScrollSpace = 0;
-    if (remaining > scrollRoom) {
-      // 不只补键盘高度：布局视口已经缩小时，也可能缺少浮动条和安全间距的滚动空间。
-      addedScrollSpace = Math.ceil(remaining - scrollRoom);
-      var currentScrollSpace = parseFloat(document.body.style.getPropertyValue('--focus-scroll-space')) || 0;
-      document.body.style.setProperty('--focus-scroll-space', (currentScrollSpace + addedScrollSpace) + 'px');
-      nativeFocusScrollSpaceHeight = viewport.height;
-    }
-    window.scrollBy({ top: remaining, left: 0, behavior: 'auto' });
-    debugEvent('nativeFocus.position', {
+    debugEvent('nativeFocus.scroll', {
       control: control.id,
       anchor: anchor.id,
-      correction: Math.round(remaining),
-      scrollRoomBefore: Math.round(scrollRoom),
-      addedScrollSpace: addedScrollSpace,
-      gap: Math.round(viewport.bottom - anchor.getBoundingClientRect().bottom),
-      margin: Math.round(margin),
-      maxScrollY: Math.round(document.documentElement.scrollHeight - window.innerHeight)
+      scrollY: Math.round(window.scrollY),
+      anchorBottomBefore: Math.round(anchor.getBoundingClientRect().bottom)
     });
+    anchor.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
     debugNativeFocusStable(anchor);
+    nativeFocusCalibrationControl = control;
+    nativeFocusResizeCompletedControl = nativeFocusClickSeen ? null : control;
   }
 
   function scheduleNativeFocusResizeScroll() {
@@ -1265,6 +1053,7 @@
     }
     nativeFocusClickSeen = true;
     debugEvent('nativeFocus.click', { control: control.id, scrollY: Math.round(window.scrollY) });
+    scheduleNativeFocusDelayedScroll(control);
     if (nativeFocusResizeCompletedControl === control) {
       nativeFocusResizeCompletedControl = null;
       return;
@@ -1275,13 +1064,21 @@
     }
     nativeFocusCalibrationControl = null;
     pendingNativeFocusScrollControl = control;
-    startNativeFocusFollowUp();
-    scheduleNativeFocusResizeScroll();
+    if (nativeFocusFallbackTimer !== null) { window.clearTimeout(nativeFocusFallbackTimer); }
+    nativeFocusFallbackTimer = window.setTimeout(function () {
+      nativeFocusFallbackTimer = null;
+      scheduleNativeFocusResizeScroll();
+    }, 50);
   });
 
+  document.addEventListener('wheel', function () {
+    cancelNativeFocusDelayedScroll();
+    pendingNativeFocusScrollControl = null;
+    nativeFocusCalibrationControl = null;
+  }, { passive: true });
+
   document.addEventListener('pointerdown', function (event) {
-    cancelNativeFocusFollowUp();
-    nativeFocusLastScroll = null;
+    cancelNativeFocusDelayedScroll();
     var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
     recordResumeFocusEvent('pointerdown', event, control);
     nativeFocusPointerId = event.pointerId;
@@ -1292,6 +1089,10 @@
     nativeFocusResizeCompletedControl = null;
     nativeFocusCalibrationControl = null;
     pendingNativeFocusScrollControl = control;
+    if (nativeFocusFallbackTimer !== null) {
+      window.clearTimeout(nativeFocusFallbackTimer);
+      nativeFocusFallbackTimer = null;
+    }
     debugEvent('nativeFocus.pointerdown', {
       control: control && control.id,
       scrollY: Math.round(window.scrollY),
@@ -1300,22 +1101,20 @@
     if (control) { prepareControlNativeScroll(control); }
   }, { passive: true });
 
-  document.addEventListener('wheel', function () {
-    cancelNativeFocusFollowUp();
-    pendingNativeFocusScrollControl = null;
-    nativeFocusCalibrationControl = null;
-  }, { passive: true });
-
   document.addEventListener('pointermove', function (event) {
     if (event.pointerId !== nativeFocusPointerId || nativeFocusPointerMoved) { return; }
     var movedX = event.clientX - nativeFocusPointerStartX;
     var movedY = event.clientY - nativeFocusPointerStartY;
     if (movedX * movedX + movedY * movedY < 64) { return; }
     nativeFocusPointerMoved = true;
-    cancelNativeFocusFollowUp();
+    cancelNativeFocusDelayedScroll();
     pendingNativeFocusScrollControl = null;
     nativeFocusResizeCompletedControl = null;
     nativeFocusCalibrationControl = null;
+    if (nativeFocusFallbackTimer !== null) {
+      window.clearTimeout(nativeFocusFallbackTimer);
+      nativeFocusFallbackTimer = null;
+    }
     debugEvent('nativeFocus.pointermove.cancel', { scrollY: Math.round(window.scrollY) });
     if (nativeFocusResizeFrame !== null) {
       window.cancelAnimationFrame(nativeFocusResizeFrame);
@@ -1329,9 +1128,9 @@
   }, { passive: true });
 
   document.addEventListener('pointercancel', function (event) {
+    cancelNativeFocusDelayedScroll();
     if (event.pointerId !== nativeFocusPointerId) { return; }
     nativeFocusPointerId = null;
-    cancelNativeFocusFollowUp();
     nativeFocusPointerMoved = false;
     pendingNativeFocusScrollControl = null;
     nativeFocusResizeCompletedControl = null;
@@ -1342,13 +1141,6 @@
       nativeFocusResizeFrame = null;
     }
   }, { passive: true });
-
-  window.addEventListener('resize', function () {
-    syncNativeFocusViewport();
-    schedulePolishFloatUpdate('window.resize');
-    scheduleNativeFocusResizeScroll();
-    startNativeFocusFollowUp();
-  });
 
   var polishFloatUpdateFrame = null;
   function schedulePolishFloatUpdate(source) {
@@ -1370,7 +1162,6 @@
 
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
-      syncNativeFocusViewport();
       debugEvent('nativeFocus.visualViewport.resize', {
         scrollY: Math.round(window.scrollY),
         pending: pendingNativeFocusScrollControl && pendingNativeFocusScrollControl.id,
@@ -1379,10 +1170,8 @@
       });
       schedulePolishFloatUpdate('visualViewport.resize');
       scheduleNativeFocusResizeScroll();
-      startNativeFocusFollowUp();
     });
     window.visualViewport.addEventListener('scroll', function () {
-      syncNativeFocusViewport();
       debugEvent('nativeFocus.visualViewport.scroll', {
         scrollY: Math.round(window.scrollY),
         pending: pendingNativeFocusScrollControl && pendingNativeFocusScrollControl.id,
@@ -1395,7 +1184,7 @@
   }
 
   function cancelDeferredSavesBeforeBackground() {
-    cancelNativeFocusFollowUp();
+    cancelNativeFocusDelayedScroll();
     [pageScrollSaveTimer, saveTimer, draftSaveTimer, sigTimer].forEach(function (timer) {
       if (timer !== null) { window.clearTimeout(timer); }
     });
@@ -4033,7 +3822,6 @@
   }
 
   function updatePolishFloat() {
-    var viewport = syncNativeFocusViewport();
     var attrActive = document.querySelector('.tab-panel[data-tab-panel="attr"]');
     var visiblePanel = attrActive && attrActive.classList.contains('active');
     if (!isNarrowScreen()) {
@@ -4055,7 +3843,10 @@
       el.polishFloat.classList.remove('hidden');
       return;
     }
-    var inView = rect.bottom > viewport.top && rect.top < viewport.bottom;
+    var viewport = window.visualViewport;
+    var viewportTop = viewport ? viewport.offsetTop : 0;
+    var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
+    var inView = rect.bottom > viewportTop && rect.top < viewportBottom;
     if (inView) {
       el.polishFloat.classList.add('hidden');
       return;
@@ -4097,8 +3888,6 @@
   window.addEventListener('scroll', function () {
     var debugStart = debugStepStart();
     updatePolishFloat();
-    // 原生聚焦结束时还可能只滚动文档，继续按当前点击目标校验最终间距。
-    scheduleNativeFocusResizeScroll();
     debugStepEnd('window.scroll.updatePolishFloat', debugStart, { scrollY: window.scrollY });
   }, { passive: true });
   window.addEventListener('resize', function () {
@@ -4788,7 +4577,6 @@
     }
     debugStepEnd('init.total', initStart, { activeTab: state.ui.activeTab });
     renderDebugPanel();
-    initNativeFocusDiagnostics();
   }
 
   init();
