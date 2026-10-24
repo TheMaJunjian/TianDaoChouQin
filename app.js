@@ -896,6 +896,10 @@
   var nativeFocusFollowUpTimer = null;
   var nativeFocusFollowUpUntil = 0;
   var nativeFocusLastScroll = null;
+  var nativeFocusViewportSample = null;
+  var nativeFocusKeyboardWait = null;
+  var nativeFocusViewportWidth = window.innerWidth;
+  var nativeFocusMaxViewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
 
   function nativeFocusViewport() {
     var viewport = window.visualViewport;
@@ -912,6 +916,37 @@
       else { document.body.style.removeProperty('--keyboard-inset'); }
     }
     return viewport;
+  }
+
+  function beginNativeFocusViewportWait(control) {
+    var viewport = nativeFocusViewport();
+    var now = performance.now();
+    if (window.innerWidth !== nativeFocusViewportWidth) {
+      nativeFocusViewportWidth = window.innerWidth;
+      nativeFocusMaxViewportHeight = viewport.height;
+    }
+    nativeFocusMaxViewportHeight = Math.max(nativeFocusMaxViewportHeight, viewport.height);
+    nativeFocusViewportSample = { height: viewport.height, bottom: viewport.bottom, at: now };
+    var keyboardVisible = viewport.height < Math.max(nativeFocusMaxViewportHeight, window.innerHeight) - 80;
+    var touchKeyboard = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    var keyboardField = control && control.matches('textarea, input[type="text"], input[type="number"], input:not([type])') &&
+      !control.readOnly && !control.disabled;
+    // 首次软键盘可能尚未开始改变尺寸；超时后允许硬件键盘等不改变视口的场景继续。
+    nativeFocusKeyboardWait = touchKeyboard && keyboardField && !keyboardVisible
+      ? { height: viewport.height, until: now + 600 } : null;
+  }
+
+  function nativeFocusViewportIsStable(viewport) {
+    var now = performance.now();
+    var sample = nativeFocusViewportSample;
+    if (!sample || Math.abs(sample.height - viewport.height) > 1 || Math.abs(sample.bottom - viewport.bottom) > 1) {
+      nativeFocusViewportSample = { height: viewport.height, bottom: viewport.bottom, at: now };
+    }
+    if (nativeFocusKeyboardWait && viewport.height < nativeFocusKeyboardWait.height - 1) {
+      nativeFocusKeyboardWait = null;
+    }
+    if (nativeFocusKeyboardWait && now < nativeFocusKeyboardWait.until) { return false; }
+    return now - nativeFocusViewportSample.at >= 120;
   }
 
   function cancelNativeFocusFollowUp() {
@@ -1029,14 +1064,21 @@
     var control = pendingNativeFocusScrollControl || nativeFocusCalibrationControl;
     if (!control || !control.matches('input, select, textarea, button[type="submit"]')) { return; }
     var isCalibration = !pendingNativeFocusScrollControl;
-    pendingNativeFocusScrollControl = null;
-    if (document.visibilityState === 'hidden' || !control || !control.isConnected) { return; }
+    if (document.visibilityState === 'hidden' || !control.isConnected) {
+      pendingNativeFocusScrollControl = null;
+      return;
+    }
     var group = getControlScrollGroup(control);
-    if (!group || !group.submit) { return; }
+    if (!group || !group.submit) {
+      pendingNativeFocusScrollControl = null;
+      return;
+    }
     syncNativeFocusViewport();
+    var viewport = nativeFocusViewport();
+    if (!nativeFocusViewportIsStable(viewport)) { return; }
+    pendingNativeFocusScrollControl = null;
     var anchor = prepareControlNativeScroll(control);
     if (!anchor) { return; }
-    var viewport = nativeFocusViewport();
     var anchorRect = anchor.getBoundingClientRect();
     var margin = parseFloat(getComputedStyle(anchor).scrollMarginBlockEnd) || 0;
     nativeFocusCalibrationControl = control;
@@ -1125,6 +1167,7 @@
     nativeFocusLastScroll = null;
     var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
     recordResumeFocusEvent('pointerdown', event, control);
+    beginNativeFocusViewportWait(control);
     nativeFocusPointerId = event.pointerId;
     nativeFocusPointerStartX = event.clientX;
     nativeFocusPointerStartY = event.clientY;
