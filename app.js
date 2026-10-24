@@ -910,8 +910,11 @@
 
   function syncNativeFocusViewport() {
     var viewport = nativeFocusViewport();
+    var inset = Math.max(0, window.innerHeight - viewport.bottom);
+    // 浮动条始终避开键盘，与页面是否需要补充滚动空间分开处理。
+    if (inset > 0) { document.body.style.setProperty('--visual-viewport-inset', inset + 'px'); }
+    else { document.body.style.removeProperty('--visual-viewport-inset'); }
     if (document.body.style.getPropertyValue('--keyboard-inset')) {
-      var inset = Math.max(0, window.innerHeight - viewport.bottom);
       if (inset > 0) { document.body.style.setProperty('--keyboard-inset', inset + 'px'); }
       else { document.body.style.removeProperty('--keyboard-inset'); }
     }
@@ -1077,6 +1080,7 @@
     var viewport = nativeFocusViewport();
     if (!nativeFocusViewportIsStable(viewport)) { return; }
     pendingNativeFocusScrollControl = null;
+    updatePolishFloat();
     var anchor = prepareControlNativeScroll(control);
     if (!anchor) { return; }
     var anchorRect = anchor.getBoundingClientRect();
@@ -3925,6 +3929,7 @@
   }
 
   function updatePolishFloat() {
+    var viewport = syncNativeFocusViewport();
     var attrActive = document.querySelector('.tab-panel[data-tab-panel="attr"]');
     var visiblePanel = attrActive && attrActive.classList.contains('active');
     if (!isNarrowScreen()) {
@@ -3946,10 +3951,7 @@
       el.polishFloat.classList.remove('hidden');
       return;
     }
-    var viewport = window.visualViewport;
-    var viewportTop = viewport ? viewport.offsetTop : 0;
-    var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
-    var inView = rect.bottom > viewportTop && rect.top < viewportBottom;
+    var inView = rect.bottom > viewport.top && rect.top < viewport.bottom;
     if (inView) {
       el.polishFloat.classList.add('hidden');
       return;

@@ -645,7 +645,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 .polish-float.at-top { top: 8px; }
-.polish-float.at-bottom { bottom: calc(8px + var(--keyboard-inset, 0px)); }
+.polish-float.at-bottom { bottom: calc(8px + var(--visual-viewport-inset, 0px)); }
 .polish-float .progress-bar { flex: 1; height: 10px; }
 .polish-float-label,
 .polish-float-pct {
