@@ -414,6 +414,29 @@ input:focus, select:focus {
 .btn.danger:hover { color: var(--red); border-color: var(--red); }
 .btn.danger-solid { background: linear-gradient(180deg, #6b1f1a, #3a0d0a); border-color: var(--red); color: var(--red); }
 
+.entry-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--cyan);
+  border-radius: 4px;
+  background: linear-gradient(180deg, #14415a, #0b2434);
+}
+
+.entry-actions > .btn {
+  grid-column: auto;
+  min-width: 0;
+  padding: 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.entry-actions > .btn + .btn { border-left: 1px solid var(--cyan); }
+.entry-actions > .btn:hover { background: #17546f; }
+.entry-actions > .btn:focus-visible { outline: 1px solid var(--gold); outline-offset: -3px; }
+
 .progress-block { margin-top: 8px; }
 
 .progress-title {
@@ -778,9 +801,65 @@ input:focus, select:focus {
 
 .timeline-ruler {
   position: relative;
+  z-index: 3;
   height: 20px;
   margin-top: 4px;
+  border-inline: 1px solid transparent;
   touch-action: none;
+}
+
+.timeline-ruler::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--line);
+}
+
+.timeline-note-markers { position: absolute; inset: 0; pointer-events: none; }
+.timeline-note-lines { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.timeline-note-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--gold);
+  transform: translateX(-50%);
+}
+.timeline-note-marker {
+  position: absolute;
+  bottom: 0;
+  z-index: 2;
+  width: 5px;
+  height: 5px;
+  padding: 0;
+  border: 1px solid var(--gold);
+  border-radius: 50%;
+  background: var(--gold);
+  box-shadow: 0 0 4px rgba(255, 212, 121, 0.45);
+  transform: translate(-50%, 50%);
+  cursor: pointer;
+  visibility: hidden;
+  pointer-events: none;
+}
+.timeline-note-marker:hover,
+.timeline-note-marker:focus-visible { z-index: 4; outline: 2px solid var(--gold); outline-offset: 3px; }
+.timeline-note-marker.is-linked,
+.timeline-note-marker.is-priority {
+  visibility: visible;
+  pointer-events: auto;
+  z-index: 5;
+  box-shadow: 0 0 8px rgba(255, 212, 121, 0.8);
+}
+.timeline-note-marker.is-priority { z-index: 6; }
+.timeline-note-marker.is-linked::after,
+.timeline-note-marker.is-priority::after {
+  content: '';
+  position: absolute;
+  inset: 0 -5px -5px;
+  border-radius: 50%;
 }
 
 .timeline-cursor {
@@ -806,9 +885,13 @@ input:focus, select:focus {
 
 .timeline-cursor:hover::before,
 .timeline-cursor:focus-visible::before,
+.timeline-cursor.log-linked::before,
 .timeline-cursor.dragging::before {
   border-top-color: var(--gold);
 }
+
+.timeline-cursor.note-linked::before { border-top-color: var(--gold); }
+.timeline-cursor.note-linked::after { border-color: var(--gold); color: var(--gold); }
 
 .timeline-cursor:focus-visible {
   outline: 1px solid var(--cyan);
@@ -817,6 +900,7 @@ input:focus, select:focus {
 
 .timeline-cursor.dragging {
   cursor: grabbing;
+  z-index: 4;
 }
 
 .timeline-cursor::after {
@@ -951,6 +1035,8 @@ input:focus, select:focus {
   word-break: break-all;
 }
 
+.log-column { display: grid; gap: 16px; min-width: 0; align-self: start; }
+
 .log-line .ts { color: var(--muted); }
 .log-line .lv-INFO { color: var(--cyan); }
 .log-line .lv-TRAIN { color: var(--green); }
@@ -963,15 +1049,13 @@ input:focus, select:focus {
 .log-entry:hover,
 .log-entry:focus-visible,
 .log-entry.log-linked { background: rgba(238, 193, 91, 0.1); outline: 1px solid rgba(238, 193, 91, 0.45); }
-.log-entry::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  left: 8px;
-  bottom: calc(100% + 6px);
-  z-index: 5;
-  display: none;
+.log-entry-tooltip {
+  position: fixed;
+  z-index: 70;
   width: max-content;
-  max-width: min(72vw, 360px);
+  max-width: min(calc(100vw - 24px), 360px);
+  max-height: calc(100vh - 24px);
+  overflow: auto;
   padding: 7px 9px;
   border: 1px solid rgba(238, 193, 91, 0.65);
   border-radius: 3px;
@@ -981,10 +1065,9 @@ input:focus, select:focus {
   font-size: 12px;
   line-height: 1.4;
   white-space: pre-line;
+  overflow-wrap: anywhere;
   pointer-events: none;
 }
-.log-entry:hover::after,
-.log-entry:focus-visible::after { display: block; }
 .task-submit-box { box-sizing: border-box; width: min(94vw, 620px); max-height: calc(100vh - 32px); overflow: hidden; padding-bottom: 24px; }
 .task-submit-body { display: grid; gap: 5px; min-width: 0; max-height: min(300px, calc(100vh - 244px)); overflow-y: auto; padding-right: 14px; scrollbar-gutter: stable; }
 .task-submit-body::-webkit-scrollbar { width: 8px; }
@@ -1011,6 +1094,8 @@ input:focus, select:focus {
 .task-progress-previous-cursor::after { color: var(--muted); }
 .task-progress-scale { grid-column: 2; display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; transform: translateY(-8px); }
 .log-entry-content { min-width: 0; flex: 1 1 auto; }
+.note-entry { display: flex; align-items: flex-start; gap: 12px; }
+.note-entry + .note-entry { margin-top: 8px; }
 .log-entry-head { min-width: 0; }
 .log-entry-activity { margin-top: 2px; white-space: pre-wrap; }
 .log-entry-created-at {

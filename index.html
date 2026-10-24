@@ -4,12 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>天道酬勤 · 系统面板</title>
-<link rel="stylesheet" href="styles.css?v=20260916-4">
+<link rel="stylesheet" href="styles.css?v=20261023-11">
 </head>
 <body>
 <div class="scanline"></div>
 
 <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+<div class="log-entry-tooltip hidden" id="logEntryTooltip" role="tooltip"></div>
 
 <div class="polish-float hidden" id="polishFloat">
   <span class="polish-float-label" id="polishFloatLabel">宿主信息完整度</span>
@@ -25,7 +26,7 @@
 
 <nav class="tabbar" id="tabbar" role="tablist">
   <button type="button" class="tab-btn" data-tab="attr" role="tab">属性</button>
-  <button type="button" class="tab-btn" data-tab="entry" role="tab">复写</button>
+  <button type="button" class="tab-btn" data-tab="entry" role="tab">记录</button>
   <button type="button" class="tab-btn" data-tab="timeline" role="tab">结算</button>
   <button type="button" class="tab-btn" data-tab="quest" role="tab">任务</button>
   <button type="button" class="tab-btn" data-tab="notice" role="tab">提示</button>
@@ -147,10 +148,10 @@
 
   </section>
 
-  <!-- ========== 复写 ========== -->
+  <!-- ========== 记录 ========== -->
   <section class="tab-panel" id="tab-entry" data-tab-panel="entry">
     <section class="card" data-hint="记录一段时间：从何时开始，到何时结束，以及完成了什么。">
-      <h2>复写时间段</h2>
+      <h2>记录</h2>
       <form id="entryForm" class="entry-form" autocomplete="off" novalidate>
         <label><span>开始日期</span><input type="date" id="startDate" required></label>
         <label><span>开始时间</span><input type="time" id="startTime" step="1" required></label>
@@ -168,7 +169,10 @@
             <option value="ERROR">ERROR · 虚度</option>
           </select>
         </label>
-        <button type="submit" class="btn wide" id="entrySubmit">写入日志</button>
+        <div class="entry-actions wide" role="group" aria-label="写入记录">
+          <button type="submit" class="btn" id="entrySubmit">写入日志</button>
+          <button type="button" class="btn" id="noteSubmit">备注</button>
+        </div>
       </form>
     </section>
 
@@ -192,7 +196,8 @@
         <input type="date" id="viewDate">
         <button type="button" class="btn ghost" id="nextDay">后一日 ▶</button>
       </div>
-      <div class="timeline-ruler" id="timelineRuler" aria-label="拖动三角游标设置时间轴范围">
+      <div class="timeline-ruler" id="timelineRuler" aria-label="拖动游标实时缩放，按当前时间轴上的日志中点和金色备注线吸附，双击恢复全天">
+        <div class="timeline-note-markers" id="timelineNoteMarkers"></div>
         <span class="timeline-cursor start" id="timelineStartCursor" role="slider" tabindex="0" aria-label="时间轴开始游标" aria-valuemin="0" aria-valuemax="23" aria-valuestep="1" title="拖动设置开始时间"></span>
         <span class="timeline-cursor end" id="timelineEndCursor" role="slider" tabindex="0" aria-label="时间轴结束游标" aria-valuemin="1" aria-valuemax="24" aria-valuestep="1" title="拖动设置结束时间"></span>
       </div>
@@ -204,14 +209,25 @@
       </div>
     </section>
 
-    <section class="card" data-hint="个人日志会按时间整理你的复写记录，空白时段表示尚未记录。">
-      <h2>个人日志 · <span id="logDateLabel"></span></h2>
-      <div class="log-view" id="logView"></div>
-      <div class="log-actions">
-        <button type="button" class="btn ghost" id="copyLog">复制日志</button>
-        <button type="button" class="btn ghost danger" id="clearDay">清空当日</button>
-      </div>
-    </section>
+    <div class="log-column">
+      <section class="card" data-hint="个人日志会按时间整理你的复写记录，空白时段表示尚未记录。">
+        <h2>个人日志 · <span id="logDateLabel"></span></h2>
+        <div class="log-view" id="logView"></div>
+        <div class="log-actions">
+          <button type="button" class="btn ghost" id="copyLog">复制日志</button>
+          <button type="button" class="btn ghost danger" id="clearDay">清空当日</button>
+        </div>
+      </section>
+
+      <section class="card" data-hint="备注按记录时刻保存，可随日期查看，不参与时间与技能结算。">
+        <h2>备注 · <span id="noteDateLabel"></span></h2>
+        <div class="log-view" id="noteView" aria-live="polite"></div>
+        <div class="log-actions">
+          <button type="button" class="btn ghost" id="copyNotes">复制备注</button>
+          <button type="button" class="btn ghost danger" id="clearNotes">清空当日</button>
+        </div>
+      </section>
+    </div>
 
     <section class="card" data-hint="技能统计汇总宿主全部复写记录，投入的小时会直接抬升对应技能等级。">
       <h2>技能 / 日志等级统计（全部记录）</h2>
@@ -334,7 +350,7 @@
       <button type="button" class="btn hidden" id="detailUploadImport">上传数据</button>
       <button type="button" class="btn ghost hidden" id="detailAchievementToggle">隐藏</button>
       <button type="button" class="btn" id="detailClose">关闭</button>
-      <button type="button" class="btn hidden" id="detailFillBlank">跳转到复写并补充</button>
+      <button type="button" class="btn hidden" id="detailFillBlank">跳转到记录并补充</button>
     </div>
   </div>
 </div>
@@ -352,6 +368,6 @@
   </div>
 </div>
 
-<script src="app.js?v=20260920-9"></script>
+<script src="app.js?v=20261023-10"></script>
 </body>
 </html>

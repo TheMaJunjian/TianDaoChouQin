@@ -75,6 +75,7 @@
   function defaultState() {
     return {
       entries: [],
+      notes: [],
       entryCategory: '',
       focus: '',
       host: {
@@ -112,6 +113,7 @@
         pageScrollTop: 0,
         activeTab: 'attr',
         timelineZoom: { start: 0, end: DAY_MINUTES },
+        timelineCursors: null,
         entryDraft: null
       },
       viewDate: todayStr(),
@@ -135,6 +137,7 @@
   var hiddenSideQuestListCollapsed = false;
   var achievementListCollapsed = false;
   var timelineZoom = { start: 0, end: DAY_MINUTES, anchor: null };
+  var timelineCursors = normalizeTimelineCursors(null);
   var renderedTimelineBlanks = [];
   var pendingBlankRange = null;
   var pendingEntryEdit = null;
@@ -161,6 +164,7 @@
       timelineZoom.start = Math.max(0, Math.min(DAY_MINUTES - 60, zoomStart));
       timelineZoom.end = Math.min(DAY_MINUTES, Math.max(timelineZoom.start + 60, zoomEnd));
     }
+    timelineCursors = normalizeTimelineCursors(ui.timelineCursors);
   }
 
   function persistCollapseState() {
@@ -175,6 +179,7 @@
       pageScrollTop: state.ui.pageScrollTop,
       activeTab: state.ui.activeTab,
       timelineZoom: { start: timelineZoom.start, end: timelineZoom.end },
+      timelineCursors: normalizeTimelineCursors(timelineCursors),
       entryDraft: state.ui.entryDraft
     };
     persist();
@@ -199,8 +204,8 @@
     'skillForm', 'skillName', 'skillMode', 'skillLevelWrap', 'skillLevel',
     'skillHoursWrap', 'skillHours', 'skillList', 'hiddenSkillsBlock', 'hiddenSkillList', 'hiddenSkillToggle',
     'achList', 'hiddenAchievementsBlock', 'hiddenAchievementList', 'hiddenAchievementToggle',
-    'entryForm', 'entrySubmit', 'startDate', 'startTime', 'endDate', 'endTime', 'category', 'activity',
-    'level', 'prevDay', 'nextDay', 'viewDate', 'timeline', 'timelineRuler', 'timelineStartCursor', 'timelineEndCursor', 'timelineAxis', 'coverageFill',
+    'entryForm', 'entrySubmit', 'noteSubmit', 'noteDateLabel', 'noteView', 'copyNotes', 'clearNotes', 'logEntryTooltip', 'startDate', 'startTime', 'endDate', 'endTime', 'category', 'activity',
+    'level', 'prevDay', 'nextDay', 'viewDate', 'timeline', 'timelineRuler', 'timelineNoteMarkers', 'timelineStartCursor', 'timelineEndCursor', 'timelineAxis', 'coverageFill',
     'coverageHint', 'logDateLabel', 'logView', 'copyLog', 'exportData',
     'importBtn', 'importFile', 'resetAll', 'clearDay', 'catList',
     'mainQuestBody', 'sideQuestForm', 'sideTitle', 'sideDesc', 'sideRewardAttr', 'sideRewardAchievement',
@@ -550,6 +555,14 @@
         });
       }).filter(function (item) { return item !== null; }) : base.entries;
     });
+    safe(function () {
+      merged.notes = Array.isArray(parsed.notes) ? parsed.notes.filter(function (item) {
+        return item && typeof item === 'object' && typeof item.text === 'string' && item.text.trim() &&
+          isValidDateString(item.date) && typeof item.createdAt === 'string' && Number.isFinite(Date.parse(item.createdAt));
+      }).map(function (item) {
+        return Object.assign({}, item, { id: typeof item.id === 'string' && item.id ? item.id : uid() });
+      }) : base.notes;
+    });
     safe(function () { merged.entryCategory = typeof parsed.entryCategory === 'string' ? parsed.entryCategory : base.entryCategory; });
     safe(function () { merged.focus = typeof parsed.focus === 'string' ? parsed.focus : base.focus; });
     safe(function () {
@@ -666,6 +679,7 @@
           merged.ui.timelineZoom = { start: zoomStart, end: zoomEnd };
         }
       }
+      merged.ui.timelineCursors = normalizeTimelineCursors(parsedUi.timelineCursors);
       if (parsedUi.entryDraft && typeof parsedUi.entryDraft === 'object') {
         merged.ui.entryDraft = {};
         ['startDate', 'startTime', 'endDate', 'endTime', 'category', 'activity', 'level'].forEach(function (key) {
@@ -735,7 +749,7 @@
   function mergeConcurrentState(latest) {
     var merged = mergeDefaults(latest);
     var baseline = persistedSnapshot;
-    ['entries', 'skills', 'achievements', 'notifications'].forEach(function (key) {
+    ['entries', 'notes', 'skills', 'achievements', 'notifications'].forEach(function (key) {
       merged[key] = mergeChangedArray(merged[key], state[key], baseline[key]);
     });
     merged.quests.side = mergeChangedArray(merged.quests.side, state.quests.side, baseline.quests.side);
@@ -890,7 +904,7 @@
       if (dateTimeControls.indexOf(control) >= 0) {
         return { start: el.startDate, submit: el.endTime };
       }
-      var entryGroupControls = [el.category, el.activity, el.level];
+      var entryGroupControls = [el.category, el.activity, el.level, el.noteSubmit];
       if (entryGroupControls.indexOf(control) >= 0) {
         return { start: el.category, submit: el.entrySubmit };
       }
@@ -1679,6 +1693,7 @@
   }
 
   function applyActiveTabView(tab) {
+    hideLogEntryTooltip();
     document.querySelectorAll('.tab-btn').forEach(function (b) {
       b.classList.toggle('active', b.getAttribute('data-tab') === tab);
     });
@@ -2183,7 +2198,7 @@
     if (pendingEntryEdit) {
       var hasEntryInput = !!el.activity.value.trim();
       if (hasEntryInput) {
-        toast('当前复写输入框已有内容，无法跳转。', { level: 'WARN' });
+        toast('当前记录输入框已有内容，无法跳转。', { level: 'WARN' });
         return;
       }
       var entry = pendingEntryEdit;
@@ -2483,6 +2498,7 @@
         notifySkillLevelUp(skill, previousSkillHours, currentSkillHours);
       }
       refreshAll();
+      flashTab('timeline');
     }
 
     if (conflicts.length) {
@@ -2494,6 +2510,46 @@
     writeEntry(false);
 
     // 数据更新后立即刷新全部面板，无需切换标签页。
+  });
+
+  /* ---------- 备注：独立保存，不推进时间段 ---------- */
+  el.noteSubmit.addEventListener('click', function () {
+    var text = el.activity.value.trim();
+    if (!text) {
+      toast('请宿主在「作为」中填写备注内容。', { level: 'WARN' });
+      return;
+    }
+    var now = new Date();
+    var note = {
+      id: uid(),
+      date: now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()),
+      createdAt: now.toISOString(),
+      text: text
+    };
+    state.notes.push(note);
+    state.viewDate = note.date;
+    el.viewDate.value = note.date;
+    el.activity.value = '';
+    captureEntryDraft();
+    persist();
+    render();
+    flashTab('timeline');
+    toast('备注已记录：' + formatCreatedAt(note.createdAt));
+  });
+
+  el.noteView.addEventListener('click', function (event) {
+    var button = event.target.closest('[data-note-del]');
+    if (!button) { return; }
+    var id = button.getAttribute('data-note-del');
+    var note = state.notes.filter(function (item) { return item.id === id; })[0];
+    if (!note) { return; }
+    openConfirmModal('确认删除 ' + formatCreatedAt(note.createdAt) + ' 的备注？', function () {
+      state.notes = state.notes.filter(function (item) { return item.id !== id; });
+      persist();
+      renderNotes(state.viewDate);
+      renderTimelineNoteMarkers();
+      toast('备注已删除。');
+    });
   });
 
   /* ---------- 日期导航 ---------- */
@@ -2531,13 +2587,50 @@
   function setViewDate(dateStr) {
     state.viewDate = dateStr;
     timelineZoom = { start: 0, end: DAY_MINUTES, anchor: null };
+    timelineCursors = normalizeTimelineCursors(null);
     state.ui.timelineZoom = { start: 0, end: DAY_MINUTES };
+    state.ui.timelineCursors = normalizeTimelineCursors(timelineCursors);
     el.viewDate.value = dateStr;
     persist();
     refreshAll();
   }
 
   /* ---------- 日志操作 ---------- */
+  el.copyNotes.addEventListener('click', function () {
+    var notes = notesByDate(state.viewDate);
+    if (!notes.length) {
+      toast('当日暂无备注可复制。', { level: 'WARN' });
+      return;
+    }
+    var text = notes.map(function (note) {
+      return '[' + formatCreatedAt(note.createdAt) + '] ' + note.text;
+    }).join('\n');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        toast('备注已复制到剪贴板。');
+      }, function () {
+        toast('无法访问剪贴板，请宿主手动选择备注内容复制。', { level: 'WARN' });
+      });
+    } else {
+      toast('当前环境不支持剪贴板，请宿主手动选择备注内容复制。', { level: 'WARN' });
+    }
+  });
+
+  el.clearNotes.addEventListener('click', function () {
+    var dateStr = state.viewDate;
+    if (!notesByDate(dateStr).length) {
+      toast('当日暂无备注可清空。', { level: 'WARN' });
+      return;
+    }
+    openConfirmModal('确认清空 ' + dateStr + ' 的全部备注？', function () {
+      state.notes = state.notes.filter(function (note) { return note.date !== dateStr; });
+      persist();
+      renderNotes(state.viewDate);
+      renderTimelineNoteMarkers();
+      toast('当日备注已清空。');
+    });
+  });
+
   el.logView.addEventListener('click', function (event) {
     var id = event.target.getAttribute && event.target.getAttribute('data-del');
     if (!id) { return; }
@@ -2596,6 +2689,7 @@
   function isImportableState(parsed) {
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
       Array.isArray(parsed.entries) && parsed.host && typeof parsed.host === 'object' &&
+      (parsed.notes === undefined || Array.isArray(parsed.notes)) &&
       !Array.isArray(parsed.host) && Array.isArray(parsed.skills) &&
       parsed.points && typeof parsed.points === 'object' && !Array.isArray(parsed.points) &&
       parsed.quests && typeof parsed.quests === 'object' && !Array.isArray(parsed.quests) &&
@@ -2605,6 +2699,7 @@
   function preservesImportedArrays(parsed, normalized) {
     var arrays = [
       ['entries', parsed.entries, normalized.entries],
+      ['notes', parsed.notes || [], normalized.notes],
       ['skills', parsed.skills, normalized.skills],
       ['achievements', parsed.achievements || [], normalized.achievements],
       ['notifications', parsed.notifications, normalized.notifications],
@@ -2838,40 +2933,194 @@
     return timelineZoom.end - timelineZoom.start;
   }
 
+  function normalizeTimelineCursors(saved) {
+    var result = {};
+    ['start', 'end'].forEach(function (name) {
+      var item = saved && saved[name];
+      var ratio = item && Number(item.ratio);
+      var snap = item && item.snap !== null && item.snap !== undefined ? Number(item.snap) : null;
+      result[name] = {
+        ratio: item && Number.isFinite(ratio) ? Math.max(0, Math.min(1, ratio)) : (name === 'start' ? 0 : 1),
+        snap: snap !== null && Number.isFinite(snap) && snap >= 0 && snap <= DAY_MINUTES ? snap : null
+      };
+    });
+    return result;
+  }
+
+  function timelineCursorMinutes(name) {
+    var cursor = timelineCursors[name];
+    return cursor.snap !== null ? cursor.snap : timelineZoom.start + cursor.ratio * timelineZoomRange();
+  }
+
+  function notesByDate(dateStr) {
+    return state.notes.filter(function (note) { return note.date === dateStr; }).sort(function (a, b) {
+      return Date.parse(a.createdAt) - Date.parse(b.createdAt);
+    });
+  }
+
+  function noteMinutes(note) {
+    var date = new Date(note.createdAt);
+    return date.getHours() * 60 + date.getMinutes() + date.getSeconds() / 60;
+  }
+
+  function timelineNotePosition(minutes, start, end) {
+    if (end <= start || minutes < start - 1e-7 || minutes > end + 1e-7) { return null; }
+    return Math.max(0, Math.min(100, (minutes - start) / (end - start) * 100));
+  }
+
+  function renderTimelineNoteLines() {
+    var lines = document.createElement('div');
+    lines.className = 'timeline-note-lines';
+    lines.setAttribute('aria-hidden', 'true');
+    var seconds = {};
+    notesByDate(state.viewDate).forEach(function (note) {
+      var second = Math.round(noteMinutes(note) * 60);
+      if (seconds[second]) { return; }
+      seconds[second] = true;
+      var position = timelineNotePosition(second / 60, timelineZoom.start, timelineZoom.end);
+      if (position === null) { return; }
+      var line = document.createElement('span');
+      line.className = 'timeline-note-line';
+      line.setAttribute('data-note-second', String(second));
+      line.style.left = position + '%';
+      lines.appendChild(line);
+    });
+    var previous = el.timeline.querySelector('.timeline-note-lines');
+    if (previous) { previous.replaceWith(lines); } else { el.timeline.appendChild(lines); }
+  }
+
+  function renderTimelineNoteMarkers() {
+    var groups = {};
+    notesByDate(state.viewDate).forEach(function (note) {
+      var second = Math.round(noteMinutes(note) * 60);
+      if (!groups[second]) { groups[second] = []; }
+      groups[second].push(note);
+    });
+    el.timelineNoteMarkers.innerHTML = Object.keys(groups).map(function (second) {
+      var notes = groups[second];
+      var label = '备注 ' + toClock(Number(second) / 60) + '：' + notes.map(function (note) { return note.text; }).join('\n');
+      return '<button type="button" class="timeline-note-marker" data-note-second="' + second +
+        '" aria-label="' + escapeHtml(label) + '" title="' + escapeHtml(label) + '"></button>';
+    }).join('');
+    updateTimelineNoteMarkerPositions();
+    setTimelineNotePriority(null);
+    syncTimelineCursorSnapStyles();
+    renderTimelineNoteLines();
+  }
+
+  function updateTimelineNoteMarkerPositions() {
+    Array.prototype.forEach.call(el.timelineNoteMarkers.querySelectorAll('[data-note-second]'), function (marker) {
+      var minutes = Number(marker.getAttribute('data-note-second')) / 60;
+      var linked = ['start', 'end'].some(function (name) { return Math.abs(minutes - timelineCursorMinutes(name)) < 1e-7; });
+      var position = timelineNotePosition(minutes, timelineZoom.start, timelineZoom.end);
+      marker.hidden = position === null;
+      marker.style.left = (position === null ? 0 : position) + '%';
+      marker.classList.toggle('is-linked', linked);
+    });
+  }
+
+  function timelineSnapKind(minutes, logPoints, notePoints) {
+    if (notePoints.some(function (point) { return Math.abs(minutes - point) < 1e-7; })) { return 'note'; }
+    if (logPoints.some(function (point) { return Math.abs(minutes - point) < 1e-7; })) { return 'log'; }
+    return '';
+  }
+
+  function syncTimelineCursorSnapStyles() {
+    var logPoints = byDate(state.viewDate).map(function (entry) { return (entry.start + entry.end) / 2; });
+    var notePoints = notesByDate(state.viewDate).map(noteMinutes);
+    ['start', 'end'].forEach(function (name) {
+      var cursor = name === 'start' ? el.timelineStartCursor : el.timelineEndCursor;
+      var kind = timelineSnapKind(timelineCursorMinutes(name), logPoints, notePoints);
+      cursor.classList.toggle('note-linked', kind === 'note');
+      cursor.classList.toggle('log-linked', kind === 'log');
+    });
+  }
+
+  function setTimelineNotePriority(second) {
+    Array.prototype.forEach.call(el.timelineNoteMarkers.querySelectorAll('[data-note-second]'), function (marker) {
+      marker.classList.toggle('is-priority', second !== null && !marker.hidden && Number(marker.getAttribute('data-note-second')) === second);
+    });
+  }
+
+  function prioritizeTimelineCursorNote(cursorName) {
+    var seconds = timelineCursorMinutes(cursorName) * 60;
+    var second = Math.round(seconds);
+    var marker = Math.abs(seconds - second) < 1e-4
+      ? el.timelineNoteMarkers.querySelector('[data-note-second="' + second + '"]') : null;
+    setTimelineNotePriority(marker ? second : null);
+  }
+
+  el.timelineRuler.addEventListener('pointerleave', function () {
+    if (el.timelineRuler.querySelector('.dragging')) { return; }
+    if (document.activeElement === el.timelineStartCursor) { prioritizeTimelineCursorNote('start'); }
+    else if (document.activeElement === el.timelineEndCursor) { prioritizeTimelineCursorNote('end'); }
+    else { setTimelineNotePriority(null); }
+  });
+
+  el.timelineNoteMarkers.addEventListener('focusin', function (event) {
+    var marker = event.target.closest('[data-note-second]');
+    if (!marker) { return; }
+    var second = Number(marker.getAttribute('data-note-second'));
+    setTimelineNotePriority(second);
+  });
+
+  el.timelineRuler.addEventListener('focusout', function (event) {
+    if (event.relatedTarget && el.timelineRuler.contains(event.relatedTarget)) { return; }
+    if (!el.timelineRuler.matches(':hover') && !el.timelineRuler.querySelector('.dragging')) {
+      setTimelineNotePriority(null);
+    }
+  });
+
+  el.timelineNoteMarkers.addEventListener('click', function (event) {
+    var marker = event.target.closest('[data-note-second]');
+    if (!marker) { return; }
+    var second = Number(marker.getAttribute('data-note-second'));
+    var notes = notesByDate(state.viewDate).filter(function (note) { return Math.round(noteMinutes(note) * 60) === second; });
+    openDetailModal('备注 · ' + toClock(second / 60), notes.map(function (note) {
+      return '<div class="detail-row detail-row-description"><span>' + escapeHtml(formatCreatedAt(note.createdAt)) +
+        '</span><b>' + escapeHtml(note.text) + '</b></div>';
+    }).join(''));
+  });
+
   function updateTimelineZoomLabel() {
     var span = timelineZoom.end - timelineZoom.start;
     el.timelineAxis.innerHTML = [0, 1, 2, 3, 4].map(function (index) {
-      var mark = Math.round(timelineZoom.start + span * index / 4);
+      var mark = Math.round((timelineZoom.start + span * index / 4) * 60) / 60;
       return '<span>' + toClock(mark) + '</span>';
     }).join('');
-    el.timelineStartCursor.style.left = (timelineZoom.start / DAY_MINUTES * 100) + '%';
-    el.timelineEndCursor.style.left = (timelineZoom.end / DAY_MINUTES * 100) + '%';
-    el.timelineStartCursor.setAttribute('aria-valuemin', '0');
-    el.timelineStartCursor.setAttribute('aria-valuemax', String(DAY_MINUTES));
-    el.timelineStartCursor.setAttribute('aria-valuestep', '1');
-    el.timelineStartCursor.setAttribute('aria-valuenow', String(timelineZoom.start));
-    el.timelineStartCursor.setAttribute('aria-valuetext', toClock(timelineZoom.start));
-    el.timelineEndCursor.setAttribute('aria-valuemin', '0');
-    el.timelineEndCursor.setAttribute('aria-valuemax', String(DAY_MINUTES));
-    el.timelineEndCursor.setAttribute('aria-valuestep', '1');
-    el.timelineEndCursor.setAttribute('aria-valuenow', String(timelineZoom.end));
-    el.timelineEndCursor.setAttribute('aria-valuetext', toClock(timelineZoom.end));
-    el.timelineStartCursor.setAttribute('data-value', toClock(timelineZoom.start));
-    el.timelineEndCursor.setAttribute('data-value', toClock(timelineZoom.end));
-    el.timelineStartCursor.title = '开始 ' + toClock(timelineZoom.start) + '，拖动设置开始时间';
-    el.timelineEndCursor.title = '结束 ' + toClock(timelineZoom.end) + '，拖动设置结束时间';
+    ['start', 'end'].forEach(function (name) {
+      var item = timelineCursors[name];
+      var cursor = name === 'start' ? el.timelineStartCursor : el.timelineEndCursor;
+      if (item.snap !== null) {
+        var position = timelineNotePosition(item.snap, timelineZoom.start, timelineZoom.end);
+        if (position === null) { item.snap = null; }
+        else { item.ratio = position / 100; }
+      }
+      var minutes = timelineCursorMinutes(name);
+      cursor.style.left = (item.ratio * 100) + '%';
+      cursor.setAttribute('aria-valuemin', '0');
+      cursor.setAttribute('aria-valuemax', String(DAY_MINUTES));
+      cursor.setAttribute('aria-valuestep', '1');
+      cursor.setAttribute('aria-valuenow', String(minutes));
+      cursor.setAttribute('aria-valuetext', toClock(minutes));
+      cursor.setAttribute('data-value', toClock(minutes));
+      cursor.title = (name === 'start' ? '左' : '右') + '游标 ' + toClock(minutes) + '，拖动实时缩放';
+    });
+    state.ui.timelineCursors = normalizeTimelineCursors(timelineCursors);
+    updateTimelineNoteMarkerPositions();
+    syncTimelineCursorSnapStyles();
   }
 
-  function setTimelineZoom(start, end, anchor) {
+  function setTimelineZoom(start, end, anchor, save) {
     var span = Math.max(60, Math.min(DAY_MINUTES, end - start));
     var boundedStart = Math.max(0, Math.min(DAY_MINUTES - span, start));
     timelineZoom.start = boundedStart;
     timelineZoom.end = boundedStart + span;
     timelineZoom.anchor = anchor === undefined ? timelineZoom.anchor : anchor;
     state.ui.timelineZoom = { start: timelineZoom.start, end: timelineZoom.end };
-    updateTimelineZoomLabel();
+    setTimelineNotePriority(null);
     renderTimeline(byDate(state.viewDate));
-    persist();
+    if (save !== false) { persist(); }
   }
 
   function timelineBlankSegments(dateStr) {
@@ -2973,6 +3222,7 @@
       el.timeline.appendChild(slot);
     });
     updateTimelineZoomLabel();
+    renderTimelineNoteLines();
   }
 
   function showTimelineEntry(entry) {
@@ -2991,7 +3241,7 @@
       '<div class="detail-row"><span>投入时间</span><b>' + hours(entryDuration(entry)) + ' h</b></div>' +
       '<div class="detail-row"><span>记录时间</span><b>' + escapeHtml(formatCreatedAt(entry.createdAt)) + '</b></div>');
     pendingEntryEdit = entry;
-    el.detailFillBlank.textContent = '跳转到复写并修改';
+    el.detailFillBlank.textContent = '跳转到记录并修改';
     el.detailFillBlank.classList.remove('hidden');
   }
 
@@ -3011,7 +3261,7 @@
     var end = stampParts(blank.end);
     pendingBlankRange = blank;
     pendingEntryEdit = null;
-    el.detailFillBlank.textContent = '跳转到复写并补充';
+    el.detailFillBlank.textContent = '跳转到记录并补充';
     openDetailModal('空白时间段',
       '<div class="timeline-detail-time">开始：' + escapeHtml(start.date) + ' ' + toClock(start.minutes) + '<br>结束：' + escapeHtml(end.date) + ' ' + toClock(end.minutes) + '</div>' +
       '<div class="detail-row"><span>状态</span><b>尚未复写</b></div>' +
@@ -3081,42 +3331,116 @@
     });
   });
 
-  function moveTimelineCursor(cursor, event) {
-    var rect = el.timelineRuler.getBoundingClientRect();
-    var ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-    var minutes = Math.round(ratio * DAY_MINUTES / 60) * 60;
-    if (cursor === 'start') {
-      minutes = Math.min(minutes, timelineZoom.end - 60);
-      setTimelineZoom(minutes, timelineZoom.end, null);
-    } else {
-      minutes = Math.max(minutes, timelineZoom.start + 60);
-      setTimelineZoom(timelineZoom.start, minutes, null);
+  function timelineSnapPoints() {
+    var points = [];
+    byDate(state.viewDate).forEach(function (entry) { points.push((entry.start + entry.end) / 2); });
+    notesByDate(state.viewDate).forEach(function (note) { points.push(noteMinutes(note)); });
+    return points.map(function (minutes) { return Math.round(minutes * 120) / 120; }).sort(function (a, b) {
+      return a - b;
+    }).filter(function (minutes, index, list) { return index === 0 || minutes !== list[index - 1]; });
+  }
+
+  function moveTimelineCursor(cursor, event, drag) {
+    var rect = el.timelineNoteMarkers.getBoundingClientRect();
+    if (!rect.width) { return; }
+    var previousX = drag.lastX;
+    var distance = event.clientX - previousX;
+    if (Math.abs(distance) < 1e-7) { return; }
+    drag.lastX = event.clientX;
+    var item = timelineCursors[cursor];
+    var previousPointerX = rect.left + item.ratio * rect.width;
+    var current = timelineCursorMinutes(cursor);
+    var minutesPerPixel = timelineZoomRange() / rect.width;
+    if (drag.released && Math.abs(event.clientX - drag.released.x) > 18) { drag.released = null; }
+    if (drag.snap) {
+      var fromSnap = event.clientX - drag.snap.x;
+      if (Math.abs(fromSnap) < 10) { return; }
+      distance = fromSnap - Math.sign(fromSnap) * 10;
+      drag.released = { minutes: drag.snap.minutes, x: event.clientX };
+      drag.snap = null;
     }
+    var pointerX = Math.max(rect.left, Math.min(rect.right, event.clientX - drag.offset));
+    var direction = distance > 0 ? 1 : -1;
+    // 每次移动都使用缩放后的屏幕位置，并取该位置对应的真实时刻。
+    var candidates = timelineSnapPoints().map(function (point) {
+      var position = timelineNotePosition(point, timelineZoom.start, timelineZoom.end);
+      return { minutes: point, x: position === null ? null : rect.left + position / 100 * rect.width };
+    }).filter(function (point) {
+      if (point.x === null ||
+          (drag.released && Math.abs(point.minutes - drag.released.minutes) < 1e-7)) { return false; }
+      if (Math.abs(point.minutes - current) < 1e-7) { return false; }
+      return Math.abs(point.x - pointerX) <= 6 || (direction > 0
+        ? point.x > previousPointerX && point.x <= pointerX
+        : point.x < previousPointerX && point.x >= pointerX);
+    });
+    candidates.sort(function (a, b) { return Math.abs(a.x - pointerX) - Math.abs(b.x - pointerX); });
+    if (candidates.length) {
+      item.snap = candidates[0].minutes;
+      item.ratio = (candidates[0].x - rect.left) / rect.width;
+      drag.snap = { minutes: item.snap, x: event.clientX };
+      drag.rangeValue = timelineZoom[cursor];
+      // 吸附只选中当前轴上的时刻，不把它重新当作缩放边界。
+      updateTimelineZoomLabel();
+    } else {
+      item.snap = null;
+      item.ratio = (pointerX - rect.left) / rect.width;
+      var min = cursor === 'start' ? 0 : timelineZoom.start + 60;
+      var max = cursor === 'start' ? timelineZoom.end - 60 : DAY_MINUTES;
+      drag.rangeValue = Math.max(min, Math.min(max, drag.rangeValue + distance * minutesPerPixel));
+      var boundary = Math.max(min, Math.min(max, Math.round(drag.rangeValue)));
+      if (cursor === 'start') { setTimelineZoom(boundary, timelineZoom.end, null, false); }
+      else { setTimelineZoom(timelineZoom.start, boundary, null, false); }
+    }
+    prioritizeTimelineCursorNote(cursor);
   }
 
   function bindTimelineCursor(cursorElement, cursorName) {
+    var drag = null;
+    function finishDrag() {
+      if (!drag) { return; }
+      drag = null;
+      cursorElement.classList.remove('dragging');
+      persist();
+      prioritizeTimelineCursorNote(cursorName);
+    }
+    cursorElement.addEventListener('pointerenter', function () { prioritizeTimelineCursorNote(cursorName); });
+    cursorElement.addEventListener('focus', function () { prioritizeTimelineCursorNote(cursorName); });
     cursorElement.addEventListener('pointerdown', function (event) {
+      if (!event.isPrimary || event.button !== 0) { return; }
       event.preventDefault();
       event.stopPropagation();
+      var current = timelineCursorMinutes(cursorName);
+      var rect = el.timelineNoteMarkers.getBoundingClientRect();
+      drag = {
+        offset: event.clientX - rect.left - timelineCursors[cursorName].ratio * rect.width,
+        lastX: event.clientX,
+        rangeValue: timelineZoom[cursorName],
+        snap: timelineSnapPoints().some(function (point) { return Math.abs(point - current) < 1e-7; })
+          ? { minutes: current, x: event.clientX } : null,
+        released: null
+      };
       cursorElement.classList.add('dragging');
       cursorElement.setPointerCapture(event.pointerId);
-      moveTimelineCursor(cursorName, event);
+      prioritizeTimelineCursorNote(cursorName);
     });
     cursorElement.addEventListener('pointermove', function (event) {
-      if (cursorElement.hasPointerCapture(event.pointerId)) {
-        moveTimelineCursor(cursorName, event);
+      if (drag && cursorElement.hasPointerCapture(event.pointerId)) {
+        moveTimelineCursor(cursorName, event, drag);
       }
     });
     cursorElement.addEventListener('pointerup', function (event) {
       event.preventDefault();
       event.stopPropagation();
-      cursorElement.classList.remove('dragging');
+      finishDrag();
       if (cursorElement.hasPointerCapture(event.pointerId)) {
         cursorElement.releasePointerCapture(event.pointerId);
       }
     });
     cursorElement.addEventListener('pointercancel', function () {
-      cursorElement.classList.remove('dragging');
+      finishDrag();
+    });
+    cursorElement.addEventListener('lostpointercapture', function () {
+      finishDrag();
     });
     cursorElement.addEventListener('click', function (event) {
       event.preventDefault();
@@ -3125,23 +3449,37 @@
     cursorElement.addEventListener('keydown', function (event) {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') { return; }
       event.preventDefault();
-      var delta = event.key === 'ArrowLeft' ? -60 : 60;
-      if (cursorName === 'start') {
-        setTimelineZoom(Math.max(0, Math.min(timelineZoom.start + delta, timelineZoom.end - 60)), timelineZoom.end, null);
-      } else {
-        setTimelineZoom(timelineZoom.start, Math.min(DAY_MINUTES, Math.max(timelineZoom.end + delta, timelineZoom.start + 60)), null);
-      }
+      if (drag) { return; }
+      var rect = el.timelineNoteMarkers.getBoundingClientRect();
+      var x = rect.left + timelineCursors[cursorName].ratio * rect.width;
+      moveTimelineCursor(cursorName, { clientX: x + (event.key === 'ArrowLeft' ? -60 : 60) / timelineZoomRange() * rect.width }, {
+        offset: 0, lastX: x, rangeValue: timelineZoom[cursorName], snap: null, released: null
+      });
+      persist();
     });
   }
 
   bindTimelineCursor(el.timelineStartCursor, 'start');
   bindTimelineCursor(el.timelineEndCursor, 'end');
 
-  el.timeline.addEventListener('dblclick', function () {
+  function resetTimelineZoom() {
+    timelineCursors = normalizeTimelineCursors(null);
     setTimelineZoom(0, DAY_MINUTES, null);
+  }
+
+  el.timeline.addEventListener('dblclick', function () {
+    resetTimelineZoom();
+  });
+
+  [el.timelineRuler, el.timelineAxis].forEach(function (surface) {
+    surface.addEventListener('dblclick', function (event) {
+      if (event.target.closest('.timeline-cursor, [data-note-second]')) { return; }
+      resetTimelineZoom();
+    });
   });
 
   function renderLog(dateStr) {
+    hideLogEntryTooltip();
     el.logDateLabel.textContent = dateStr;
     el.logView.innerHTML = buildLogLines(dateStr).map(function (l) {
       if (l.id) {
@@ -3174,6 +3512,19 @@
     el.logView.scrollTop = state.ui.logScrollTop;
   }
 
+  function renderNotes(dateStr) {
+    var scrollTop = el.noteView.scrollTop;
+    var notes = notesByDate(dateStr);
+    el.noteDateLabel.textContent = dateStr;
+    el.noteView.innerHTML = notes.length ? notes.map(function (note) {
+      return '<div class="log-line note-entry"><div class="log-entry-content">' +
+        '<time class="ts" datetime="' + escapeHtml(note.createdAt) + '">[' + escapeHtml(formatCreatedAt(note.createdAt)) + ']</time>' +
+        '<div class="msg log-entry-activity">' + escapeHtml(note.text) + '</div></div>' +
+        '<button type="button" class="del" data-note-del="' + escapeHtml(note.id) + '" aria-label="删除该备注" title="删除该备注">[x]</button></div>';
+    }).join('') : '<div class="empty">当日暂无备注。</div>';
+    el.noteView.scrollTop = scrollTop;
+  }
+
   function timelineSlotsForEntry(entryId) {
     return Array.prototype.filter.call(el.timeline.querySelectorAll('.slot[data-entry-id]'), function (slot) {
       return slot.getAttribute('data-entry-id') === entryId;
@@ -3194,18 +3545,71 @@
     })[0] || null;
   }
 
-  el.logView.addEventListener('mouseover', function (event) {
-    var entry = logEntryFromTarget(event.target);
-    if (entry) { setTimelineEntryLinked(entry.id, true); }
-  });
+  var tooltipLogLine = null;
+  function hideLogEntryTooltip() {
+    if (tooltipLogLine) { tooltipLogLine.removeAttribute('aria-describedby'); }
+    tooltipLogLine = null;
+    el.logEntryTooltip.classList.add('hidden');
+  }
 
-  el.logView.addEventListener('mouseout', function (event) {
-    var entry = logEntryFromTarget(event.target);
-    var related = event.relatedTarget;
-    if (entry && (!related || !related.closest || !related.closest('.log-entry[data-entry-id]'))) {
-      setTimelineEntryLinked(entry.id, false);
+  function showLogEntryTooltip(line) {
+    if (!line) { return; }
+    hideLogEntryTooltip();
+    tooltipLogLine = line;
+    var tooltip = el.logEntryTooltip;
+    tooltip.textContent = line.getAttribute('data-tooltip');
+    tooltip.classList.remove('hidden');
+    line.setAttribute('aria-describedby', 'logEntryTooltip');
+    var viewport = window.visualViewport;
+    var leftEdge = viewport ? viewport.offsetLeft : 0;
+    var topEdge = viewport ? viewport.offsetTop : 0;
+    var width = viewport ? viewport.width : window.innerWidth;
+    var height = viewport ? viewport.height : window.innerHeight;
+    tooltip.style.maxWidth = Math.max(0, Math.min(360, width - 24)) + 'px';
+    tooltip.style.maxHeight = Math.max(0, height - 24) + 'px';
+    var lineRect = line.getBoundingClientRect();
+    var tooltipRect = tooltip.getBoundingClientRect();
+    var above = lineRect.top - tooltipRect.height - 6;
+    var below = lineRect.bottom + 6;
+    var logTop = Math.max(topEdge + 12, el.logView.getBoundingClientRect().top + 1);
+    var top = above;
+    if (above < logTop) {
+      top = below + tooltipRect.height <= topEdge + height - 12 || above < topEdge + 12 ? below : above;
     }
-  });
+    tooltip.style.left = Math.max(leftEdge + 12, Math.min(lineRect.left + 8, leftEdge + width - tooltipRect.width - 12)) + 'px';
+    tooltip.style.top = Math.max(topEdge + 12, Math.min(top, topEdge + height - tooltipRect.height - 12)) + 'px';
+  }
+
+  function enterLogEntry(event) {
+    var line = event.target.closest('.log-entry[data-entry-id]');
+    if (!line || (event.relatedTarget && line.contains(event.relatedTarget))) { return; }
+    setTimelineEntryLinked(line.getAttribute('data-entry-id'), true);
+    showLogEntryTooltip(line);
+  }
+
+  function leaveLogEntry(event) {
+    var line = event.target.closest('.log-entry[data-entry-id]');
+    if (!line || (event.relatedTarget && line.contains(event.relatedTarget))) { return; }
+    setTimelineEntryLinked(line.getAttribute('data-entry-id'), false);
+    hideLogEntryTooltip();
+  }
+
+  el.logView.addEventListener('mouseover', enterLogEntry);
+  el.logView.addEventListener('mouseout', leaveLogEntry);
+  el.logView.addEventListener('focusin', enterLogEntry);
+  el.logView.addEventListener('focusout', leaveLogEntry);
+  document.addEventListener('scroll', function () {
+    if (tooltipLogLine && tooltipLogLine.contains(document.activeElement)) {
+      var rect = tooltipLogLine.getBoundingClientRect();
+      var logRect = el.logView.getBoundingClientRect();
+      if (rect.bottom > Math.max(0, logRect.top) && rect.top < Math.min(window.innerHeight, logRect.bottom)) {
+        showLogEntryTooltip(tooltipLogLine);
+        return;
+      }
+    }
+    hideLogEntryTooltip();
+  }, true);
+  window.addEventListener('resize', hideLogEntryTooltip);
 
   function openLogEntryDetail(event) {
     if (event.target.closest && event.target.closest('[data-del]')) { return; }
@@ -3973,7 +4377,9 @@
           ' h 尚未记录。');
 
     renderTimeline(list);
+    renderTimelineNoteMarkers();
     renderLog(state.viewDate);
+    renderNotes(state.viewDate);
     renderFocus();
     renderCategories();
   }
