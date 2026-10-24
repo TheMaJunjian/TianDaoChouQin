@@ -979,7 +979,11 @@
     var groupBottom = Math.max(submitRect.bottom, controlRect.bottom);
     var viewport = window.visualViewport;
     var viewportHeight = viewport ? viewport.height : window.innerHeight;
-    var anchor = groupBottom - groupTop > viewportHeight ? control : group.submit;
+    var groupFits = groupBottom - groupTop <= viewportHeight;
+    // 记录组放不下时，只需当前字段到写入按钮可见，不必带上前面的技能选项。
+    var focusedEntryFits = control.form.id === 'entryForm' && group.submit === el.entryActions &&
+      groupBottom - Math.min(controlRect.top, submitRect.top) + margin <= viewportHeight;
+    var anchor = groupFits || focusedEntryFits ? group.submit : control;
     group.submit.style.removeProperty('scroll-margin-block-start');
     group.submit.style.removeProperty('scroll-margin-block-end');
     control.style.removeProperty('scroll-margin-block-start');
