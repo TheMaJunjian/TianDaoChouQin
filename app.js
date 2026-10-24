@@ -204,7 +204,7 @@
     'skillForm', 'skillName', 'skillMode', 'skillLevelWrap', 'skillLevel',
     'skillHoursWrap', 'skillHours', 'skillList', 'hiddenSkillsBlock', 'hiddenSkillList', 'hiddenSkillToggle',
     'achList', 'hiddenAchievementsBlock', 'hiddenAchievementList', 'hiddenAchievementToggle',
-    'entryForm', 'entrySubmit', 'noteSubmit', 'noteDateLabel', 'noteView', 'copyNotes', 'clearNotes', 'logEntryTooltip', 'startDate', 'startTime', 'endDate', 'endTime', 'category', 'activity',
+    'entryForm', 'entryActions', 'entrySubmit', 'noteSubmit', 'noteDateLabel', 'noteView', 'copyNotes', 'clearNotes', 'logEntryTooltip', 'startDate', 'startTime', 'endDate', 'endTime', 'category', 'activity',
     'level', 'prevDay', 'nextDay', 'viewDate', 'timeline', 'timelineRuler', 'timelineNoteMarkers', 'timelineStartCursor', 'timelineEndCursor', 'timelineAxis', 'coverageFill',
     'coverageHint', 'logDateLabel', 'logView', 'copyLog', 'exportData',
     'importBtn', 'importFile', 'resetAll', 'clearDay', 'catList',
@@ -892,7 +892,7 @@
     if (!control || !control.form) { return null; }
     if (control.matches('button[type="submit"]')) {
       if (control.form.id === 'entryForm' && control === el.entrySubmit) {
-        return { start: el.category, submit: el.entrySubmit };
+        return { start: el.category, submit: el.entryActions };
       }
       if (['skillForm', 'sideQuestForm'].indexOf(control.form.id) >= 0) {
         return { start: control.form.querySelector('input, select, textarea'), submit: control };
@@ -906,7 +906,7 @@
       }
       var entryGroupControls = [el.category, el.activity, el.level, el.noteSubmit];
       if (entryGroupControls.indexOf(control) >= 0) {
-        return { start: el.category, submit: el.entrySubmit };
+        return { start: el.category, submit: el.entryActions };
       }
       return null;
     }
@@ -967,9 +967,9 @@
       var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
       var anchorRect = anchor.getBoundingClientRect();
       var margin = parseFloat(getComputedStyle(anchor).scrollMarginBlockEnd) || 0;
-      if (anchorRect.bottom <= viewportBottom - margin + 3 && anchorRect.top >= (viewport ? viewport.offsetTop : 0) - 3) {
+      if (Math.abs(anchorRect.bottom - (viewportBottom - margin)) <= 3 && anchorRect.top >= (viewport ? viewport.offsetTop : 0) - 3) {
         debugNativeFocusStable(anchor);
-        nativeFocusCalibrationControl = null;
+        // 同次点击的后续 resize 仍需校准，下一次点击或手动滑动才取消目标。
         return;
       }
     }
@@ -1125,6 +1125,7 @@
         viewportPageTop: Math.round(window.visualViewport.pageTop)
       });
       schedulePolishFloatUpdate('visualViewport.scroll');
+      scheduleNativeFocusResizeScroll();
     });
   }
 
