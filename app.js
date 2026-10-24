@@ -1028,6 +1028,16 @@
       anchorBottomBefore: Math.round(anchor.getBoundingClientRect().bottom)
     });
     anchor.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
+    if (anchor === el.entryActions) {
+      // 原生滚动可能仍按布局视口定位，核对键盘弹出后的实际可见边界。
+      var entryViewport = window.visualViewport;
+      var entryViewportBottom = entryViewport ? entryViewport.offsetTop + entryViewport.height : window.innerHeight;
+      var entryMargin = parseFloat(getComputedStyle(anchor).scrollMarginBlockEnd) || 0;
+      var entryShortfall = anchor.getBoundingClientRect().bottom - (entryViewportBottom - entryMargin);
+      if (entryShortfall > 3) {
+        window.scrollBy(0, entryShortfall);
+      }
+    }
     debugNativeFocusStable(anchor);
     nativeFocusCalibrationControl = control;
     nativeFocusResizeCompletedControl = nativeFocusClickSeen ? null : control;
