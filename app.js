@@ -3935,6 +3935,8 @@
   window.addEventListener('scroll', function () {
     var debugStart = debugStepStart();
     updatePolishFloat();
+    // 原生聚焦结束时还可能只滚动文档，继续按当前点击目标校验最终间距。
+    scheduleNativeFocusResizeScroll();
     debugStepEnd('window.scroll.updatePolishFloat', debugStart, { scrollY: window.scrollY });
   }, { passive: true });
   window.addEventListener('resize', function () {
