@@ -127,9 +127,6 @@
   var debugRecords = [];
   var debugRecordIndex = 0;
   var debugSessionStartedAt = performance.now();
-  var resumeFocusTrace = null;
-  var resumeFocusTraceTimer = null;
-  var hiddenSince = null;
   var persistedSnapshot = cloneState(state);
   var skillListCollapsed = false;
   var hiddenSkillListCollapsed = false;
@@ -276,68 +273,6 @@
       details: details
     });
     renderDebugPanel();
-  }
-
-  function debugEvent(label, details) {
-    if (!debugEnabled) { return; }
-    var now = performance.now();
-    debugRecords.push({
-      index: ++debugRecordIndex,
-      elapsed: now - debugSessionStartedAt,
-      label: label,
-      duration: 0,
-      details: details
-    });
-    renderDebugPanel();
-  }
-
-  function resumeFocusControl(target) {
-    if (!target || !target.matches || !target.matches('input, select, textarea, button[type="submit"]')) { return null; }
-    return target.id || target.tagName.toLowerCase();
-  }
-
-  function recordResumeFocusEvent(label, event, target) {
-    if (!resumeFocusTrace) { return; }
-    var now = performance.now();
-    var control = resumeFocusControl(target);
-    var eventTimeStamp = event && Number(event.timeStamp);
-    var eventLag = Number.isFinite(eventTimeStamp) && Math.abs(eventTimeStamp - now) < 60000
-      ? now - eventTimeStamp
-      : null;
-    debugEvent('resumeFocus.' + label, {
-      control: control,
-      fromResumeMs: Number((now - resumeFocusTrace.startedAt).toFixed(1)),
-      eventTimeStamp: Number.isFinite(eventTimeStamp) ? eventTimeStamp : null,
-      eventLagMs: eventLag === null ? null : Number(eventLag.toFixed(1)),
-      visibility: document.visibilityState
-    });
-    if (label === 'focusin' && control) {
-      if (resumeFocusTraceTimer !== null) { window.clearTimeout(resumeFocusTraceTimer); }
-      resumeFocusTraceTimer = null;
-      resumeFocusTrace = null;
-    }
-  }
-
-  function startResumeFocusTrace() {
-    if (resumeFocusTraceTimer !== null) { window.clearTimeout(resumeFocusTraceTimer); }
-    var startedAt = performance.now();
-    resumeFocusTrace = { startedAt: startedAt };
-    debugEvent('resumeFocus.start', {
-      hiddenDurationMs: hiddenSince === null ? null : Number((startedAt - hiddenSince).toFixed(1)),
-      visibility: document.visibilityState
-    });
-    resumeFocusTraceTimer = window.setTimeout(function () {
-      if (!resumeFocusTrace) { return; }
-      recordResumeFocusEvent('timeout', null, null);
-      resumeFocusTrace = null;
-      resumeFocusTraceTimer = null;
-    }, 10000);
-  }
-
-  function cancelResumeFocusTrace() {
-    if (resumeFocusTraceTimer !== null) { window.clearTimeout(resumeFocusTraceTimer); }
-    resumeFocusTraceTimer = null;
-    resumeFocusTrace = null;
   }
 
   function syncDebugAccess() {
@@ -880,7 +815,7 @@
     }, 150);
   }, { passive: true });
 
-  /* 让原生焦点滚动把整组控件放进键盘弹出后的视觉视口。 */
+  /* 点击与视口变化触发原生定位，350 毫秒后补滚；记录按钮仍被遮挡时立即校正差额。 */
   var ENTRY_FLOAT_GAP = 18;
   var pendingNativeFocusScrollControl = null;
   var nativeFocusPointerId = null;
@@ -891,7 +826,6 @@
   var nativeFocusResizeCompletedControl = null;
   var nativeFocusClickSeen = false;
   var nativeFocusCalibrationControl = null;
-  var nativeFocusStableTimer = null;
   var nativeFocusFallbackTimer = null;
   var nativeFocusDelayedTimer = null;
 
@@ -914,24 +848,6 @@
     }, 350);
   }
 
-  function debugNativeFocusStable(anchor) {
-    if (nativeFocusStableTimer !== null) { window.clearTimeout(nativeFocusStableTimer); }
-    nativeFocusStableTimer = window.setTimeout(function () {
-      nativeFocusStableTimer = null;
-      if (!anchor || !anchor.isConnected) { return; }
-      var rect = anchor.getBoundingClientRect();
-      var viewport = window.visualViewport;
-      var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
-      debugEvent('nativeFocus.stable', {
-        anchor: anchor.id,
-        scrollY: Math.round(window.scrollY),
-        anchorBottom: Math.round(rect.bottom),
-        viewportBottom: Math.round(viewportBottom),
-        gap: Math.round(viewportBottom - rect.bottom)
-      });
-    }, 120);
-  }
-
   function getControlScrollGroup(control) {
     if (!control || !control.form) { return null; }
     if (control.matches('button[type="submit"]')) {
@@ -948,7 +864,7 @@
       if (dateTimeControls.indexOf(control) >= 0) {
         return { start: el.startDate, submit: el.endTime };
       }
-      var entryGroupControls = [el.category, el.activity, el.level, el.noteSubmit];
+      var entryGroupControls = [el.category, el.activity, el.level];
       if (entryGroupControls.indexOf(control) >= 0) {
         return { start: el.category, submit: el.entryActions };
       }
@@ -965,7 +881,6 @@
     if (!control || !control.matches('input, select, textarea, button[type="submit"]')) { return; }
     var group = getControlScrollGroup(control);
     if (!group || !group.submit) {
-      control.style.removeProperty('scroll-margin-block-start');
       control.style.removeProperty('scroll-margin-block-end');
       return null;
     }
@@ -984,19 +899,9 @@
     var focusedEntryFits = control.form.id === 'entryForm' && group.submit === el.entryActions &&
       groupBottom - Math.min(controlRect.top, submitRect.top) + margin <= viewportHeight;
     var anchor = groupFits || focusedEntryFits ? group.submit : control;
-    group.submit.style.removeProperty('scroll-margin-block-start');
     group.submit.style.removeProperty('scroll-margin-block-end');
-    control.style.removeProperty('scroll-margin-block-start');
     control.style.removeProperty('scroll-margin-block-end');
     anchor.style.scrollMarginBlockEnd = margin + 'px';
-    debugEvent('nativeFocus.target', {
-      control: control.id,
-      anchor: anchor.id,
-      viewportHeight: Math.round(viewportHeight),
-      viewportOffsetTop: viewport ? Math.round(viewport.offsetTop) : 0,
-      groupHeight: Math.round(groupBottom - groupTop),
-      margin: Math.round(margin)
-    });
     return anchor;
   }
 
@@ -1005,9 +910,7 @@
     if (!control || !control.matches('input, select, textarea, button[type="submit"]')) { return; }
     var isCalibration = !pendingNativeFocusScrollControl;
     pendingNativeFocusScrollControl = null;
-    if (document.visibilityState === 'hidden' || !control || !control.isConnected) { return; }
-    var group = getControlScrollGroup(control);
-    if (!group || !group.submit) { return; }
+    if (document.visibilityState === 'hidden' || !control.isConnected) { return; }
     var anchor = prepareControlNativeScroll(control);
     if (!anchor) { return; }
     if (isCalibration) {
@@ -1016,17 +919,10 @@
       var anchorRect = anchor.getBoundingClientRect();
       var margin = parseFloat(getComputedStyle(anchor).scrollMarginBlockEnd) || 0;
       if (Math.abs(anchorRect.bottom - (viewportBottom - margin)) <= 3 && anchorRect.top >= (viewport ? viewport.offsetTop : 0) - 3) {
-        debugNativeFocusStable(anchor);
         // 同次点击的后续 resize 仍需校准，下一次点击或手动滑动才取消目标。
         return;
       }
     }
-    debugEvent('nativeFocus.scroll', {
-      control: control.id,
-      anchor: anchor.id,
-      scrollY: Math.round(window.scrollY),
-      anchorBottomBefore: Math.round(anchor.getBoundingClientRect().bottom)
-    });
     anchor.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
     if (anchor === el.entryActions) {
       // 原生滚动可能仍按布局视口定位，核对键盘弹出后的实际可见边界。
@@ -1038,7 +934,6 @@
         window.scrollBy(0, entryShortfall);
       }
     }
-    debugNativeFocusStable(anchor);
     nativeFocusCalibrationControl = control;
     nativeFocusResizeCompletedControl = nativeFocusClickSeen ? null : control;
   }
@@ -1053,7 +948,6 @@
 
   document.addEventListener('click', function (event) {
     var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
-    recordResumeFocusEvent('click', event, control);
     if (nativeFocusPointerMoved) {
       nativeFocusPointerMoved = false;
       pendingNativeFocusScrollControl = null;
@@ -1066,7 +960,6 @@
       return;
     }
     nativeFocusClickSeen = true;
-    debugEvent('nativeFocus.click', { control: control.id, scrollY: Math.round(window.scrollY) });
     scheduleNativeFocusDelayedScroll(control);
     if (nativeFocusResizeCompletedControl === control) {
       nativeFocusResizeCompletedControl = null;
@@ -1094,7 +987,6 @@
   document.addEventListener('pointerdown', function (event) {
     cancelNativeFocusDelayedScroll();
     var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
-    recordResumeFocusEvent('pointerdown', event, control);
     nativeFocusPointerId = event.pointerId;
     nativeFocusPointerStartX = event.clientX;
     nativeFocusPointerStartY = event.clientY;
@@ -1107,11 +999,6 @@
       window.clearTimeout(nativeFocusFallbackTimer);
       nativeFocusFallbackTimer = null;
     }
-    debugEvent('nativeFocus.pointerdown', {
-      control: control && control.id,
-      scrollY: Math.round(window.scrollY),
-      viewportHeight: window.visualViewport && Math.round(window.visualViewport.height)
-    });
     if (control) { prepareControlNativeScroll(control); }
   }, { passive: true });
 
@@ -1129,7 +1016,6 @@
       window.clearTimeout(nativeFocusFallbackTimer);
       nativeFocusFallbackTimer = null;
     }
-    debugEvent('nativeFocus.pointermove.cancel', { scrollY: Math.round(window.scrollY) });
     if (nativeFocusResizeFrame !== null) {
       window.cancelAnimationFrame(nativeFocusResizeFrame);
       nativeFocusResizeFrame = null;
@@ -1157,7 +1043,7 @@
   }, { passive: true });
 
   var polishFloatUpdateFrame = null;
-  function schedulePolishFloatUpdate(source) {
+  function schedulePolishFloatUpdate() {
     if (document.visibilityState === 'hidden' || polishFloatUpdateFrame !== null) {
       return;
     }
@@ -1176,23 +1062,11 @@
 
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
-      debugEvent('nativeFocus.visualViewport.resize', {
-        scrollY: Math.round(window.scrollY),
-        pending: pendingNativeFocusScrollControl && pendingNativeFocusScrollControl.id,
-        viewportHeight: Math.round(window.visualViewport.height),
-        viewportOffsetTop: Math.round(window.visualViewport.offsetTop)
-      });
-      schedulePolishFloatUpdate('visualViewport.resize');
+      schedulePolishFloatUpdate();
       scheduleNativeFocusResizeScroll();
     });
     window.visualViewport.addEventListener('scroll', function () {
-      debugEvent('nativeFocus.visualViewport.scroll', {
-        scrollY: Math.round(window.scrollY),
-        pending: pendingNativeFocusScrollControl && pendingNativeFocusScrollControl.id,
-        viewportOffsetTop: Math.round(window.visualViewport.offsetTop),
-        viewportPageTop: Math.round(window.visualViewport.pageTop)
-      });
-      schedulePolishFloatUpdate('visualViewport.scroll');
+      schedulePolishFloatUpdate();
       scheduleNativeFocusResizeScroll();
     });
   }
@@ -1209,10 +1083,7 @@
   }
 
   document.addEventListener('visibilitychange', function () {
-    debugEvent('visibilitychange', { state: document.visibilityState });
     if (document.visibilityState === 'hidden') {
-      hiddenSince = performance.now();
-      cancelResumeFocusTrace();
       cancelPolishFloatUpdate();
       cancelDeferredSavesBeforeBackground();
       flushState();
@@ -1221,8 +1092,6 @@
         sigTimer = null;
       }
       renderTamperSignature();
-    } else {
-      startResumeFocusTrace();
     }
   });
   window.addEventListener('pagehide', function () {
