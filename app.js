@@ -279,6 +279,7 @@
   }
 
   function debugEvent(label, details) {
+    if (nativeFocusDiagnosticEnabled && label.indexOf('nativeFocus.') === 0) { recordNativeFocusDiagnostic(label, details); }
     if (!debugEnabled) { return; }
     var now = performance.now();
     debugRecords.push({
@@ -896,6 +897,144 @@
   var nativeFocusFollowUpUntil = 0;
   var nativeFocusLastScroll = null;
   var nativeFocusScrollSpaceHeight = 0;
+  var nativeFocusDiagnosticEnabled = new URLSearchParams(window.location.search).get('focus-debug') === '1';
+  var nativeFocusDiagnosticScript = document.currentScript && document.currentScript.getAttribute('src');
+  var nativeFocusDiagnosticRecords = [];
+  var nativeFocusDiagnosticTimers = [];
+  var nativeFocusDiagnosticStartedAt = performance.now();
+  var nativeFocusDiagnosticDropped = 0;
+  var nativeFocusDiagnosticCopyText = null;
+
+  function nativeFocusDiagnosticRect(element) {
+    if (!element) { return null; }
+    var rect = element.getBoundingClientRect();
+    return { top: Math.round(rect.top), bottom: Math.round(rect.bottom), height: Math.round(rect.height) };
+  }
+
+  function recordNativeFocusDiagnostic(label, details, event) {
+    if (!nativeFocusDiagnosticEnabled) { return; }
+    var active = document.activeElement;
+    var control = pendingNativeFocusScrollControl || nativeFocusCalibrationControl || active;
+    var group = getControlScrollGroup(control);
+    var viewport = window.visualViewport;
+    var scrollRoot = document.scrollingElement || document.documentElement;
+    var floatStyle = getComputedStyle(el.polishFloat);
+    var record = {
+      ms: Math.round(performance.now() - nativeFocusDiagnosticStartedAt),
+      event: label,
+      tab: state.ui.activeTab,
+      active: active && active.id,
+      pending: pendingNativeFocusScrollControl && pendingNativeFocusScrollControl.id,
+      calibrating: nativeFocusCalibrationControl && nativeFocusCalibrationControl.id,
+      pointerMoved: nativeFocusPointerMoved,
+      viewport: {
+        innerWidth: window.innerWidth,
+        clientWidth: document.documentElement.clientWidth,
+        width: viewport && Math.round(viewport.width),
+        innerHeight: window.innerHeight,
+        clientHeight: document.documentElement.clientHeight,
+        height: viewport && Math.round(viewport.height),
+        offsetTop: viewport && Math.round(viewport.offsetTop),
+        pageTop: viewport && Math.round(viewport.pageTop),
+        scale: viewport && viewport.scale,
+        scrollY: Math.round(window.scrollY),
+        scrollRoom: Math.round(scrollRoot.scrollHeight - scrollRoot.clientHeight - scrollRoot.scrollTop)
+      },
+      float: {
+        hidden: el.polishFloat.classList.contains('hidden'),
+        narrow: isNarrowScreen(),
+        rect: nativeFocusDiagnosticRect(el.polishFloat),
+        display: floatStyle.display,
+        visibility: floatStyle.visibility,
+        bottom: floatStyle.bottom,
+        inset: document.body.style.getPropertyValue('--visual-viewport-inset')
+      },
+      originalBar: nativeFocusDiagnosticRect(el.polishBlock),
+      control: nativeFocusDiagnosticRect(control && control.matches('input, select, textarea') ? control : null),
+      button: nativeFocusDiagnosticRect(group && group.submit),
+      scrollSpace: document.body.style.getPropertyValue('--focus-scroll-space')
+    };
+    if (details) { record.details = details; }
+    if (event) {
+      record.pointer = {
+        target: event.target && event.target.id,
+        type: event.pointerType,
+        id: event.pointerId,
+        clientY: event.clientY,
+        screenY: event.screenY
+      };
+    }
+    if (nativeFocusDiagnosticRecords.length >= 100) {
+      nativeFocusDiagnosticRecords.splice(5, 1);
+      nativeFocusDiagnosticDropped += 1;
+    }
+    nativeFocusDiagnosticRecords.push(record);
+  }
+
+  function nativeFocusDiagnosticReport() {
+    var header = {
+      script: nativeFocusDiagnosticScript,
+      userAgent: navigator.userAgent,
+      width: window.innerWidth,
+      screen: { width: window.screen.width, height: window.screen.height },
+      dropped: nativeFocusDiagnosticDropped
+    };
+    return [JSON.stringify(header)].concat(nativeFocusDiagnosticRecords.map(function (record) {
+      return JSON.stringify(record);
+    })).join('\n');
+  }
+
+  function initNativeFocusDiagnostics() {
+    if (!nativeFocusDiagnosticEnabled) { return; }
+    var copyButton = document.createElement('button');
+    copyButton.type = 'button';
+    copyButton.id = 'focusDiagnosticCopy';
+    copyButton.textContent = '复制定位信息';
+    copyButton.style.cssText = 'position:fixed;top:8px;right:8px;z-index:100;padding:6px 8px;' +
+      'border:1px solid #4fe3ff;border-radius:4px;background:#06121b;color:#4fe3ff;font:14px sans-serif;';
+    document.body.appendChild(copyButton);
+    document.addEventListener('pointerdown', function (event) {
+      recordNativeFocusDiagnostic('pointerdown.before', null, event);
+      if (event.target === copyButton) {
+        // 在复制按钮使输入框失焦、键盘收起之前保存现场。
+        nativeFocusDiagnosticCopyText = nativeFocusDiagnosticReport();
+      }
+    }, true);
+    ['pointerup', 'pointermove', 'pointercancel', 'click', 'focusin', 'focusout'].forEach(function (type) {
+      document.addEventListener(type, function (event) {
+        recordNativeFocusDiagnostic(type, null, event);
+        if (type !== 'focusin' || !event.target.matches('input, select, textarea')) { return; }
+        nativeFocusDiagnosticTimers.forEach(function (timer) { window.clearTimeout(timer); });
+        nativeFocusDiagnosticTimers = [0, 100, 300, 700, 1200, 2000].map(function (delay) {
+          return window.setTimeout(function () { recordNativeFocusDiagnostic('sample.' + delay); }, delay);
+        });
+      }, true);
+    });
+    ['resize', 'scroll'].forEach(function (type) {
+      window.addEventListener(type, function () { recordNativeFocusDiagnostic('window.' + type); }, { passive: true });
+    });
+    copyButton.addEventListener('click', function () {
+      var report = nativeFocusDiagnosticCopyText || nativeFocusDiagnosticReport();
+      function copied() { copyButton.textContent = '定位信息已复制'; }
+      function fallback() {
+        var area = document.createElement('textarea');
+        area.value = report;
+        area.readOnly = true;
+        area.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;';
+        document.body.appendChild(area);
+        area.select();
+        var success = false;
+        try { success = document.execCommand('copy'); } catch (e) { success = false; }
+        area.remove();
+        if (success) { copied(); }
+        else { window.prompt('请复制定位信息', report); }
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(report).then(copied, fallback);
+      } else { fallback(); }
+    });
+    recordNativeFocusDiagnostic('ready');
+  }
 
   function nativeFocusViewport() {
     var viewport = window.visualViewport;
@@ -4639,6 +4778,7 @@
     }
     debugStepEnd('init.total', initStart, { activeTab: state.ui.activeTab });
     renderDebugPanel();
+    initNativeFocusDiagnostics();
   }
 
   init();
