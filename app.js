@@ -215,6 +215,30 @@
     el[id] = document.getElementById(id);
   });
 
+  /* 单行文本区避免触发浏览器的密码、支付与地址填充入口。 */
+  document.addEventListener('input', function (event) {
+    if (event.target.matches('textarea.single-line-input')) {
+      var value = event.target.value.replace(/[\r\n]/g, '');
+      if (value !== event.target.value) { event.target.value = value; }
+    }
+  }, true);
+  document.addEventListener('beforeinput', function (event) {
+    if (event.target.matches('textarea.single-line-input') &&
+        (event.inputType === 'insertLineBreak' || event.inputType === 'insertParagraph')) {
+      event.preventDefault();
+    }
+  });
+  document.addEventListener('keydown', function (event) {
+    if (!event.target.matches('textarea.single-line-input') || event.key !== 'Enter' ||
+        event.isComposing || event.keyCode === 229) { return; }
+    event.preventDefault();
+    var form = event.target.form;
+    if (form && form.id === 'skillForm') {
+      if (form.requestSubmit) { form.requestSubmit(); }
+      else { form.querySelector('button[type="submit"]').click(); }
+    }
+  });
+
   function debugDetails(details) {
     if (details === undefined || details === null) { return ''; }
     if (typeof details === 'string') { return details; }
@@ -869,6 +893,43 @@
   var nativeFocusCalibrationControl = null;
   var nativeFocusStableTimer = null;
   var nativeFocusFallbackTimer = null;
+  var nativeFocusFollowUpTimer = null;
+  var nativeFocusFollowUpUntil = 0;
+
+  function nativeFocusViewport() {
+    var viewport = window.visualViewport;
+    var top = viewport ? viewport.offsetTop : 0;
+    var bottom = Math.min(window.innerHeight, viewport ? top + viewport.height : window.innerHeight);
+    return { top: top, bottom: bottom, height: Math.max(0, bottom - top) };
+  }
+
+  function syncNativeFocusViewport() {
+    var viewport = nativeFocusViewport();
+    var inset = Math.max(0, window.innerHeight - viewport.bottom);
+    document.body.style.setProperty('--keyboard-inset', inset + 'px');
+    return viewport;
+  }
+
+  function cancelNativeFocusFollowUp() {
+    if (nativeFocusFollowUpTimer !== null) { window.clearTimeout(nativeFocusFollowUpTimer); }
+    nativeFocusFollowUpTimer = null;
+    nativeFocusFollowUpUntil = 0;
+  }
+
+  function queueNativeFocusFollowUp() {
+    if (nativeFocusFollowUpTimer !== null || performance.now() >= nativeFocusFollowUpUntil ||
+        (!pendingNativeFocusScrollControl && !nativeFocusCalibrationControl)) { return; }
+    nativeFocusFollowUpTimer = window.setTimeout(function () {
+      nativeFocusFollowUpTimer = null;
+      scheduleNativeFocusResizeScroll();
+      queueNativeFocusFollowUp();
+    }, 80);
+  }
+
+  function startNativeFocusFollowUp() {
+    nativeFocusFollowUpUntil = performance.now() + 800;
+    queueNativeFocusFollowUp();
+  }
 
   function debugNativeFocusStable(anchor) {
     if (nativeFocusStableTimer !== null) { window.clearTimeout(nativeFocusStableTimer); }
@@ -876,13 +937,15 @@
       nativeFocusStableTimer = null;
       if (!anchor || !anchor.isConnected) { return; }
       var rect = anchor.getBoundingClientRect();
-      var viewport = window.visualViewport;
-      var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
+      var viewport = nativeFocusViewport();
+      var viewportBottom = viewport.bottom;
       debugEvent('nativeFocus.stable', {
         anchor: anchor.id,
         scrollY: Math.round(window.scrollY),
         anchorBottom: Math.round(rect.bottom),
         viewportBottom: Math.round(viewportBottom),
+        innerHeight: Math.round(window.innerHeight),
+        visualHeight: window.visualViewport && Math.round(window.visualViewport.height),
         gap: Math.round(viewportBottom - rect.bottom)
       });
     }, 120);
@@ -933,9 +996,13 @@
     var submitRect = group.submit.getBoundingClientRect();
     var groupTop = Math.min(groupStartRect.top, controlRect.top);
     var groupBottom = Math.max(submitRect.bottom, controlRect.bottom);
-    var viewport = window.visualViewport;
-    var viewportHeight = viewport ? viewport.height : window.innerHeight;
-    var anchor = groupBottom - groupTop > viewportHeight ? control : group.submit;
+    var viewport = nativeFocusViewport();
+    var viewportHeight = viewport.height;
+    var availableHeight = Math.max(0, viewportHeight - margin);
+    var groupFits = groupBottom - groupTop <= availableHeight;
+    var focusedRangeFits = control.form.id === 'entryForm' && group.submit === el.entryActions &&
+      groupBottom - Math.min(controlRect.top, submitRect.top) <= availableHeight;
+    var anchor = groupFits || focusedRangeFits ? group.submit : control;
     group.submit.style.removeProperty('scroll-margin-block-start');
     group.submit.style.removeProperty('scroll-margin-block-end');
     control.style.removeProperty('scroll-margin-block-start');
@@ -945,8 +1012,10 @@
       control: control.id,
       anchor: anchor.id,
       viewportHeight: Math.round(viewportHeight),
-      viewportOffsetTop: viewport ? Math.round(viewport.offsetTop) : 0,
+      viewportOffsetTop: Math.round(viewport.top),
       groupHeight: Math.round(groupBottom - groupTop),
+      focusedRangeHeight: Math.round(groupBottom - controlRect.top),
+      innerHeight: Math.round(window.innerHeight),
       margin: Math.round(margin)
     });
     return anchor;
@@ -960,26 +1029,38 @@
     if (document.visibilityState === 'hidden' || !control || !control.isConnected) { return; }
     var group = getControlScrollGroup(control);
     if (!group || !group.submit) { return; }
+    syncNativeFocusViewport();
     var anchor = prepareControlNativeScroll(control);
     if (!anchor) { return; }
-    if (isCalibration) {
-      var viewport = window.visualViewport;
-      var viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
-      var anchorRect = anchor.getBoundingClientRect();
-      var margin = parseFloat(getComputedStyle(anchor).scrollMarginBlockEnd) || 0;
-      if (Math.abs(anchorRect.bottom - (viewportBottom - margin)) <= 3 && anchorRect.top >= (viewport ? viewport.offsetTop : 0) - 3) {
-        debugNativeFocusStable(anchor);
-        // 同次点击的后续 resize 仍需校准，下一次点击或手动滑动才取消目标。
-        return;
-      }
+    var viewport = nativeFocusViewport();
+    var anchorRect = anchor.getBoundingClientRect();
+    var margin = parseFloat(getComputedStyle(anchor).scrollMarginBlockEnd) || 0;
+    if (Math.abs(anchorRect.bottom - (viewport.bottom - margin)) <= 3 && anchorRect.top >= viewport.top - 3) {
+      nativeFocusCalibrationControl = control;
+      nativeFocusResizeCompletedControl = nativeFocusClickSeen ? null : control;
+      return;
     }
     debugEvent('nativeFocus.scroll', {
       control: control.id,
       anchor: anchor.id,
+      calibration: isCalibration,
       scrollY: Math.round(window.scrollY),
       anchorBottomBefore: Math.round(anchor.getBoundingClientRect().bottom)
     });
     anchor.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
+    viewport = nativeFocusViewport();
+    var remaining = anchor.getBoundingClientRect().bottom - (viewport.bottom - margin);
+    if (Math.abs(remaining) > 3) {
+      window.scrollBy({ top: remaining, left: 0, behavior: 'auto' });
+    }
+    debugEvent('nativeFocus.position', {
+      control: control.id,
+      anchor: anchor.id,
+      correction: Math.round(remaining),
+      gap: Math.round(viewport.bottom - anchor.getBoundingClientRect().bottom),
+      margin: Math.round(margin),
+      maxScrollY: Math.round(document.documentElement.scrollHeight - window.innerHeight)
+    });
     debugNativeFocusStable(anchor);
     nativeFocusCalibrationControl = control;
     nativeFocusResizeCompletedControl = nativeFocusClickSeen ? null : control;
@@ -1019,6 +1100,7 @@
     }
     nativeFocusCalibrationControl = null;
     pendingNativeFocusScrollControl = control;
+    startNativeFocusFollowUp();
     if (nativeFocusFallbackTimer !== null) { window.clearTimeout(nativeFocusFallbackTimer); }
     nativeFocusFallbackTimer = window.setTimeout(function () {
       nativeFocusFallbackTimer = null;
@@ -1027,6 +1109,7 @@
   });
 
   document.addEventListener('pointerdown', function (event) {
+    cancelNativeFocusFollowUp();
     var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
     recordResumeFocusEvent('pointerdown', event, control);
     nativeFocusPointerId = event.pointerId;
@@ -1049,12 +1132,19 @@
     if (control) { prepareControlNativeScroll(control); }
   }, { passive: true });
 
+  document.addEventListener('wheel', function () {
+    cancelNativeFocusFollowUp();
+    pendingNativeFocusScrollControl = null;
+    nativeFocusCalibrationControl = null;
+  }, { passive: true });
+
   document.addEventListener('pointermove', function (event) {
     if (event.pointerId !== nativeFocusPointerId || nativeFocusPointerMoved) { return; }
     var movedX = event.clientX - nativeFocusPointerStartX;
     var movedY = event.clientY - nativeFocusPointerStartY;
     if (movedX * movedX + movedY * movedY < 64) { return; }
     nativeFocusPointerMoved = true;
+    cancelNativeFocusFollowUp();
     pendingNativeFocusScrollControl = null;
     nativeFocusResizeCompletedControl = null;
     nativeFocusCalibrationControl = null;
@@ -1077,6 +1167,7 @@
   document.addEventListener('pointercancel', function (event) {
     if (event.pointerId !== nativeFocusPointerId) { return; }
     nativeFocusPointerId = null;
+    cancelNativeFocusFollowUp();
     nativeFocusPointerMoved = false;
     pendingNativeFocusScrollControl = null;
     nativeFocusResizeCompletedControl = null;
@@ -1087,6 +1178,13 @@
       nativeFocusResizeFrame = null;
     }
   }, { passive: true });
+
+  window.addEventListener('resize', function () {
+    syncNativeFocusViewport();
+    schedulePolishFloatUpdate('window.resize');
+    scheduleNativeFocusResizeScroll();
+    startNativeFocusFollowUp();
+  });
 
   var polishFloatUpdateFrame = null;
   function schedulePolishFloatUpdate(source) {
@@ -1108,6 +1206,7 @@
 
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', function () {
+      syncNativeFocusViewport();
       debugEvent('nativeFocus.visualViewport.resize', {
         scrollY: Math.round(window.scrollY),
         pending: pendingNativeFocusScrollControl && pendingNativeFocusScrollControl.id,
@@ -1116,8 +1215,10 @@
       });
       schedulePolishFloatUpdate('visualViewport.resize');
       scheduleNativeFocusResizeScroll();
+      startNativeFocusFollowUp();
     });
     window.visualViewport.addEventListener('scroll', function () {
+      syncNativeFocusViewport();
       debugEvent('nativeFocus.visualViewport.scroll', {
         scrollY: Math.round(window.scrollY),
         pending: pendingNativeFocusScrollControl && pendingNativeFocusScrollControl.id,
@@ -1130,6 +1231,7 @@
   }
 
   function cancelDeferredSavesBeforeBackground() {
+    cancelNativeFocusFollowUp();
     [pageScrollSaveTimer, saveTimer, draftSaveTimer, sigTimer].forEach(function (timer) {
       if (timer !== null) { window.clearTimeout(timer); }
     });
@@ -1870,11 +1972,11 @@
 
   document.querySelectorAll('[data-weight-step]').forEach(function (button) {
     button.addEventListener('click', function () {
-      var step = Number(el.attrWeight.step) || 0.1;
+      var step = Number(el.attrWeight.getAttribute('data-step')) || 0.1;
       var value = Number(el.attrWeight.value);
       if (!Number.isFinite(value)) { value = 0; }
       value += (Number(button.getAttribute('data-weight-step')) || 0) * step;
-      value = Math.max(Number(el.attrWeight.min) || 0, value);
+      value = Math.max(Number(el.attrWeight.getAttribute('data-min')) || 0, value);
       el.attrWeight.value = value.toFixed(1);
       el.attrWeight.dispatchEvent(new Event('input', { bubbles: true }));
       el.attrWeight.focus();
@@ -3648,7 +3750,7 @@
       el.focusPercent.textContent = '0.000%';
       el.focusHint.textContent = state.skills.length
         ? '未设定主修方向，请宿主从已有技能中选择一项，进度将直接沿用该技能的累计小时。'
-        : '尚无技能可供选择，请宿主先复写技能，再指定主修方向。';
+        : '尚无技能可供选择，请宿主先记录技能，再指定主修方向。';
       return;
     }
     // 主修方向即技能：进度直接沿用该技能已累计的小时，不会从零开始。

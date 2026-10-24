@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>天道酬勤 · 系统面板</title>
-<link rel="stylesheet" href="styles.css?v=20261023-11">
+<link rel="stylesheet" href="styles.css?v=20261024-2">
 </head>
 <body>
 <div class="scanline"></div>
@@ -45,18 +45,18 @@
       </div>
       <div class="attr-row">
         <span class="attr-label">天赋</span>
-        <input type="text" id="attrTalent" placeholder="">
+        <textarea id="attrTalent" class="single-line-input" rows="1" wrap="off" autocomplete="off" aria-label="天赋" aria-multiline="false"></textarea>
         <button type="button" class="attr-plus" data-attr-plus="talent" aria-label="强化天赋">+</button>
       </div>
       <div class="attr-row">
         <span class="attr-label">修为</span>
-        <input type="text" id="attrEdu" placeholder="">
+        <textarea id="attrEdu" class="single-line-input" rows="1" wrap="off" autocomplete="off" aria-label="修为" aria-multiline="false"></textarea>
         <button type="button" class="attr-plus" data-attr-plus="edu" aria-label="强化修为">+</button>
       </div>
       <div class="attr-row">
         <span class="attr-label">体重</span>
         <div class="attr-number-control">
-          <input type="number" id="attrWeight" placeholder="kg" min="0" step="0.1">
+          <textarea id="attrWeight" class="single-line-input" rows="1" wrap="off" inputmode="decimal" autocomplete="off" placeholder="kg" data-min="0" data-step="0.1" aria-label="体重" aria-multiline="false"></textarea>
           <div class="number-stepper" aria-label="调整体重">
             <button type="button" class="number-stepper-btn" data-weight-step="1" aria-label="增加体重">+</button>
             <button type="button" class="number-stepper-btn" data-weight-step="-1" aria-label="减少体重">−</button>
@@ -66,12 +66,12 @@
       </div>
       <div class="attr-row">
         <span class="attr-label">财产</span>
-        <input type="text" id="attrProperty" placeholder="">
+        <textarea id="attrProperty" class="single-line-input" rows="1" wrap="off" autocomplete="off" aria-label="财产" aria-multiline="false"></textarea>
         <button type="button" class="attr-plus" data-attr-plus="property" aria-label="强化财产">+</button>
       </div>
       <div class="attr-row">
         <span class="attr-label">状态</span>
-        <input type="text" id="attrStatus" placeholder="">
+        <textarea id="attrStatus" class="single-line-input" rows="1" wrap="off" autocomplete="off" aria-label="状态" aria-multiline="false"></textarea>
         <button type="button" class="attr-plus" data-attr-plus="status" aria-label="强化状态">+</button>
       </div>
       <div class="attr-row attr-row-link">
@@ -122,20 +122,20 @@
     </section>
 
     <section class="card" id="skillCard" data-hint="技能记录宿主的修行积累，每一次投入都会沉淀为可见进度。">
-      <h2>复写技能</h2>
+      <h2>记录技能</h2>
       <form id="skillForm" class="entry-form" autocomplete="off" novalidate>
-        <label class="wide"><span>技能名称</span><input type="text" id="skillName" placeholder="" required></label>
-        <label><span>复写方式</span>
+        <label class="wide"><span>技能名称</span><textarea id="skillName" class="single-line-input" rows="1" wrap="off" autocomplete="off" aria-multiline="false" required></textarea></label>
+        <label><span>记录方式</span>
           <select id="skillMode">
-            <option value="level">按等级复写</option>
-            <option value="hours">按小时复写</option>
+            <option value="level">按等级记录</option>
+            <option value="hours">按小时记录</option>
           </select>
         </label>
         <label id="skillLevelWrap"><span>等级</span>
           <select id="skillLevel"></select>
         </label>
-        <label id="skillHoursWrap" class="hidden"><span>投入小时</span><input type="number" id="skillHours" min="0" max="50000" step="1"></label>
-        <button type="submit" class="btn wide">复写 / 更新技能</button>
+        <label id="skillHoursWrap" class="hidden"><span>投入小时</span><textarea id="skillHours" class="single-line-input" rows="1" wrap="off" inputmode="decimal" autocomplete="off" aria-multiline="false"></textarea></label>
+        <button type="submit" class="btn wide">记录 / 更新技能</button>
       </form>
       <div class="hidden-skills-block hidden" id="hiddenSkillsBlock">
         <div class="hidden-skills-title">
@@ -368,6 +368,6 @@
   </div>
 </div>
 
-<script src="app.js?v=20261024-1"></script>
+<script src="app.js?v=20261024-2"></script>
 </body>
 </html>

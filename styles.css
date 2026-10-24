@@ -16,7 +16,7 @@
 
 body {
   margin: 0;
-  padding: 0 0 40px;
+  padding: 0 0 calc(40px + var(--keyboard-inset, 0px));
   background:
     radial-gradient(circle at 20% 0%, #0d2233 0%, transparent 55%),
     radial-gradient(circle at 90% 10%, #12283a 0%, transparent 45%),
@@ -272,6 +272,15 @@ textarea {
   scrollbar-color: var(--line) rgba(28, 59, 77, 0.28);
 }
 
+textarea.single-line-input {
+  height: 33px;
+  min-height: 33px;
+  line-height: 17px;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+}
+
 textarea::-webkit-scrollbar { width: 8px; }
 textarea::-webkit-scrollbar-track { background: rgba(28, 59, 77, 0.28); border-radius: 4px; }
 textarea::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
@@ -378,7 +387,7 @@ input[type="number"]::-webkit-outer-spin-button {
 
 input[type="number"] { -moz-appearance: textfield; }
 
-input:focus, select:focus {
+input:focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--cyan);
   box-shadow: 0 0 6px rgba(79, 227, 255, 0.4);
@@ -478,13 +487,13 @@ input:focus, select:focus {
   font-size: 12px;
   color: var(--muted);
 }
-.attr-row input { flex: 1; }
+.attr-row input, .attr-row textarea { flex: 1; min-width: 0; }
 .attr-number-control {
   display: flex;
   flex: 1;
   min-width: 0;
 }
-.attr-number-control input {
+.attr-number-control input, .attr-number-control textarea {
   min-width: 0;
   border-radius: 4px 0 0 4px;
 }
@@ -636,7 +645,7 @@ input:focus, select:focus {
 }
 
 .polish-float.at-top { top: 8px; }
-.polish-float.at-bottom { bottom: 8px; }
+.polish-float.at-bottom { bottom: calc(8px + var(--keyboard-inset, 0px)); }
 .polish-float .progress-bar { flex: 1; height: 10px; }
 .polish-float-label,
 .polish-float-pct {
