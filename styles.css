@@ -16,14 +16,14 @@
 
 body {
   margin: 0;
-  padding: 0 0 calc(40px + var(--keyboard-inset, 0px));
+  padding: 0 0 calc(40px + var(--focus-scroll-space, 0px));
   background:
     radial-gradient(circle at 20% 0%, #0d2233 0%, transparent 55%),
     radial-gradient(circle at 90% 10%, #12283a 0%, transparent 45%),
     var(--bg);
   color: var(--text);
   font-family: "Consolas", "Menlo", "Courier New", "Microsoft YaHei", monospace;
-  min-height: 100vh;
+  min-height: calc(100vh + var(--focus-scroll-space, 0px));
   transition: background 0.6s ease;
 }
 

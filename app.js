@@ -892,14 +892,10 @@
   var nativeFocusClickSeen = false;
   var nativeFocusCalibrationControl = null;
   var nativeFocusStableTimer = null;
-  var nativeFocusFallbackTimer = null;
   var nativeFocusFollowUpTimer = null;
   var nativeFocusFollowUpUntil = 0;
   var nativeFocusLastScroll = null;
-  var nativeFocusViewportSample = null;
-  var nativeFocusKeyboardWait = null;
-  var nativeFocusViewportWidth = window.innerWidth;
-  var nativeFocusMaxViewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  var nativeFocusScrollSpaceHeight = 0;
 
   function nativeFocusViewport() {
     var viewport = window.visualViewport;
@@ -914,42 +910,11 @@
     // 浮动条始终避开键盘，与页面是否需要补充滚动空间分开处理。
     if (inset > 0) { document.body.style.setProperty('--visual-viewport-inset', inset + 'px'); }
     else { document.body.style.removeProperty('--visual-viewport-inset'); }
-    if (document.body.style.getPropertyValue('--keyboard-inset')) {
-      if (inset > 0) { document.body.style.setProperty('--keyboard-inset', inset + 'px'); }
-      else { document.body.style.removeProperty('--keyboard-inset'); }
+    if (nativeFocusScrollSpaceHeight && viewport.height > nativeFocusScrollSpaceHeight + 1) {
+      document.body.style.removeProperty('--focus-scroll-space');
+      nativeFocusScrollSpaceHeight = 0;
     }
     return viewport;
-  }
-
-  function beginNativeFocusViewportWait(control) {
-    var viewport = nativeFocusViewport();
-    var now = performance.now();
-    if (window.innerWidth !== nativeFocusViewportWidth) {
-      nativeFocusViewportWidth = window.innerWidth;
-      nativeFocusMaxViewportHeight = viewport.height;
-    }
-    nativeFocusMaxViewportHeight = Math.max(nativeFocusMaxViewportHeight, viewport.height);
-    nativeFocusViewportSample = { height: viewport.height, bottom: viewport.bottom, at: now };
-    var keyboardVisible = viewport.height < Math.max(nativeFocusMaxViewportHeight, window.innerHeight) - 80;
-    var touchKeyboard = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
-    var keyboardField = control && control.matches('textarea, input[type="text"], input[type="number"], input:not([type])') &&
-      !control.readOnly && !control.disabled;
-    // 首次软键盘可能尚未开始改变尺寸；超时后允许硬件键盘等不改变视口的场景继续。
-    nativeFocusKeyboardWait = touchKeyboard && keyboardField && !keyboardVisible
-      ? { height: viewport.height, until: now + 600 } : null;
-  }
-
-  function nativeFocusViewportIsStable(viewport) {
-    var now = performance.now();
-    var sample = nativeFocusViewportSample;
-    if (!sample || Math.abs(sample.height - viewport.height) > 1 || Math.abs(sample.bottom - viewport.bottom) > 1) {
-      nativeFocusViewportSample = { height: viewport.height, bottom: viewport.bottom, at: now };
-    }
-    if (nativeFocusKeyboardWait && viewport.height < nativeFocusKeyboardWait.height - 1) {
-      nativeFocusKeyboardWait = null;
-    }
-    if (nativeFocusKeyboardWait && now < nativeFocusKeyboardWait.until) { return false; }
-    return now - nativeFocusViewportSample.at >= 120;
   }
 
   function cancelNativeFocusFollowUp() {
@@ -1076,9 +1041,7 @@
       pendingNativeFocusScrollControl = null;
       return;
     }
-    syncNativeFocusViewport();
-    var viewport = nativeFocusViewport();
-    if (!nativeFocusViewportIsStable(viewport)) { return; }
+    var viewport = syncNativeFocusViewport();
     pendingNativeFocusScrollControl = null;
     updatePolishFloat();
     var anchor = prepareControlNativeScroll(control);
@@ -1088,9 +1051,7 @@
     nativeFocusCalibrationControl = control;
     nativeFocusResizeCompletedControl = nativeFocusClickSeen ? null : control;
     var lastScroll = nativeFocusLastScroll;
-    var viewportChanged = !lastScroll || lastScroll.anchor !== anchor ||
-      Math.abs(lastScroll.height - viewport.height) > 3 || Math.abs(lastScroll.bottom - viewport.bottom) > 3;
-    if (!isCalibration || viewportChanged) {
+    if (!isCalibration || !lastScroll || lastScroll.anchor !== anchor) {
       debugEvent('nativeFocus.scroll', {
         control: control.id,
         anchor: anchor.id,
@@ -1099,24 +1060,31 @@
         anchorBottomBefore: Math.round(anchorRect.bottom)
       });
       anchor.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
-      viewport = nativeFocusViewport();
-      nativeFocusLastScroll = { anchor: anchor, height: viewport.height, bottom: viewport.bottom, at: performance.now() };
+      nativeFocusLastScroll = { anchor: anchor };
       debugNativeFocusStable(anchor);
+      scheduleNativeFocusResizeScroll();
       return;
     }
     var remaining = anchorRect.bottom - (viewport.bottom - margin);
-    // 等原生滚动稳定后，只补足仍然缺少的间距，避免把已安全显示的按钮向下拉。
-    if (remaining <= 3 || performance.now() - lastScroll.at < 80) { return; }
-    var scrollRoom = Math.max(0, document.documentElement.scrollHeight - window.innerHeight - window.scrollY);
-    if (remaining > scrollRoom + 3) {
-      var keyboardInset = Math.max(0, window.innerHeight - viewport.bottom);
-      if (keyboardInset > 0) { document.body.style.setProperty('--keyboard-inset', keyboardInset + 'px'); }
+    // 每次按实际位置只向上补足，键盘继续变动时也不重启整组原生定位。
+    if (remaining <= 3) { return; }
+    var scrollRoot = document.scrollingElement || document.documentElement;
+    var scrollRoom = Math.max(0, scrollRoot.scrollHeight - scrollRoot.clientHeight - scrollRoot.scrollTop);
+    var addedScrollSpace = 0;
+    if (remaining > scrollRoom) {
+      // 不只补键盘高度：布局视口已经缩小时，也可能缺少浮动条和安全间距的滚动空间。
+      addedScrollSpace = Math.ceil(remaining - scrollRoom);
+      var currentScrollSpace = parseFloat(document.body.style.getPropertyValue('--focus-scroll-space')) || 0;
+      document.body.style.setProperty('--focus-scroll-space', (currentScrollSpace + addedScrollSpace) + 'px');
+      nativeFocusScrollSpaceHeight = viewport.height;
     }
     window.scrollBy({ top: remaining, left: 0, behavior: 'auto' });
     debugEvent('nativeFocus.position', {
       control: control.id,
       anchor: anchor.id,
       correction: Math.round(remaining),
+      scrollRoomBefore: Math.round(scrollRoom),
+      addedScrollSpace: addedScrollSpace,
       gap: Math.round(viewport.bottom - anchor.getBoundingClientRect().bottom),
       margin: Math.round(margin),
       maxScrollY: Math.round(document.documentElement.scrollHeight - window.innerHeight)
@@ -1159,11 +1127,7 @@
     nativeFocusCalibrationControl = null;
     pendingNativeFocusScrollControl = control;
     startNativeFocusFollowUp();
-    if (nativeFocusFallbackTimer !== null) { window.clearTimeout(nativeFocusFallbackTimer); }
-    nativeFocusFallbackTimer = window.setTimeout(function () {
-      nativeFocusFallbackTimer = null;
-      scheduleNativeFocusResizeScroll();
-    }, 50);
+    scheduleNativeFocusResizeScroll();
   });
 
   document.addEventListener('pointerdown', function (event) {
@@ -1171,7 +1135,6 @@
     nativeFocusLastScroll = null;
     var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
     recordResumeFocusEvent('pointerdown', event, control);
-    beginNativeFocusViewportWait(control);
     nativeFocusPointerId = event.pointerId;
     nativeFocusPointerStartX = event.clientX;
     nativeFocusPointerStartY = event.clientY;
@@ -1180,10 +1143,6 @@
     nativeFocusResizeCompletedControl = null;
     nativeFocusCalibrationControl = null;
     pendingNativeFocusScrollControl = control;
-    if (nativeFocusFallbackTimer !== null) {
-      window.clearTimeout(nativeFocusFallbackTimer);
-      nativeFocusFallbackTimer = null;
-    }
     debugEvent('nativeFocus.pointerdown', {
       control: control && control.id,
       scrollY: Math.round(window.scrollY),
@@ -1208,10 +1167,6 @@
     pendingNativeFocusScrollControl = null;
     nativeFocusResizeCompletedControl = null;
     nativeFocusCalibrationControl = null;
-    if (nativeFocusFallbackTimer !== null) {
-      window.clearTimeout(nativeFocusFallbackTimer);
-      nativeFocusFallbackTimer = null;
-    }
     debugEvent('nativeFocus.pointermove.cancel', { scrollY: Math.round(window.scrollY) });
     if (nativeFocusResizeFrame !== null) {
       window.cancelAnimationFrame(nativeFocusResizeFrame);
