@@ -233,7 +233,7 @@
         event.isComposing || event.keyCode === 229) { return; }
     event.preventDefault();
     var form = event.target.form;
-    if (form && form.id === 'skillForm') {
+    if (form && ['skillForm', 'sideQuestForm'].indexOf(form.id) >= 0) {
       if (form.requestSubmit) { form.requestSubmit(); }
       else { form.querySelector('button[type="submit"]').click(); }
     }
@@ -895,6 +895,7 @@
   var nativeFocusFallbackTimer = null;
   var nativeFocusFollowUpTimer = null;
   var nativeFocusFollowUpUntil = 0;
+  var nativeFocusLastScroll = null;
 
   function nativeFocusViewport() {
     var viewport = window.visualViewport;
@@ -905,8 +906,11 @@
 
   function syncNativeFocusViewport() {
     var viewport = nativeFocusViewport();
-    var inset = Math.max(0, window.innerHeight - viewport.bottom);
-    document.body.style.setProperty('--keyboard-inset', inset + 'px');
+    if (document.body.style.getPropertyValue('--keyboard-inset')) {
+      var inset = Math.max(0, window.innerHeight - viewport.bottom);
+      if (inset > 0) { document.body.style.setProperty('--keyboard-inset', inset + 'px'); }
+      else { document.body.style.removeProperty('--keyboard-inset'); }
+    }
     return viewport;
   }
 
@@ -999,7 +1003,7 @@
     var viewport = nativeFocusViewport();
     var viewportHeight = viewport.height;
     var availableHeight = Math.max(0, viewportHeight - margin);
-    var groupFits = groupBottom - groupTop <= availableHeight;
+    var groupFits = groupBottom - groupTop <= viewportHeight;
     var focusedRangeFits = control.form.id === 'entryForm' && group.submit === el.entryActions &&
       groupBottom - Math.min(controlRect.top, submitRect.top) <= availableHeight;
     var anchor = groupFits || focusedRangeFits ? group.submit : control;
@@ -1035,24 +1039,34 @@
     var viewport = nativeFocusViewport();
     var anchorRect = anchor.getBoundingClientRect();
     var margin = parseFloat(getComputedStyle(anchor).scrollMarginBlockEnd) || 0;
-    if (Math.abs(anchorRect.bottom - (viewport.bottom - margin)) <= 3 && anchorRect.top >= viewport.top - 3) {
-      nativeFocusCalibrationControl = control;
-      nativeFocusResizeCompletedControl = nativeFocusClickSeen ? null : control;
+    nativeFocusCalibrationControl = control;
+    nativeFocusResizeCompletedControl = nativeFocusClickSeen ? null : control;
+    var lastScroll = nativeFocusLastScroll;
+    var viewportChanged = !lastScroll || lastScroll.anchor !== anchor ||
+      Math.abs(lastScroll.height - viewport.height) > 3 || Math.abs(lastScroll.bottom - viewport.bottom) > 3;
+    if (!isCalibration || viewportChanged) {
+      debugEvent('nativeFocus.scroll', {
+        control: control.id,
+        anchor: anchor.id,
+        calibration: isCalibration,
+        scrollY: Math.round(window.scrollY),
+        anchorBottomBefore: Math.round(anchorRect.bottom)
+      });
+      anchor.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
+      viewport = nativeFocusViewport();
+      nativeFocusLastScroll = { anchor: anchor, height: viewport.height, bottom: viewport.bottom, at: performance.now() };
+      debugNativeFocusStable(anchor);
       return;
     }
-    debugEvent('nativeFocus.scroll', {
-      control: control.id,
-      anchor: anchor.id,
-      calibration: isCalibration,
-      scrollY: Math.round(window.scrollY),
-      anchorBottomBefore: Math.round(anchor.getBoundingClientRect().bottom)
-    });
-    anchor.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'auto' });
-    viewport = nativeFocusViewport();
-    var remaining = anchor.getBoundingClientRect().bottom - (viewport.bottom - margin);
-    if (Math.abs(remaining) > 3) {
-      window.scrollBy({ top: remaining, left: 0, behavior: 'auto' });
+    var remaining = anchorRect.bottom - (viewport.bottom - margin);
+    // 等原生滚动稳定后，只补足仍然缺少的间距，避免把已安全显示的按钮向下拉。
+    if (remaining <= 3 || performance.now() - lastScroll.at < 80) { return; }
+    var scrollRoom = Math.max(0, document.documentElement.scrollHeight - window.innerHeight - window.scrollY);
+    if (remaining > scrollRoom + 3) {
+      var keyboardInset = Math.max(0, window.innerHeight - viewport.bottom);
+      if (keyboardInset > 0) { document.body.style.setProperty('--keyboard-inset', keyboardInset + 'px'); }
     }
+    window.scrollBy({ top: remaining, left: 0, behavior: 'auto' });
     debugEvent('nativeFocus.position', {
       control: control.id,
       anchor: anchor.id,
@@ -1062,8 +1076,6 @@
       maxScrollY: Math.round(document.documentElement.scrollHeight - window.innerHeight)
     });
     debugNativeFocusStable(anchor);
-    nativeFocusCalibrationControl = control;
-    nativeFocusResizeCompletedControl = nativeFocusClickSeen ? null : control;
   }
 
   function scheduleNativeFocusResizeScroll() {
@@ -1110,6 +1122,7 @@
 
   document.addEventListener('pointerdown', function (event) {
     cancelNativeFocusFollowUp();
+    nativeFocusLastScroll = null;
     var control = event.target.closest && event.target.closest('input, select, textarea, button[type="submit"]');
     recordResumeFocusEvent('pointerdown', event, control);
     nativeFocusPointerId = event.pointerId;
@@ -4205,8 +4218,10 @@
     }
     var desc = el.sideDesc.value.trim();
     // 奖励允许为负数，用于记录任务带来的点数扣减。
-    var rewardAttr = Math.floor(Number(el.sideRewardAttr.value) || 0);
-    var rewardAchievement = Math.floor(Number(el.sideRewardAchievement.value) || 0);
+    var attrValue = Number(el.sideRewardAttr.value);
+    var achievementValue = Number(el.sideRewardAchievement.value);
+    var rewardAttr = Number.isFinite(attrValue) ? Math.floor(attrValue) : 0;
+    var rewardAchievement = Number.isFinite(achievementValue) ? Math.floor(achievementValue) : 0;
     state.quests.side.push({
       id: uid(), title: title, desc: desc,
       rewardAttr: rewardAttr, rewardAchievement: rewardAchievement,
