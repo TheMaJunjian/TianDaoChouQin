@@ -1,0 +1,2 @@
+# Personal backup files are local regression inputs, not public site assets.
+/data/*.json

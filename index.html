@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
 <title>天道酬勤 · 系统面板</title>
-<link rel="stylesheet" href="styles.css?v=20261024-7">
+<link rel="stylesheet" href="styles.css?v=20261028-10">
 </head>
 <body>
 <div class="scanline"></div>
@@ -216,15 +216,21 @@
         <div class="log-actions">
           <button type="button" class="btn ghost" id="copyLog">复制日志</button>
           <button type="button" class="btn ghost danger" id="clearDay">清空当日</button>
+          <button type="button" class="btn ghost" id="logTrash">回收站</button>
         </div>
       </section>
 
-      <section class="card" data-hint="备注按记录时刻保存，可随日期查看，不参与时间与技能结算。">
-        <h2>备注 · <span id="noteDateLabel"></span></h2>
+      <section class="card" data-hint="备注按全部日期归类。点击整条备注（包括时间和空白处）可修改，点对勾选择技能和小时数后完成；回收站中的备注可复制或恢复。已计入的技能小时会保留。">
+        <h2>备注 · <span id="noteCountLabel"></span></h2>
+        <label class="note-filter"><span>查看</span><select id="noteFilter" aria-label="备注分类">
+          <option value="pending">未完成</option>
+          <option value="completed">已完成</option>
+          <option value="trash">回收站</option>
+        </select></label>
         <div class="log-view" id="noteView" aria-live="polite"></div>
         <div class="log-actions">
           <button type="button" class="btn ghost" id="copyNotes">复制备注</button>
-          <button type="button" class="btn ghost danger" id="clearNotes">清空当日</button>
+          <button type="button" class="btn ghost danger" id="clearNotes">移入回收站</button>
         </div>
       </section>
     </div>
@@ -310,7 +316,7 @@
 <div class="modal-mask hidden" id="confirmModal">
   <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmMessage">
     <h2 id="confirmTitle">系统确认</h2>
-    <p class="hint" id="confirmMessage"></p>
+    <div class="hint" id="confirmMessage"></div>
     <div class="modal-actions">
       <button type="button" class="btn ghost" id="confirmCancel">取消</button>
       <button type="button" class="btn danger-solid" id="confirmAccept">确认</button>
@@ -339,15 +345,47 @@
   </div>
 </div>
 
+<div class="modal-mask hidden" id="noteEditModal">
+  <form class="modal-box note-complete-box" id="noteEditForm" role="dialog" aria-modal="true" aria-labelledby="noteEditTitle" aria-describedby="noteEditMeta" novalidate>
+    <h2 id="noteEditTitle">修改备注</h2>
+    <p class="hint" id="noteEditMeta"></p>
+    <label class="note-edit-label"><span>备注内容</span><textarea id="noteEditInput" rows="6" aria-label="备注内容" autocomplete="off" required></textarea></label>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" id="noteEditCancel">取消</button>
+      <button type="submit" class="btn" id="noteEditSave">保存修改</button>
+    </div>
+  </form>
+</div>
+
+<div class="modal-mask hidden" id="noteCompleteModal">
+  <form class="modal-box note-complete-box" id="noteCompleteForm" role="dialog" aria-modal="true" aria-labelledby="noteCompleteTitle" aria-describedby="noteCompleteText">
+    <h2 id="noteCompleteTitle">完成备注</h2>
+    <p class="note-complete-text" id="noteCompleteText"></p>
+    <div class="note-complete-fields">
+      <label><span>计入技能</span><select id="noteCompleteSkill" aria-label="计入技能"><option value="">请选择技能</option></select></label>
+      <label><span>投入小时</span><textarea id="noteCompleteHours" class="single-line-input" rows="1" wrap="off" inputmode="decimal" autocomplete="off" aria-label="投入小时" aria-multiline="false" placeholder="例如 1.5"></textarea></label>
+    </div>
+    <p class="hint hidden" id="noteCompleteEmpty">还没有可选技能，请先添加技能。</p>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost hidden" id="noteCompleteAddSkill">前往添加技能</button>
+      <button type="button" class="btn ghost" id="noteCompleteCancel">取消</button>
+      <button type="submit" class="btn" id="noteCompleteAccept">完成并计入进度</button>
+    </div>
+  </form>
+</div>
+
 <div class="modal-mask hidden" id="detailModal">
   <div class="modal-box detail-modal-box" role="dialog" aria-modal="true" aria-labelledby="detailTitle" aria-describedby="detailBody">
     <h2 id="detailTitle"></h2>
     <div class="detail-modal-body" id="detailBody"></div>
     <div class="modal-actions">
       <button type="button" class="btn ghost hidden" id="detailCopyBackup">复制</button>
-      <a class="btn hidden" id="detailDownloadBackup">下载数据</a>
+      <button type="button" class="btn hidden" id="detailDownloadBackup">另存新文件</button>
+      <button type="button" class="btn ghost hidden" id="detailUpdateBackup">更新已有文件</button>
       <button type="button" class="btn ghost hidden" id="detailPasteImport">粘贴</button>
       <button type="button" class="btn hidden" id="detailUploadImport">上传数据</button>
+      <button type="button" class="btn ghost hidden" id="detailChooseImport">选择文件</button>
+      <button type="button" class="btn ghost danger hidden" id="detailTrashClear">清空回收站</button>
       <button type="button" class="btn ghost hidden" id="detailAchievementToggle">隐藏</button>
       <button type="button" class="btn" id="detailClose">关闭</button>
       <button type="button" class="btn hidden" id="detailFillBlank">跳转到记录并补充</button>
@@ -368,6 +406,7 @@
   </div>
 </div>
 
-<script src="app.js?v=20261024-14"></script>
+<script src="backup.js?v=20261028-3"></script>
+<script src="app.js?v=20261028-9"></script>
 </body>
 </html>

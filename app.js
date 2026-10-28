@@ -76,6 +76,8 @@
     return {
       entries: [],
       notes: [],
+      noteCompletions: [],
+      trashEntries: [],
       entryCategory: '',
       focus: '',
       host: {
@@ -112,6 +114,7 @@
         noticeScrollTop: 0,
         pageScrollTop: 0,
         activeTab: 'attr',
+        noteFilter: 'pending',
         timelineZoom: { start: 0, end: DAY_MINUTES },
         timelineCursors: null,
         entryDraft: null
@@ -144,8 +147,17 @@
   var toastQueue = [];
   var toastTimer = null;
   var toastNextStartAt = 0;
-  var backupDownloadUrl = null;
   var backupCopyText = '';
+  var backupFilename = '';
+  var backupSession = 0;
+  var backupBusy = false;
+  var pendingImport = null;
+  var pendingFileUpdate = null;
+  var importMode = 'merge';
+  var importReadVersion = 0;
+  var pendingNoteId = null;
+  var pendingNoteEdit = null;
+  var logTrashOpen = false;
 
   function syncCollapseState() {
     var ui = state.ui || {};
@@ -175,6 +187,7 @@
       noticeScrollTop: state.ui.noticeScrollTop,
       pageScrollTop: state.ui.pageScrollTop,
       activeTab: state.ui.activeTab,
+      noteFilter: state.ui.noteFilter,
       timelineZoom: { start: timelineZoom.start, end: timelineZoom.end },
       timelineCursors: normalizeTimelineCursors(timelineCursors),
       entryDraft: state.ui.entryDraft
@@ -192,16 +205,18 @@
     'hostName', 'todayFilled', 'todayMissing', 'totalHours', 'skillCount', 'focusCategory',
     'nameModal', 'nameInput', 'nameConfirm', 'nameCancel',
     'confirmModal', 'confirmMessage', 'confirmCancel', 'confirmAccept',
+    'noteCompleteModal', 'noteCompleteForm', 'noteCompleteText', 'noteCompleteSkill', 'noteCompleteHours', 'noteCompleteCancel', 'noteCompleteAccept', 'noteCompleteEmpty', 'noteCompleteAddSkill',
+    'noteEditModal', 'noteEditForm', 'noteEditMeta', 'noteEditInput', 'noteEditCancel', 'noteEditSave',
     'taskSubmitModal', 'taskSubmitTitle', 'taskSubmitBody', 'taskProgress', 'taskProgressRuler', 'taskProgressFill', 'taskProgressCursor', 'taskProgressPreviousCursor', 'taskSubmitCancel', 'taskSubmitConfirm',
     'detailModal', 'detailTitle', 'detailBody', 'detailClose', 'detailFillBlank', 'detailAchievementToggle',
-    'detailCopyBackup', 'detailDownloadBackup', 'detailPasteImport', 'detailUploadImport',
+    'detailCopyBackup', 'detailDownloadBackup', 'detailUpdateBackup', 'detailPasteImport', 'detailUploadImport', 'detailChooseImport', 'detailTrashClear',
     'focusLabel', 'focusPercent', 'focusFill', 'focusHint',
     'attrWeight', 'attrEdu', 'attrTalent', 'attrProperty', 'attrStatus',
     'polishPercent', 'polishFill',
     'skillForm', 'skillName', 'skillMode', 'skillLevelWrap', 'skillLevel',
     'skillHoursWrap', 'skillHours', 'skillList', 'hiddenSkillsBlock', 'hiddenSkillList', 'hiddenSkillToggle',
     'achList', 'hiddenAchievementsBlock', 'hiddenAchievementList', 'hiddenAchievementToggle',
-    'entryForm', 'entryActions', 'entrySubmit', 'noteSubmit', 'noteDateLabel', 'noteView', 'copyNotes', 'clearNotes', 'logEntryTooltip', 'startDate', 'startTime', 'endDate', 'endTime', 'category', 'activity',
+    'entryForm', 'entryActions', 'entrySubmit', 'noteSubmit', 'noteFilter', 'noteCountLabel', 'noteView', 'copyNotes', 'clearNotes', 'logTrash', 'logEntryTooltip', 'startDate', 'startTime', 'endDate', 'endTime', 'category', 'activity',
     'level', 'prevDay', 'nextDay', 'viewDate', 'timeline', 'timelineRuler', 'timelineNoteMarkers', 'timelineStartCursor', 'timelineEndCursor', 'timelineAxis', 'coverageFill',
     'coverageHint', 'logDateLabel', 'logView', 'copyLog', 'exportData',
     'importBtn', 'importFile', 'resetAll', 'clearDay', 'catList',
@@ -230,7 +245,7 @@
         event.isComposing || event.keyCode === 229) { return; }
     event.preventDefault();
     var form = event.target.form;
-    if (form && ['skillForm', 'sideQuestForm'].indexOf(form.id) >= 0) {
+    if (form && ['skillForm', 'sideQuestForm', 'noteCompleteForm'].indexOf(form.id) >= 0) {
       if (form.requestSubmit) { form.requestSubmit(); }
       else { form.querySelector('button[type="submit"]').click(); }
     }
@@ -367,6 +382,11 @@
     var menuHeight = item.list.scrollHeight;
     var spaceBelow = window.innerHeight - rect.bottom - 8;
     var spaceAbove = rect.top - 8;
+    if (item.select === el.noteCompleteSkill) {
+      var bounds = el.noteCompleteForm.getBoundingClientRect();
+      spaceBelow = Math.max(0, Math.min(spaceBelow, bounds.bottom - rect.bottom - 10));
+      spaceAbove = Math.max(0, Math.min(spaceAbove, rect.top - bounds.top - 10));
+    }
     var opensUp = spaceBelow < menuHeight && spaceAbove > spaceBelow;
     var availableSpace = opensUp ? spaceAbove : spaceBelow;
     item.shell.classList.toggle('open-up', opensUp);
@@ -478,6 +498,22 @@
     return migrated;
   }
 
+  function normalizeEntry(item) {
+    if (!item || typeof item !== 'object' || typeof item.category !== 'string' || typeof item.activity !== 'string') { return null; }
+    var startDate = typeof item.startDate === 'string' ? item.startDate : item.date;
+    var endDate = typeof item.endDate === 'string' ? item.endDate : startDate;
+    var start = Number(item.start);
+    var end = Number(item.end);
+    if (!isValidDateString(startDate) || !isValidDateString(endDate) || !Number.isFinite(start) || !Number.isFinite(end) ||
+        start < 0 || start >= DAY_MINUTES || end < 0 || end > DAY_MINUTES || dateTimeStamp(endDate, end) < dateTimeStamp(startDate, start)) { return null; }
+    return Object.assign({}, item, {
+      id: typeof item.id === 'string' && item.id ? item.id : uid(),
+      date: startDate, startDate: startDate, endDate: endDate, start: start, end: end,
+      createdAt: typeof item.createdAt === 'string' && Number.isFinite(Date.parse(item.createdAt)) ? item.createdAt : '',
+      level: ['INFO', 'TRAIN', 'WARN', 'ERROR'].indexOf(item.level) >= 0 ? item.level : 'INFO'
+    });
+  }
+
   function mergeDefaults(parsed) {
     var base = defaultState();
     if (!parsed || typeof parsed !== 'object') { return base; }
@@ -486,41 +522,29 @@
     function safe(fn) { try { fn(); } catch (e) { /* keep default for this field only */ } }
 
     safe(function () {
-      merged.entries = Array.isArray(parsed.entries) ? parsed.entries.map(function (item) {
-        if (!item || typeof item !== 'object' || typeof item.category !== 'string' || typeof item.activity !== 'string') {
-          return null;
-        }
-        var startDate = typeof item.startDate === 'string' ? item.startDate : item.date;
-        var endDate = typeof item.endDate === 'string' ? item.endDate : startDate;
-        var start = Number(item.start);
-        var end = Number(item.end);
-        var startStamp = dateTimeStamp(startDate, start);
-        var endStamp = dateTimeStamp(endDate, end);
-        if (!isValidDateString(startDate) || !isValidDateString(endDate) ||
-          !Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start >= DAY_MINUTES ||
-          end < 0 || end > DAY_MINUTES ||
-          endStamp < startStamp) {
-          return null;
-        }
-        return Object.assign({}, item, {
-          id: typeof item.id === 'string' && item.id ? item.id : uid(),
-          date: startDate,
-          startDate: startDate,
-          endDate: endDate,
-          start: start,
-          end: end,
-          createdAt: typeof item.createdAt === 'string' && Number.isFinite(Date.parse(item.createdAt)) ? item.createdAt : '',
-          level: ['INFO', 'TRAIN', 'WARN', 'ERROR'].indexOf(item.level) >= 0 ? item.level : 'INFO'
-        });
-      }).filter(function (item) { return item !== null; }) : base.entries;
+      merged.entries = Array.isArray(parsed.entries) ? parsed.entries.map(normalizeEntry).filter(Boolean) : base.entries;
     });
     safe(function () {
       merged.notes = Array.isArray(parsed.notes) ? parsed.notes.filter(function (item) {
         return item && typeof item === 'object' && typeof item.text === 'string' && item.text.trim() &&
-          isValidDateString(item.date) && typeof item.createdAt === 'string' && Number.isFinite(Date.parse(item.createdAt));
+          isValidDateString(item.date) && typeof item.createdAt === 'string' && Number.isFinite(Date.parse(item.createdAt)) &&
+          (item.deletedAt === undefined || typeof item.deletedAt === 'string' && Number.isFinite(Date.parse(item.deletedAt)));
       }).map(function (item) {
         return Object.assign({}, item, { id: typeof item.id === 'string' && item.id ? item.id : uid() });
       }) : base.notes;
+    });
+    safe(function () {
+      merged.noteCompletions = Array.isArray(parsed.noteCompletions) ? parsed.noteCompletions.filter(function (item) {
+        return item && typeof item.id === 'string' && item.id && typeof item.skillId === 'string' && item.skillId &&
+          typeof item.skillName === 'string' && item.skillName.trim() && Number.isFinite(Number(item.hours)) &&
+          Number(item.hours) > 0 && Number(item.hours) <= MAX_MANUAL_SKILL_HOURS &&
+          typeof item.completedAt === 'string' && Number.isFinite(Date.parse(item.completedAt));
+      }).map(function (item) { return Object.assign({}, item, { hours: Number(item.hours) }); }) : [];
+      merged.trashEntries = Array.isArray(parsed.trashEntries) ? parsed.trashEntries.map(function (item) {
+        if (!item || typeof item.id !== 'string' || !item.id || typeof item.deletedAt !== 'string' || !Number.isFinite(Date.parse(item.deletedAt))) { return null; }
+        var entry = normalizeEntry(item.entry);
+        return entry ? Object.assign({}, item, { entry: entry }) : null;
+      }).filter(Boolean) : [];
     });
     safe(function () { merged.entryCategory = typeof parsed.entryCategory === 'string' ? parsed.entryCategory : base.entryCategory; });
     safe(function () { merged.focus = typeof parsed.focus === 'string' ? parsed.focus : base.focus; });
@@ -631,6 +655,7 @@
       merged.ui.pageScrollTop = Number.isFinite(pageScrollTop) ? Math.max(0, pageScrollTop) : base.ui.pageScrollTop;
       merged.ui.activeTab = ['attr', 'entry', 'timeline', 'quest', 'notice'].indexOf(parsedUi.activeTab) >= 0
         ? parsedUi.activeTab : base.ui.activeTab;
+      merged.ui.noteFilter = ['pending', 'completed', 'trash'].indexOf(parsedUi.noteFilter) >= 0 ? parsedUi.noteFilter : 'pending';
       if (parsedUi.timelineZoom && typeof parsedUi.timelineZoom === 'object') {
         var zoomStart = Number(parsedUi.timelineZoom.start);
         var zoomEnd = Number(parsedUi.timelineZoom.end);
@@ -708,7 +733,7 @@
   function mergeConcurrentState(latest) {
     var merged = mergeDefaults(latest);
     var baseline = persistedSnapshot;
-    ['entries', 'notes', 'skills', 'achievements', 'notifications'].forEach(function (key) {
+    ['entries', 'notes', 'noteCompletions', 'trashEntries', 'skills', 'achievements', 'notifications'].forEach(function (key) {
       merged[key] = mergeChangedArray(merged[key], state[key], baseline[key]);
     });
     merged.quests.side = mergeChangedArray(merged.quests.side, state.quests.side, baseline.quests.side);
@@ -767,12 +792,13 @@
         toast('存储模块异常，本次记录可能无法持久化保存。', { level: 'ERROR' });
       }
       debugStepEnd('persist.failed', debugStart, { message: String(e && e.message || e) });
-      return;
+      return false;
     }
     // 签名计算涉及多次数组遍历，防抖到空闲时统一计算一次，避免频繁操作（如逐字输入）时反复重算。
     if (sigTimer) { window.clearTimeout(sigTimer); }
     sigTimer = window.setTimeout(renderTamperSignature, 300);
     debugStepEnd('persist', debugStart, { bytes: serialized.length, forceReplace: forceReplace === true });
+    return true;
   }
 
   window.addEventListener('storage', function (event) {
@@ -1418,6 +1444,7 @@
         rewritten.push(entry);
         return;
       }
+      trashEntryRange(entry, Math.max(entryStart, startStamp), Math.min(entryEnd, endStamp), 'overwritten');
       var hasLeft = entryStart < startStamp;
       var hasRight = entryEnd > endStamp;
       if (hasLeft) {
@@ -1865,7 +1892,21 @@
     return !!FIRST_LOCKED_LEVEL && h >= FIRST_LOCKED_LEVEL.minHours;
   }
 
-  /* 技能实际小时 = 手动复写的基准小时 + 复写时间段中归属该技能的时长。 */
+  /* 完成记录独立保存：删除备注、恢复或重复导入均不会再次结算小时。 */
+  function completionForNote(id) {
+    return state.noteCompletions.find(function (item) { return item.id === id; });
+  }
+
+  function completedNoteHours(skill) {
+    var counted = Object.create(null);
+    return state.noteCompletions.reduce(function (sum, item) {
+      if (counted[item.id] || item.skillId !== skill.id) { return sum; }
+      counted[item.id] = true;
+      return sum + item.hours;
+    }, 0);
+  }
+
+  /* 技能实际小时 = 手动基准 + 时间记录 + 备注完成小时。 */
   function entryHoursFor(name) {
     var key = normalize(name);
     var minutes = state.entries.reduce(function (sum, e) {
@@ -1875,7 +1916,7 @@
   }
 
   function effectiveHours(skill) {
-    return (Number(skill.hours) || 0) + entryHoursFor(skill.name);
+    return (Number(skill.hours) || 0) + entryHoursFor(skill.name) + completedNoteHours(skill);
   }
 
   function skillByName(name) {
@@ -2077,14 +2118,18 @@
   }
 
   function openDetailModal(title, body) {
+    logTrashOpen = false;
     el.detailTitle.textContent = title;
     el.detailBody.innerHTML = body;
     el.detailCopyBackup.classList.add('hidden');
     el.detailDownloadBackup.classList.add('hidden');
+    el.detailUpdateBackup.classList.add('hidden');
     el.detailPasteImport.classList.add('hidden');
     el.detailUploadImport.classList.add('hidden');
-    el.detailDownloadBackup.removeAttribute('href');
-    el.detailDownloadBackup.removeAttribute('download');
+    el.detailChooseImport.classList.add('hidden');
+    el.detailTrashClear.classList.add('hidden');
+    el.detailUploadImport.disabled = false;
+    el.detailUpdateBackup.disabled = false;
     el.detailFillBlank.classList.add('hidden');
     el.detailAchievementToggle.classList.add('hidden');
     el.detailAchievementToggle.removeAttribute('data-achievement-hide');
@@ -2094,19 +2139,19 @@
   }
 
   function closeDetailModal() {
+    logTrashOpen = false;
+    backupSession++;
+    pendingImport = null;
+    pendingFileUpdate = null;
     el.detailModal.classList.add('hidden');
-    if (backupDownloadUrl) {
-      URL.revokeObjectURL(backupDownloadUrl);
-      backupDownloadUrl = null;
-    }
     backupCopyText = '';
   }
 
   el.detailClose.addEventListener('click', closeDetailModal);
   el.detailCopyBackup.addEventListener('click', copyBackupJson);
-  el.detailDownloadBackup.addEventListener('click', function () {
-    toast('系统已触发数据下载。', { level: 'SYSTEM' });
-  });
+  el.detailDownloadBackup.addEventListener('click', saveNewBackup);
+  el.detailUpdateBackup.addEventListener('click', updateBackupFile);
+  el.detailChooseImport.addEventListener('click', function () { el.importFile.click(); });
   el.detailModal.addEventListener('click', function (event) {
     if (event.target === el.detailModal) { closeDetailModal(); }
   });
@@ -2400,9 +2445,23 @@
       createdAt: new Date().toISOString(),
       level: el.level.value
     };
-    var conflicts = entriesOverlapping(startStamp, endStamp, editingEntryId);
-    function writeEntry(rewrite) {
+    function writeEntry(rewrite, confirmedKey) {
+      syncBackupState();
+      var conflicts = entriesOverlapping(startStamp, endStamp, editingEntryId);
+      var key = JSON.stringify(conflicts);
+      if (conflicts.length && key !== confirmedKey) {
+        openConfirmModal('检测到 ' + conflicts.length + ' 条时间记录重叠：\n' + conflicts.map(function (entry) {
+          return (entry.startDate || entry.date) + ' ' + toClock(entry.start) + ' → ' + (entry.endDate || entry.date) + ' ' + toClock(entry.end) + '\n' + entry.activity;
+        }).join('\n\n') + '\n\n更正后，被覆盖的旧时段会移入回收站，未覆盖部分保留。', function () {
+          writeEntry(true, key);
+        }, '更正并保留旧记录');
+        return;
+      }
       if (editingEntryId) {
+        var original = state.entries.find(function (entry) { return entry.id === editingEntryId; });
+        if (original && !sameLogRecord(original, newEntry)) {
+          trashEntryRange(original, entryStartStamp(original), entryEndStamp(original), 'edited');
+        }
         state.entries = state.entries.filter(function (entry) { return entry.id !== editingEntryId; });
       }
       if (rewrite) {
@@ -2440,18 +2499,156 @@
       flashTab('timeline');
     }
 
-    if (conflicts.length) {
-      openConfirmModal('检测到 ' + conflicts.length + ' 条时间记录重叠，点击“更正”将保留未覆盖部分并写入当前记录。', function () {
-        writeEntry(true);
-      }, '更正');
-      return;
-    }
     writeEntry(false);
 
     // 数据更新后立即刷新全部面板，无需切换标签页。
   });
 
   /* ---------- 备注：独立保存，不推进时间段 ---------- */
+  function closeNoteEditModal() {
+    var id = pendingNoteEdit && pendingNoteEdit.id;
+    pendingNoteEdit = null;
+    el.noteEditModal.classList.add('hidden');
+    el.noteEditInput.value = '';
+    var trigger = Array.prototype.find.call(el.noteView.querySelectorAll('[data-note-edit]'), function (item) { return item.dataset.noteEdit === id; });
+    if (trigger) { trigger.focus({ preventScroll: true }); }
+  }
+
+  function openNoteEditModal(id) {
+    syncBackupState();
+    var note = state.notes.find(function (item) { return item.id === id; });
+    if (!note || note.deletedAt) { return; }
+    pendingNoteEdit = { id: id, originalText: note.text };
+    el.noteEditMeta.textContent = '记录于 ' + formatCreatedAt(note.createdAt) + (completionForNote(id) ? ' · 已完成' : ' · 未完成');
+    el.noteEditInput.value = note.text;
+    el.noteEditModal.classList.remove('hidden');
+    el.noteEditInput.focus();
+  }
+
+  function saveNoteEdit(confirmedText) {
+    if (!pendingNoteEdit) { return; }
+    var text = el.noteEditInput.value.trim();
+    if (!text) { toast('备注内容不能为空。', { level: 'WARN' }); el.noteEditInput.focus(); return; }
+    syncBackupState();
+    var note = state.notes.find(function (item) { return item.id === pendingNoteEdit.id; });
+    if (!note || note.deletedAt) {
+      closeNoteEditModal();
+      refreshAll();
+      toast('这条备注已被删除或移入回收站，未保存修改。', { level: 'WARN' });
+      return;
+    }
+    if (note.text !== pendingNoteEdit.originalText && note.text !== confirmedText && note.text !== text) {
+      var latestText = note.text;
+      openConfirmModal('这条备注已在其他页面修改。\n\n当前内容：\n' + latestText + '\n\n你编辑的内容：\n' + text + '\n\n确认用你编辑的内容替换？', function () {
+        saveNoteEdit(latestText);
+      }, '替换并保存');
+      return;
+    }
+    var previousText = note.text;
+    var id = note.id;
+    note.text = text;
+    if (!persist()) {
+      var previous = state.notes.find(function (item) { return item.id === id; });
+      if (previous) { previous.text = previousText; }
+      persist(true);
+      toast('备注保存失败，请稍后重试。', { level: 'ERROR' });
+      return;
+    }
+    refreshAll();
+    closeNoteEditModal();
+    toast('备注已修改。');
+  }
+
+  el.noteEditCancel.addEventListener('click', closeNoteEditModal);
+  el.noteEditModal.addEventListener('click', function (event) {
+    if (event.target === el.noteEditModal) { closeNoteEditModal(); }
+  });
+  el.noteEditModal.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') { closeNoteEditModal(); }
+  });
+  el.noteEditForm.addEventListener('submit', function (event) { event.preventDefault(); saveNoteEdit(); });
+
+  function closeNoteCompleteModal() {
+    pendingNoteId = null;
+    el.noteCompleteModal.classList.add('hidden');
+    if (openCustomSelect && openCustomSelect.select === el.noteCompleteSkill) { closeCustomSelect(openCustomSelect); }
+  }
+
+  function openNoteCompleteModal(id) {
+    var note = state.notes.find(function (item) { return item.id === id; });
+    if (!note || note.deletedAt || completionForNote(id)) { return; }
+    pendingNoteId = id;
+    el.noteCompleteText.textContent = note.text;
+    el.noteCompleteHours.value = '';
+    el.noteCompleteSkill.innerHTML = sortedSkills().map(function (skill) {
+      return '<option value="' + escapeHtml(skill.id) + '">' + escapeHtml(skill.name) + '</option>';
+    }).join('');
+    var focus = skillByName(state.focus);
+    if (focus) { el.noteCompleteSkill.value = focus.id; }
+    var empty = !state.skills.length;
+    el.noteCompleteEmpty.classList.toggle('hidden', !empty);
+    el.noteCompleteAddSkill.classList.toggle('hidden', !empty);
+    el.noteCompleteAccept.disabled = empty;
+    syncCustomSelects();
+    el.noteCompleteModal.classList.remove('hidden');
+    if (empty) { el.noteCompleteAddSkill.focus(); }
+    else { el.noteCompleteHours.focus(); }
+  }
+
+  el.noteCompleteCancel.addEventListener('click', closeNoteCompleteModal);
+  el.noteCompleteModal.addEventListener('click', function (event) {
+    if (event.target === el.noteCompleteModal) { closeNoteCompleteModal(); }
+  });
+  el.noteCompleteModal.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') { closeNoteCompleteModal(); }
+  });
+  el.noteCompleteAddSkill.addEventListener('click', function () {
+    closeNoteCompleteModal();
+    setActiveTab('attr');
+    el.skillName.focus();
+  });
+  el.noteCompleteForm.addEventListener('submit', function (event) {
+    event.preventDefault();
+    syncBackupState();
+    var note = state.notes.find(function (item) { return item.id === pendingNoteId; });
+    if (!note || note.deletedAt || completionForNote(note.id)) {
+      closeNoteCompleteModal();
+      refreshAll();
+      toast('这条备注已被处理，请查看最新状态。', { level: 'WARN' });
+      return;
+    }
+    var skill = state.skills.find(function (item) { return item.id === el.noteCompleteSkill.value; });
+    var hoursValue = Number(el.noteCompleteHours.value.trim());
+    if (!skill) { toast('请先选择一个现有技能。', { level: 'WARN' }); return; }
+    if (!Number.isFinite(hoursValue) || hoursValue <= 0 || hoursValue > MAX_MANUAL_SKILL_HOURS) {
+      toast('投入小时需大于 0 且不超过 ' + MAX_MANUAL_SKILL_HOURS + '，可填写小数。', { level: 'WARN' });
+      el.noteCompleteHours.focus();
+      return;
+    }
+    var previousHours = effectiveHours(skill);
+    var completion = { id: note.id, skillId: skill.id, skillName: skill.name, hours: hoursValue, completedAt: new Date().toISOString(),
+      noteText: note.text, noteDate: note.date, noteCreatedAt: note.createdAt };
+    state.noteCompletions.push(completion);
+    if (!persist()) {
+      state.noteCompletions = state.noteCompletions.filter(function (item) { return item.id !== completion.id; });
+      persist(true);
+      toast('完成记录保存失败，请稍后重试。', { level: 'ERROR' });
+      return;
+    }
+    closeNoteCompleteModal();
+    refreshAll();
+    var saved = completionForNote(note.id);
+    toast('备注已完成，技能【' + saved.skillName + '】计入 ' + saved.hours + ' 小时。', { level: 'TRAIN' });
+    if (saved.skillId === skill.id) { notifySkillLevelUp(skill, previousHours, effectiveHours(skill)); }
+  });
+
+  el.noteFilter.addEventListener('change', function () {
+    state.ui.noteFilter = el.noteFilter.value;
+    el.noteView.scrollTop = 0;
+    persist();
+    renderNotes();
+  });
+
   el.noteSubmit.addEventListener('click', function () {
     var text = el.activity.value.trim();
     if (!text) {
@@ -2466,6 +2663,7 @@
       text: text
     };
     state.notes.push(note);
+    state.ui.noteFilter = 'pending';
     state.viewDate = note.date;
     el.viewDate.value = note.date;
     el.activity.value = '';
@@ -2477,18 +2675,49 @@
   });
 
   el.noteView.addEventListener('click', function (event) {
+    var copy = event.target.closest('[data-note-copy]');
+    if (copy) {
+      var copiedNote = state.notes.find(function (item) { return item.id === copy.dataset.noteCopy; });
+      if (copiedNote) { copyTextWithFeedback(copiedNote.text, '备注内容已复制。', '复制失败，请手动选中备注内容复制。'); }
+      return;
+    }
+    var complete = event.target.closest('[data-note-complete]');
+    if (complete) { openNoteCompleteModal(complete.dataset.noteComplete); return; }
+    var restore = event.target.closest('[data-note-restore]');
+    if (restore) {
+      var restored = state.notes.find(function (item) { return item.id === restore.dataset.noteRestore; });
+      if (restored) { delete restored.deletedAt; persist(); refreshAll(); toast('备注已恢复。'); }
+      return;
+    }
     var button = event.target.closest('[data-note-del]');
-    if (!button) { return; }
+    if (!button) {
+      var edit = event.target.closest('[data-note-edit]');
+      var selection = window.getSelection();
+      if (edit && !(selection && !selection.isCollapsed && edit.contains(selection.anchorNode))) { openNoteEditModal(edit.dataset.noteEdit); }
+      return;
+    }
     var id = button.getAttribute('data-note-del');
     var note = state.notes.filter(function (item) { return item.id === id; })[0];
     if (!note) { return; }
-    openConfirmModal('确认删除 ' + formatCreatedAt(note.createdAt) + ' 的备注？', function () {
+    if (!note.deletedAt) {
+      note.deletedAt = new Date().toISOString();
+      persist();
+      refreshAll();
+      toast('备注已移入回收站。');
+      return;
+    }
+    openConfirmModal('确认彻底删除这条备注？删除后无法恢复，已计入的技能小时会保留。', function () {
       state.notes = state.notes.filter(function (item) { return item.id !== id; });
       persist();
-      renderNotes(state.viewDate);
-      renderTimelineNoteMarkers();
-      toast('备注已删除。');
-    });
+      refreshAll();
+      toast('备注已彻底删除。');
+    }, '彻底删除');
+  });
+  el.noteView.addEventListener('keydown', function (event) {
+    if (event.key !== 'Enter' && event.key !== ' ') { return; }
+    if (event.target.closest('.note-actions')) { return; }
+    var edit = event.target.closest('[data-note-edit]');
+    if (edit) { event.preventDefault(); openNoteEditModal(edit.dataset.noteEdit); }
   });
 
   /* ---------- 日期导航 ---------- */
@@ -2497,6 +2726,16 @@
   el.viewDate.addEventListener('change', function () {
     if (el.viewDate.value) { setViewDate(el.viewDate.value); }
   });
+
+  function sameLogRecord(left, right) {
+    return entryStartStamp(left) === entryStartStamp(right) && entryEndStamp(left) === entryEndStamp(right) &&
+      left.category === right.category && left.activity === right.activity && left.level === right.level;
+  }
+
+  function trashEntryRange(entry, startStamp, endStamp, reason) {
+    state.trashEntries.push({ id: uid(), deletedAt: new Date().toISOString(), reason: reason || 'deleted',
+      entry: entryWithRange(entry, startStamp, endStamp, entry.id) });
+  }
 
   function removeEntrySlice(entryId, dateStr) {
     var dayStart = dateTimeStamp(dateStr, 0);
@@ -2513,6 +2752,7 @@
         retained.push(entry);
         return;
       }
+      trashEntryRange(entry, Math.max(entryStart, dayStart), Math.min(entryEnd, dayEnd));
       if (entryStart < dayStart) {
         retained.push(entryWithRange(entry, entryStart, dayStart, entry.id));
       }
@@ -2536,17 +2776,19 @@
 
   /* ---------- 日志操作 ---------- */
   el.copyNotes.addEventListener('click', function () {
-    var notes = notesByDate(state.viewDate);
+    var notes = filteredNotes();
     if (!notes.length) {
-      toast('当日暂无备注可复制。', { level: 'WARN' });
+      toast('暂无备注可复制。', { level: 'WARN' });
       return;
     }
     var text = notes.map(function (note) {
-      return '[' + formatCreatedAt(note.createdAt) + '] ' + note.text;
+      var completion = completionForNote(note.id);
+      return '[' + formatCreatedAt(note.createdAt) + '] ' + note.text +
+        (completion ? '\n已完成 · ' + completion.skillName + ' +' + completion.hours + ' 小时' : '');
     }).join('\n');
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(function () {
-        toast('备注已复制到剪贴板。');
+        toast('当前分类的全部备注已复制到剪贴板。');
       }, function () {
         toast('无法访问剪贴板，请宿主手动选择备注内容复制。', { level: 'WARN' });
       });
@@ -2556,18 +2798,25 @@
   });
 
   el.clearNotes.addEventListener('click', function () {
-    var dateStr = state.viewDate;
-    if (!notesByDate(dateStr).length) {
-      toast('当日暂无备注可清空。', { level: 'WARN' });
+    var notes = filteredNotes();
+    if (!notes.length) {
+      toast('暂无备注可清空。', { level: 'WARN' });
       return;
     }
-    openConfirmModal('确认清空 ' + dateStr + ' 的全部备注？', function () {
-      state.notes = state.notes.filter(function (note) { return note.date !== dateStr; });
+    var trash = state.ui.noteFilter === 'trash';
+    var ids = notes.map(function (note) { return note.id; });
+    var message = trash ? '确认彻底删除回收站中的 ' + ids.length + ' 条备注？此操作无法恢复，已计入的技能小时会保留。' :
+      '确认将当前分类的全部 ' + ids.length + ' 条备注移入回收站？';
+    openConfirmModal(message, function () {
+      if (trash) { state.notes = state.notes.filter(function (note) { return ids.indexOf(note.id) < 0; }); }
+      else {
+        var deletedAt = new Date().toISOString();
+        state.notes.forEach(function (note) { if (ids.indexOf(note.id) >= 0) { note.deletedAt = deletedAt; } });
+      }
       persist();
-      renderNotes(state.viewDate);
-      renderTimelineNoteMarkers();
-      toast('当日备注已清空。');
-    });
+      refreshAll();
+      toast(trash ? '备注回收站已清空。' : '备注已移入回收站。');
+    }, trash ? '彻底删除' : '移入回收站');
   });
 
   el.logView.addEventListener('click', function (event) {
@@ -2575,10 +2824,11 @@
     if (!id) { return; }
     var entry = byDate(state.viewDate).filter(function (e) { return e.id === id; })[0];
     if (!entry) { return; }
-    openConfirmModal('确认删除 ' + state.viewDate + ' ' + toClock(entry.start) + '-' + toClock(entry.end) + ' 的日志记录？', function () {
-      removeEntrySlice(id, state.viewDate);
+    var dateStr = state.viewDate;
+    openConfirmModal('确认将 ' + dateStr + ' ' + toClock(entry.start) + '-' + toClock(entry.end) + ' 的日志移入回收站？', function () {
+      removeEntrySlice(id, dateStr);
       persist();
-      toast('该段记录已从时间线抹除。', { level: 'TRAIN' });
+      toast('该段日志已移入回收站，可查阅原记录。', { level: 'TRAIN' });
       refreshAll();
     });
   });
@@ -2599,8 +2849,9 @@
   });
 
   el.clearDay.addEventListener('click', function () {
-    openConfirmModal('确认清空 ' + state.viewDate + ' 的全部记录？', function () {
-      var dayStart = dateTimeStamp(state.viewDate, 0);
+    var dateStr = state.viewDate;
+    openConfirmModal('确认将 ' + dateStr + ' 的全部日志移入回收站？', function () {
+      var dayStart = dateTimeStamp(dateStr, 0);
       var dayEnd = dayStart + DAY_MINUTES;
       var retained = [];
       state.entries.forEach(function (entry) {
@@ -2610,6 +2861,7 @@
           retained.push(entry);
           return;
         }
+        trashEntryRange(entry, Math.max(entryStart, dayStart), Math.min(entryEnd, dayEnd));
         if (entryStart < dayStart) {
           retained.push(entryWithRange(entry, entryStart, dayStart, entry.id));
         }
@@ -2619,9 +2871,86 @@
       });
       state.entries = retained;
       persist();
-      toast('当日时间线已重置。', { level: 'SYSTEM' });
+      toast('当日日志已移入回收站。', { level: 'SYSTEM' });
       refreshAll();
     });
+  });
+
+  function renderLogTrashModal() {
+    var items = state.trashEntries.slice().sort(function (a, b) { return Date.parse(b.deletedAt) - Date.parse(a.deletedAt); });
+    openDetailModal('个人日志回收站 · ' + items.length + ' 条', '<p class="hint">这里保留被删除、覆盖或修改前的日志，供查阅。需要调整时，请参照旧记录在「记录」页手动填写或修改。</p>' + (items.length ? items.map(function (item) {
+      var entry = item.entry;
+      var start = stampParts(entryStartStamp(entry));
+      var end = stampParts(entryEndStamp(entry));
+      return '<section class="trash-entry"><div class="trash-entry-text">' + escapeHtml(start.date + ' ' + toClock(start.minutes) + ' → ' + end.date + ' ' + toClock(end.minutes)) +
+        '<br>' + escapeHtml(entry.activity) + '<br>技能：' + escapeHtml(entry.category || '未指定') + ' · ' + hours(entryDuration(entry)) + ' 小时</div>' +
+        '<div class="trash-entry-meta">' + ({ overwritten: '被新日志覆盖', edited: '编辑前的原记录', restored: '历史恢复时被替换', imported: '导入时被替换' }[item.reason] || '移入回收站') +
+        ' · ' + escapeHtml(formatCreatedAt(item.deletedAt)) + '</div><div class="trash-entry-actions">' +
+        '<button type="button" class="btn ghost" data-log-copy="' + escapeHtml(item.id) + '">复制</button>' +
+        '<button type="button" class="btn ghost danger" data-log-purge="' + escapeHtml(item.id) + '">彻底删除</button></div></section>';
+    }).join('') : '<p class="empty">回收站为空。</p>'));
+    logTrashOpen = true;
+    el.detailTrashClear.classList.toggle('hidden', !items.length);
+  }
+
+  el.logTrash.addEventListener('click', renderLogTrashModal);
+  el.detailBody.addEventListener('click', function (event) {
+    if (!logTrashOpen) { return; }
+    var copy = event.target.closest('[data-log-copy]');
+    var purge = event.target.closest('[data-log-purge]');
+    if (!copy && !purge) { return; }
+    syncBackupState();
+    var id = copy ? copy.dataset.logCopy : purge.dataset.logPurge;
+    var item = state.trashEntries.find(function (candidate) { return candidate.id === id; });
+    if (!item) { renderLogTrashModal(); return; }
+    if (copy) { copyTrashedLog(item.entry); return; }
+    openConfirmModal('确认彻底删除这段日志？此操作无法恢复。', function () {
+      state.trashEntries = state.trashEntries.filter(function (candidate) { return candidate.id !== id; });
+      persist();
+      refreshAll();
+      toast('日志已彻底删除。');
+    }, '彻底删除');
+  });
+
+  function copyTrashedLog(entry) {
+    var start = stampParts(entryStartStamp(entry));
+    var end = stampParts(entryEndStamp(entry));
+    var text = '开始：' + start.date + ' ' + toClock(start.minutes) + '\n结束：' + end.date + ' ' + toClock(end.minutes) +
+      '\n作为：' + entry.activity + '\n技能：' + (entry.category || '未指定') + '\n时长：' + hours(entryDuration(entry)) +
+      ' 小时\n日志等级：' + (entry.level || 'INFO') + (entry.createdAt ? '\n复写时间：' + formatCreatedAt(entry.createdAt) : '');
+    return copyTextWithFeedback(text, '旧日志已复制，可粘贴后手动修改。', '复制失败，请手动选中回收站中的记录复制。');
+  }
+
+  async function copyTextWithFeedback(text, successMessage, failureMessage) {
+    var copied = false;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try { await navigator.clipboard.writeText(text); copied = true; } catch (error) { /* try the browser's copy command */ }
+    }
+    if (!copied) {
+      var previousFocus = document.activeElement;
+      var textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', 'readonly');
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try { copied = document.execCommand('copy'); } catch (error) { copied = false; }
+      textarea.remove();
+      if (previousFocus && previousFocus.isConnected) { previousFocus.focus({ preventScroll: true }); }
+    }
+    toast(copied ? successMessage : failureMessage, { level: copied ? 'SYSTEM' : 'WARN' });
+  }
+
+  el.detailTrashClear.addEventListener('click', function () {
+    if (!logTrashOpen || !state.trashEntries.length) { return; }
+    var ids = state.trashEntries.map(function (item) { return item.id; });
+    openConfirmModal('确认彻底删除回收站中的 ' + ids.length + ' 段日志？此操作无法恢复。', function () {
+      state.trashEntries = state.trashEntries.filter(function (item) { return ids.indexOf(item.id) < 0; });
+      persist();
+      refreshAll();
+      toast('个人日志回收站已清空。');
+    }, '彻底删除');
   });
 
   /* ---------- 数据导入 / 导出 ---------- */
@@ -2629,9 +2958,11 @@
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
       Array.isArray(parsed.entries) && parsed.host && typeof parsed.host === 'object' &&
       (parsed.notes === undefined || Array.isArray(parsed.notes)) &&
+      ['achievements', 'hiddenSkills', 'hiddenAchievements', 'noteCompletions', 'trashEntries'].every(function (key) { return parsed[key] === undefined || Array.isArray(parsed[key]); }) &&
       !Array.isArray(parsed.host) && Array.isArray(parsed.skills) &&
       parsed.points && typeof parsed.points === 'object' && !Array.isArray(parsed.points) &&
       parsed.quests && typeof parsed.quests === 'object' && !Array.isArray(parsed.quests) &&
+      (parsed.quests.side === undefined || Array.isArray(parsed.quests.side)) &&
       Array.isArray(parsed.notifications);
   }
 
@@ -2639,8 +2970,12 @@
     var arrays = [
       ['entries', parsed.entries, normalized.entries],
       ['notes', parsed.notes || [], normalized.notes],
+      ['note completions', parsed.noteCompletions || [], normalized.noteCompletions],
+      ['trash entries', parsed.trashEntries || [], normalized.trashEntries],
       ['skills', parsed.skills, normalized.skills],
       ['achievements', parsed.achievements || [], normalized.achievements],
+      ['hidden skills', parsed.hiddenSkills || [], normalized.hiddenSkills],
+      ['hidden achievements', parsed.hiddenAchievements || [], normalized.hiddenAchievements],
       ['notifications', parsed.notifications, normalized.notifications],
       ['side quests', parsed.quests.side || [], normalized.quests.side]
     ];
@@ -2650,39 +2985,298 @@
   }
 
   function exportDataBackup() {
-    var filename = 'tiandaochouqin-' + todayStr() + '.json';
-    var json = JSON.stringify(state, null, 2);
     try {
-      showExportModal(filename, json, new Blob([json], { type: 'application/json;charset=utf-8' }));
+      syncBackupState();
+      backupSession++;
+      pendingImport = null;
+      pendingFileUpdate = null;
+      backupFilename = newBackupFilename();
+      showExportModal(backupFilename, JSON.stringify(state, null, 2));
     } catch (e) {
-      console.error('[export] FAILED_TO_CREATE_BLOB', e);
-      toast('当前浏览器无法生成备份文件。', { level: 'ERROR' });
-      return;
+      toast('无法生成备份：' + e.message, { level: 'ERROR' });
     }
   }
 
-  function showExportModal(filename, json, blob) {
-    if (backupDownloadUrl) {
-      URL.revokeObjectURL(backupDownloadUrl);
-      backupDownloadUrl = null;
-    }
+  function newBackupFilename() {
+    var bytes = new Uint32Array(3);
+    if (window.crypto && window.crypto.getRandomValues) { window.crypto.getRandomValues(bytes); }
+    else { bytes = [Date.now(), Math.random() * 0xffffffff, Math.random() * 0xffffffff]; }
+    return TianDaoBackup.uniqueFilename(new Date(), Array.prototype.map.call(bytes, function (value) {
+      return Math.floor(value).toString(16);
+    }).join(''));
+  }
+
+  function showExportModal(filename, json) {
     backupCopyText = json;
-    openDetailModal('封印系统数据', '<p class="hint backup-hint">系统已显示运行数据。宿主可复制内容，或直接下载。</p>' +
+    openDetailModal('封印系统数据', '<p class="hint backup-hint">另存时自动生成独立文件名；如有同名文件，会继续更名。更新已有文件前会先检查并保留双方数据。</p>' +
+      '<p class="backup-summary">新文件：<span id="backupExportFilename">' + escapeHtml(filename) + '</span></p>' +
+      (!window.showOpenFilePicker ? '<p class="hint">当前浏览器支持下载新备份。更新已有文件请使用桌面版 Chrome 或 Edge。</p>' : '') +
       '<pre class="backup-json">' + escapeHtml(json) + '</pre>');
     el.detailCopyBackup.classList.remove('hidden');
-    if (window.URL && URL.createObjectURL) {
-      backupDownloadUrl = URL.createObjectURL(blob);
-      el.detailDownloadBackup.href = backupDownloadUrl;
-      el.detailDownloadBackup.download = filename;
+    if ((window.URL && URL.createObjectURL) || window.showDirectoryPicker) {
       el.detailDownloadBackup.classList.remove('hidden');
     }
+    el.detailUpdateBackup.textContent = '更新已有文件';
+    el.detailUpdateBackup.classList.toggle('hidden', !window.showOpenFilePicker);
+  }
+
+  function backupError(error) {
+    if (error.name === 'AbortError') { return; }
+    toast('文件操作未完成：' + error.message, { level: 'ERROR' });
+  }
+
+  async function saveNewBackup() {
+    if (backupBusy || !backupCopyText) { return; }
+    backupBusy = true;
+    var json = backupCopyText;
+    var filename = backupFilename;
+    backupFilename = newBackupFilename();
+    var nameElement = document.getElementById('backupExportFilename');
+    if (nameElement) { nameElement.textContent = filename; }
+    try {
+      if (window.showDirectoryPicker) {
+        var directory = await window.showDirectoryPicker({ mode: 'readwrite' });
+        var savedName = await TianDaoBackup.writeNewFile(directory, filename, json);
+        toast('已另存为「' + savedName + '」。', { level: 'SYSTEM' });
+      } else {
+        var blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+        toast('已开始下载新备份「' + filename + '」。', { level: 'SYSTEM' });
+      }
+    } catch (error) { backupError(error); }
+    finally { backupBusy = false; }
+  }
+
+  function syncBackupState() {
+    var latest = window.localStorage.getItem(STORAGE_KEY);
+    if (latest && latest !== JSON.stringify(persistedSnapshot)) {
+      var parsed = readBackupText(latest);
+      state = mergeConcurrentState(parsed);
+      persistedSnapshot = cloneState(parsed);
+    }
+  }
+
+  function backupFingerprint(value) {
+    return JSON.stringify(['entries', 'notes', 'noteCompletions', 'trashEntries', 'host', 'skills', 'achievements', 'points', 'quests', 'hiddenSkills', 'hiddenAchievements'].map(function (key) {
+      return value[key];
+    }));
+  }
+
+  async function updateBackupFile() {
+    if (backupBusy) { return; }
+    if (pendingFileUpdate) { await commitBackupUpdate(); return; }
+    backupBusy = true;
+    var session = backupSession;
+    try {
+      var handles = await window.showOpenFilePicker({ multiple: false, types: [{ description: '系统数据备份', accept: { 'application/json': ['.json'] } }] });
+      var file = await handles[0].getFile();
+      var raw = await file.text();
+      var existing = readBackupText(raw);
+      if (session !== backupSession) { return; }
+      syncBackupState();
+      pendingFileUpdate = { handle: handles[0], name: file.name, raw: raw, existing: existing, baseline: backupFingerprint(state) };
+      renderBackupUpdate();
+    } catch (error) { backupError(error); }
+    finally { backupBusy = false; }
+  }
+
+  function renderBackupUpdate(message) {
+    var pending = pendingFileUpdate;
+    var plan = TianDaoBackup.planMerge(pending.existing, state, {}, defaultState());
+    openDetailModal('检查文件更新', '<p class="backup-summary">文件：' + escapeHtml(pending.name) + '<br>更新会保留文件中独有的数据，并加入当前数据。</p>' +
+      (message ? '<p class="backup-warning">' + escapeHtml(message) + '</p>' : '') +
+      (plan.conflicts.length ? '<p class="backup-warning">发现 ' + plan.conflicts.length + ' 项冲突，不能更新。请先导入此文件，在兼容扩充中处理冲突，再另存新文件。</p>' :
+        '<p class="backup-summary">检查通过，没有冲突。确认后更新此文件。</p>') + renderBackupConflicts(plan, '文件中', '当前数据', false));
+    el.detailUpdateBackup.textContent = '确认更新文件';
+    el.detailUpdateBackup.disabled = !!plan.conflicts.length;
+    el.detailUpdateBackup.classList.remove('hidden');
+  }
+
+  async function commitBackupUpdate() {
+    var pending = pendingFileUpdate;
+    backupBusy = true;
+    el.detailUpdateBackup.disabled = true;
+    try {
+      syncBackupState();
+      if (pending.baseline !== backupFingerprint(state)) {
+        pending.baseline = backupFingerprint(state);
+        renderBackupUpdate('当前数据已变化，已重新检查，请查看结果后再次确认。');
+        return;
+      }
+      var plan = TianDaoBackup.planMerge(pending.existing, state, {}, defaultState());
+      if (plan.conflicts.length) { renderBackupUpdate(); return; }
+      await TianDaoBackup.writeFile(pending.handle, JSON.stringify(plan.state, null, 2), pending.raw);
+      if (pendingFileUpdate === pending) { closeDetailModal(); }
+      toast('已检查并更新「' + pending.name + '」。', { level: 'SYSTEM' });
+    } catch (error) {
+      backupError(error);
+      // 文件变化后必须重新选择，不能继续使用旧预览。
+      if (pendingFileUpdate === pending) { exportDataBackup(); }
+    } finally { backupBusy = false; }
+  }
+
+  function importModesHtml() {
+    return '<fieldset class="backup-modes"><legend>导入方式</legend>' +
+      '<label><input type="radio" name="backupImportMode" value="merge"' + (importMode === 'merge' ? ' checked' : '') +
+      '><span>兼容扩充<small>保留双方记录、自动去重，逐项处理冲突；重叠时间只替换选中的部分。</small></span></label>' +
+      '<label><input type="radio" name="backupImportMode" value="replace"' + (importMode === 'replace' ? ' checked' : '') +
+      '><span>覆盖当前数据<small>以导入文件为准，替换当前全部数据。</small></span></label></fieldset>';
   }
 
   function showImportModal() {
-    openDetailModal('启封系统数据', '<p class="hint backup-hint">请宿主载入系统曾被封印的数据，或选择封印数据所在文件。</p>' +
+    backupSession++;
+    pendingImport = null;
+    pendingFileUpdate = null;
+    importMode = 'merge';
+    openDetailModal('启封系统数据', importModesHtml() + '<p class="hint backup-hint">选择备份文件，或粘贴数据后点击「检查数据」。检查期间不会修改当前记录。</p>' +
       '<textarea id="importJsonInput" class="import-json-input" spellcheck="false" placeholder="此处显示系统被封印数据"></textarea>');
     el.detailPasteImport.classList.remove('hidden');
+    el.detailUploadImport.textContent = '检查数据';
     el.detailUploadImport.classList.remove('hidden');
+    el.detailChooseImport.classList.remove('hidden');
+  }
+
+  function readBackupText(rawText) {
+    var parsed = JSON.parse(String(rawText).replace(/^\uFEFF/, ''));
+    if (!isImportableState(parsed)) { throw new Error('不是有效的系统数据。'); }
+    if (Object.keys(parsed.points).some(function (key) {
+      return parsed.points[key] === null || parsed.points[key] === '' || !Number.isFinite(Number(parsed.points[key]));
+    })) { throw new Error('点数余额无效，未执行导入。'); }
+    var imported = mergeDefaults(parsed);
+    if (!preservesImportedArrays(parsed, imported)) { throw new Error('数据包含无法识别的记录，未执行导入。'); }
+    return imported;
+  }
+
+  function describeBackupValue(value) {
+    if (Array.isArray(value)) { return value.map(describeBackupValue).join('\n\n'); }
+    if (!value || typeof value !== 'object') { return String(value === '' ? '未填写' : value); }
+    if (value.entry) { return describeBackupValue(value.entry) + '\n删除于：' + formatCreatedAt(value.deletedAt); }
+    if (value.skillId && value.completedAt) {
+      return '备注：' + (value.noteText || '已完成备注') + '\n技能：' + value.skillName + '\n计入小时：' + value.hours + '\n完成于：' + formatCreatedAt(value.completedAt);
+    }
+    if (value.start !== undefined && value.activity !== undefined) {
+      return (value.startDate || value.date) + ' ' + toClock(value.start) + ' → ' + (value.endDate || value.date) + ' ' + toClock(value.end) +
+        '\n技能：' + (value.category || '未指定') + '\n作为：' + value.activity + '\n等级：' + value.level;
+    }
+    var labels = { name: '名称', title: '标题', text: '内容', hours: '基准小时', points: '成就点', desc: '描述', date: '日期', createdAt: '创建时间',
+      attribute: '属性点', contribution: '贡献点', achievement: '成就点', status: '状态', progress: '进度', completionCount: '完成次数',
+      rewardAttr: '属性点奖励', rewardAchievement: '成就点奖励', mainRevealed: '已解锁线索', mainCompleted: '已完成线索',
+      mainProgress: '主线进度', mainAccepted: '已领取主线', level: '等级', ts: '时间', count: '次数', hidden: '已隐藏', deletedAt: '移入回收站时间' };
+    return Object.keys(value).filter(function (key) { return ['id', 'questId', 'rewardContrib'].indexOf(key) < 0; }).map(function (key) {
+      var item = value[key];
+      if (key === 'ts') { item = new Date(Number(item)).toLocaleString(); }
+      if (key === 'status') { item = { open: '未领取', accepted: '进行中', done: '已完成' }[item] || item; }
+      if (typeof item === 'boolean') { item = item ? '是' : '否'; }
+      return (labels[key] || key) + '：' + item;
+    }).join('\n');
+  }
+
+  function renderBackupConflicts(plan, currentLabel, incomingLabel, editable) {
+    return plan.conflicts.map(function (conflict, index) {
+      var localLabel = conflict.scope === 'current' ? currentLabel + '（记录一）' : currentLabel;
+      var importedLabel = conflict.scope === 'current' ? currentLabel + '（记录二）' : incomingLabel;
+      return '<section class="backup-conflict"><h3>' + (index + 1) + '. ' + escapeHtml(conflict.title) + '</h3><div class="backup-values">' +
+        '<div><strong>' + localLabel + '</strong><pre>' + escapeHtml(describeBackupValue(conflict.current)) + '</pre></div>' +
+        '<div><strong>' + importedLabel + '</strong><pre>' + escapeHtml(describeBackupValue(conflict.incoming)) + '</pre></div></div>' +
+        (editable ? '<div class="backup-choices">' + ['current', 'incoming'].map(function (choice) {
+          return '<button type="button" class="btn ghost" data-backup-conflict="' + escapeHtml(conflict.id) + '" data-backup-choice="' + choice +
+            '" aria-pressed="' + (conflict.choice === choice) + '">' + (conflict.scope === 'current' ? (choice === 'current' ? '采用记录一' : '采用记录二') : (choice === 'current' ? '保留当前' : '采用导入')) + '</button>';
+        }).join('') + '</div>' : '') + '</section>';
+    }).join('');
+  }
+
+  function renderImportReview(message) {
+    var pending = pendingImport;
+    var imported = pending.imported;
+    var plan = TianDaoBackup.planMerge(state, imported, pending.choices, defaultState());
+    var merging = importMode === 'merge';
+    openDetailModal('检查导入数据', importModesHtml() + '<p class="backup-summary">来源：' + escapeHtml(pending.name) + '<br>' +
+      imported.entries.length + ' 条时间记录 · ' + imported.notes.length + ' 条备注 · ' + imported.skills.length + ' 项技能 · ' + imported.quests.side.length + ' 条支线</p>' +
+      (message ? '<p class="backup-warning">' + escapeHtml(message) + '</p>' : '') +
+      (merging ? '<p class="backup-summary" role="status">已识别 ' + plan.duplicates + ' 项重复数据，' + plan.conflicts.length + ' 项冲突，剩余 ' + plan.unresolved + ' 项待处理。</p>' +
+        (plan.conflicts.length ? '<div class="backup-bulk"><button type="button" class="btn ghost" data-backup-all="current">全部保留当前</button>' +
+          '<button type="button" class="btn ghost" data-backup-all="incoming">全部采用导入</button></div>' : '<p class="hint">没有冲突，可以直接兼容扩充。</p>') +
+        '<p class="hint">当前日志被替换的部分会保存在个人日志回收站。</p>' + renderBackupConflicts(plan, '当前数据', '导入数据', true) :
+        '<p class="backup-warning">确认后将替换当前的 ' + state.entries.length + ' 条时间记录、' + state.notes.length + ' 条备注及全部属性、技能、任务和点数。原有日志被替换或移除的部分会保存在个人日志回收站。</p>'));
+    el.detailUploadImport.textContent = merging ? '确认兼容扩充' : '确认覆盖导入';
+    el.detailUploadImport.disabled = merging && plan.unresolved > 0;
+    el.detailUploadImport.classList.remove('hidden');
+    el.detailChooseImport.classList.remove('hidden');
+  }
+
+  el.detailBody.addEventListener('change', function (event) {
+    if (event.target.name !== 'backupImportMode') { return; }
+    importMode = event.target.value;
+    if (pendingImport) {
+      renderImportReview();
+      el.detailBody.querySelector('input[name="backupImportMode"][value="' + importMode + '"]').focus({ preventScroll: true });
+    }
+  });
+  el.detailBody.addEventListener('click', function (event) {
+    if (!pendingImport) { return; }
+    var button = event.target.closest('[data-backup-conflict], [data-backup-all]');
+    if (!button) { return; }
+    var scrollTop = el.detailBody.scrollTop;
+    if (button.dataset.backupAll) {
+      TianDaoBackup.planMerge(state, pendingImport.imported, pendingImport.choices, defaultState()).conflicts.forEach(function (conflict) {
+        pendingImport.choices[conflict.id] = button.dataset.backupAll;
+      });
+    } else { pendingImport.choices[button.dataset.backupConflict] = button.dataset.backupChoice; }
+    renderImportReview();
+    el.detailBody.scrollTop = scrollTop;
+    if (button.dataset.backupConflict) {
+      var replacement = Array.prototype.find.call(el.detailBody.querySelectorAll('[data-backup-conflict]'), function (item) {
+        return item.dataset.backupConflict === button.dataset.backupConflict && item.dataset.backupChoice === button.dataset.backupChoice;
+      });
+      if (replacement) { replacement.focus({ preventScroll: true }); }
+    }
+  });
+
+  function commitBackupImport() {
+    syncBackupState();
+    var pending = pendingImport;
+    if (pending.baseline !== backupFingerprint(state)) {
+      pending.choices = {};
+      pending.baseline = backupFingerprint(state);
+      renderImportReview('当前数据已变化，已重新检查，请重新处理冲突并确认。');
+      return;
+    }
+    var plan = TianDaoBackup.planMerge(state, pending.imported, pending.choices, defaultState());
+    if (importMode === 'merge' && plan.unresolved) { renderImportReview(); return; }
+    var previousState = state;
+    var previousPrimary = window.localStorage.getItem(STORAGE_KEY);
+    var previousBackup = window.localStorage.getItem(STORAGE_BACKUP_KEY);
+    state = importMode === 'merge' ? plan.state : cloneState(pending.imported);
+    state = TianDaoBackup.preserveDisplacedEntries(previousState, state, new Date().toISOString());
+    if (!persist(true)) {
+      state = previousState;
+      // 第二份存储写入失败时，也恢复已写入的第一份，保留原备份。
+      try {
+        if (previousPrimary === null) { window.localStorage.removeItem(STORAGE_KEY); }
+        else { window.localStorage.setItem(STORAGE_KEY, previousPrimary); }
+        if (previousBackup === null) { window.localStorage.removeItem(STORAGE_BACKUP_KEY); }
+        else { window.localStorage.setItem(STORAGE_BACKUP_KEY, previousBackup); }
+      } catch (error) { console.error('[import] RESTORE_FAILED', error); }
+      persistedSnapshot = cloneState(state);
+      renderImportReview('数据保存失败，导入未完成。请检查浏览器存储空间后重试。');
+      return;
+    }
+    clearQuestUpgradeTimers();
+    closeNoteCompleteModal();
+    closeNoteEditModal();
+    editingEntryId = null;
+    syncCollapseState();
+    closeDetailModal();
+    fullRender();
+    applyActiveTabView(state.ui.activeTab);
+    toast('宿主数据已' + (importMode === 'merge' ? '兼容扩充' : '覆盖导入') + '，面板已重新同步。', { level: 'SYSTEM' });
   }
 
   function copyBackupJson() {
@@ -2723,6 +3317,10 @@
   });
 
   el.detailUploadImport.addEventListener('click', function () {
+    if (pendingImport) {
+      try { commitBackupImport(); } catch (error) { backupError(error); }
+      return;
+    }
     var input = document.getElementById('importJsonInput');
     if (input && input.value.trim()) {
       importJsonText(input.value);
@@ -2731,32 +3329,14 @@
     el.importFile.click();
   });
 
-  function importJsonText(rawText) {
-    var previousState = state;
+  function importJsonText(rawText, filename) {
     try {
-      var parsed = JSON.parse(String(rawText));
-      if (!isImportableState(parsed)) {
-        throw new Error('导入数据不是有效的系统数据。');
-      }
-      var importedState = mergeDefaults(parsed);
-      if (!preservesImportedArrays(parsed, importedState)) {
-        throw new Error('导入数据包含无法识别的记录。');
-      }
-      closeDetailModal();
-      var confirmed = openConfirmModal('确认导入数据并覆盖当前系统数据？', function () {
-        clearQuestUpgradeTimers();
-        state = importedState;
-        syncCollapseState();
-        persist(true);
-        toast('宿主数据导入成功，面板已重新同步。', { level: 'SYSTEM' });
-        fullRender();
-      });
-      if (!confirmed) {
-        toast('当前有待确认操作，导入未执行。', { level: 'WARN' });
-      }
+      var imported = readBackupText(rawText);
+      syncBackupState();
+      pendingImport = { imported: imported, name: filename || '粘贴的数据', choices: {}, baseline: backupFingerprint(state) };
+      renderImportReview();
     } catch (e) {
-      state = previousState;
-      toast('导入文件格式异常，数据未变更。', { level: 'ERROR' });
+      toast('导入文件格式异常，数据未变更。' + (e instanceof SyntaxError ? '' : e.message), { level: 'ERROR' });
     }
   }
 
@@ -2764,13 +3344,12 @@
   el.importFile.addEventListener('change', function () {
     var file = el.importFile.files && el.importFile.files[0];
     if (!file) { return; }
+    var session = backupSession;
+    var readVersion = ++importReadVersion;
     var reader = new FileReader();
     reader.onload = function () {
-      var input = document.getElementById('importJsonInput');
-      if (input) {
-        input.value = String(reader.result);
-      }
-      importJsonText(reader.result);
+      if (session !== backupSession || readVersion !== importReadVersion || el.detailModal.classList.contains('hidden')) { return; }
+      importJsonText(reader.result, file.name);
     };
     reader.onerror = function () {
       toast('导入文件读取失败，数据未变更。', { level: 'ERROR' });
@@ -2891,8 +3470,22 @@
     return cursor.snap !== null ? cursor.snap : timelineZoom.start + cursor.ratio * timelineZoomRange();
   }
 
+  function allNotes() {
+    return state.notes.slice().sort(function (a, b) {
+      return Date.parse(a.createdAt) - Date.parse(b.createdAt);
+    });
+  }
+
+  function filteredNotes() {
+    var filter = state.ui.noteFilter || 'pending';
+    return allNotes().filter(function (note) {
+      if (filter === 'trash') { return !!note.deletedAt; }
+      return !note.deletedAt && (filter === 'completed' ? !!completionForNote(note.id) : !completionForNote(note.id));
+    });
+  }
+
   function notesByDate(dateStr) {
-    return state.notes.filter(function (note) { return note.date === dateStr; }).sort(function (a, b) {
+    return state.notes.filter(function (note) { return !note.deletedAt && note.date === dateStr; }).sort(function (a, b) {
       return Date.parse(a.createdAt) - Date.parse(b.createdAt);
     });
   }
@@ -3451,16 +4044,31 @@
     el.logView.scrollTop = state.ui.logScrollTop;
   }
 
-  function renderNotes(dateStr) {
+  function renderNotes() {
     var scrollTop = el.noteView.scrollTop;
-    var notes = notesByDate(dateStr);
-    el.noteDateLabel.textContent = dateStr;
+    var notes = filteredNotes();
+    var filter = state.ui.noteFilter || 'pending';
+    var label = { pending: '未完成', completed: '已完成', trash: '回收站' }[filter];
+    el.noteFilter.value = filter;
+    var filterSelect = customSelects.find(function (item) { return item.select === el.noteFilter; });
+    if (filterSelect) { syncCustomSelect(filterSelect); }
+    el.noteCountLabel.textContent = label + ' · ' + notes.length + ' 条';
+    el.clearNotes.textContent = filter === 'trash' ? '清空回收站' : '全部移入回收站';
     el.noteView.innerHTML = notes.length ? notes.map(function (note) {
-      return '<div class="log-line note-entry"><div class="log-entry-content">' +
-        '<time class="ts" datetime="' + escapeHtml(note.createdAt) + '">[' + escapeHtml(formatCreatedAt(note.createdAt)) + ']</time>' +
-        '<div class="msg log-entry-activity">' + escapeHtml(note.text) + '</div></div>' +
-        '<button type="button" class="del" data-note-del="' + escapeHtml(note.id) + '" aria-label="删除该备注" title="删除该备注">[x]</button></div>';
-    }).join('') : '<div class="empty">当日暂无备注。</div>';
+      var completion = completionForNote(note.id);
+      var actions = '<div class="note-actions">' +
+        '<button type="button" class="del" data-note-del="' + escapeHtml(note.id) + '" aria-label="' + (filter === 'trash' ? '彻底删除该备注' : '将该备注移入回收站') + '" title="' + (filter === 'trash' ? '彻底删除' : '移入回收站') + '">[x]</button>' + (filter === 'trash' ?
+          '<button type="button" class="del" data-note-restore="' + escapeHtml(note.id) + '" aria-label="恢复该备注" title="恢复该备注">↶</button>' :
+          '<button type="button" class="del note-done" data-note-complete="' + escapeHtml(note.id) + '" aria-label="' + (completion ? '已完成' : '完成该备注') + '" title="' + (completion ? '已完成，小时已计入技能' : '完成并计入技能进度') + '"' + (completion ? ' disabled' : '') + '>[✓]</button>') +
+        (filter === 'trash' ? '<button type="button" class="del" data-note-copy="' + escapeHtml(note.id) + '" aria-label="复制备注内容" title="复制备注内容">复制</button>' : '') + '</div>';
+      return '<div class="log-line note-entry' + (note.deletedAt ? '' : ' note-edit-trigger') + '"' +
+        (note.deletedAt ? '' : ' data-note-edit="' + escapeHtml(note.id) + '" role="button" tabindex="0" aria-label="修改备注" title="点击修改备注"') + '><div class="note-entry-head">' +
+        '<time class="ts" datetime="' + escapeHtml(note.createdAt) + '">[' + escapeHtml(formatCreatedAt(note.createdAt)) + ']</time>' + actions + '</div>' +
+        '<div class="log-entry-content">' +
+        '<div class="msg log-entry-activity">' + escapeHtml(note.text) + '</div>' +
+        (completion ? '<div class="note-completion">已完成 · ' + escapeHtml(completion.skillName) + ' +' + completion.hours + ' 小时</div>' : '') +
+        (note.deletedAt ? '<div class="trash-entry-meta">删除于 ' + escapeHtml(formatCreatedAt(note.deletedAt)) + '</div>' : '') + '</div></div>';
+    }).join('') : '<div class="empty">' + (filter === 'trash' ? '回收站为空。' : '暂无' + label + '备注。') + '</div>';
     el.noteView.scrollTop = scrollTop;
   }
 
@@ -4320,7 +4928,9 @@
     renderTimeline(list);
     renderTimelineNoteMarkers();
     renderLog(state.viewDate);
-    renderNotes(state.viewDate);
+    renderNotes();
+    el.logTrash.textContent = '回收站 · ' + state.trashEntries.length;
+    if (logTrashOpen) { renderLogTrashModal(); }
     renderFocus();
     renderCategories();
   }
