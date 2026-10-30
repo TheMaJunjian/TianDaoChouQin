@@ -196,10 +196,10 @@
         <input type="date" id="viewDate">
         <button type="button" class="btn ghost" id="nextDay">后一日 ▶</button>
       </div>
-      <div class="timeline-ruler" id="timelineRuler" aria-label="拖动游标实时缩放，按当前时间轴上的日志中点和金色备注线吸附，双击恢复全天">
+      <div class="timeline-ruler" id="timelineRuler" aria-label="左右滑块选择开始和结束时间以放大时间块，不能交叉；吸附当前金色备注线或日志中点时保持现有缩放范围，继续拖动可脱离吸附，双击恢复全天">
         <div class="timeline-note-markers" id="timelineNoteMarkers"></div>
-        <span class="timeline-cursor start" id="timelineStartCursor" role="slider" tabindex="0" aria-label="时间轴开始游标" aria-valuemin="0" aria-valuemax="23" aria-valuestep="1" title="拖动设置开始时间"></span>
-        <span class="timeline-cursor end" id="timelineEndCursor" role="slider" tabindex="0" aria-label="时间轴结束游标" aria-valuemin="1" aria-valuemax="24" aria-valuestep="1" title="拖动设置结束时间"></span>
+        <span class="timeline-cursor start" id="timelineStartCursor" role="slider" tabindex="0" aria-label="时间轴开始时间滑块" aria-valuemin="0" aria-valuemax="1380" aria-valuestep="1" title="拖动选择开始时间"></span>
+        <span class="timeline-cursor end" id="timelineEndCursor" role="slider" tabindex="0" aria-label="时间轴结束时间滑块" aria-valuemin="60" aria-valuemax="1440" aria-valuestep="1" title="拖动选择结束时间"></span>
       </div>
       <div class="timeline" id="timeline"></div>
       <div class="timeline-axis" id="timelineAxis"></div>

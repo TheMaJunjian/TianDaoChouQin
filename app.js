@@ -173,7 +173,18 @@
       timelineZoom.start = Math.max(0, Math.min(DAY_MINUTES - 60, zoomStart));
       timelineZoom.end = Math.min(DAY_MINUTES, Math.max(timelineZoom.start + 60, zoomEnd));
     }
-    timelineCursors = normalizeTimelineCursors(ui.timelineCursors);
+    timelineCursors = normalizeTimelineCursors(ui.timelineCursors, timelineZoom);
+    if (!ui.timelineCursors) {
+      timelineCursors.start.ratio = timelineZoom.start / DAY_MINUTES;
+      timelineCursors.end.ratio = timelineZoom.end / DAY_MINUTES;
+      timelineCursors.start.rangeRatio = timelineCursors.start.ratio;
+      timelineCursors.end.rangeRatio = timelineCursors.end.ratio;
+    }
+    var range = timelineZoomFromCursors();
+    timelineZoom.start = range.start;
+    timelineZoom.end = range.end;
+    ui.timelineZoom = { start: range.start, end: range.end };
+    ui.timelineCursors = normalizeTimelineCursors(timelineCursors);
   }
 
   function persistCollapseState() {
@@ -663,7 +674,8 @@
           merged.ui.timelineZoom = { start: zoomStart, end: zoomEnd };
         }
       }
-      merged.ui.timelineCursors = normalizeTimelineCursors(parsedUi.timelineCursors);
+      merged.ui.timelineCursors = parsedUi.timelineCursors
+        ? normalizeTimelineCursors(parsedUi.timelineCursors, merged.ui.timelineZoom) : null;
       if (parsedUi.entryDraft && typeof parsedUi.entryDraft === 'object') {
         merged.ui.entryDraft = {};
         ['startDate', 'startTime', 'endDate', 'endTime', 'category', 'activity', 'level'].forEach(function (key) {
@@ -3451,23 +3463,50 @@
     return timelineZoom.end - timelineZoom.start;
   }
 
-  function normalizeTimelineCursors(saved) {
+  function normalizeTimelineCursors(saved, range) {
     var result = {};
+    var hasSnap = saved && ['start', 'end'].some(function (name) {
+      return saved[name] && saved[name].snap !== null && saved[name].snap !== undefined;
+    });
     ['start', 'end'].forEach(function (name) {
       var item = saved && saved[name];
       var ratio = item && Number(item.ratio);
+      var rangeRatio = item && item.rangeRatio !== null && item.rangeRatio !== undefined ? Number(item.rangeRatio) : NaN;
       var snap = item && item.snap !== null && item.snap !== undefined ? Number(item.snap) : null;
+      ratio = item && Number.isFinite(ratio) ? Math.max(0, Math.min(1, ratio)) : (name === 'start' ? 0 : 1);
+      if (!Number.isFinite(rangeRatio)) {
+        rangeRatio = hasSnap && range && Number.isFinite(Number(range[name])) ? Number(range[name]) / DAY_MINUTES : ratio;
+      }
       result[name] = {
-        ratio: item && Number.isFinite(ratio) ? Math.max(0, Math.min(1, ratio)) : (name === 'start' ? 0 : 1),
+        ratio: ratio,
+        rangeRatio: Math.max(0, Math.min(1, rangeRatio)),
         snap: snap !== null && Number.isFinite(snap) && snap >= 0 && snap <= DAY_MINUTES ? snap : null
       };
     });
+    var minGap = 60 / DAY_MINUTES;
+    result.end.rangeRatio = Math.max(minGap, result.end.rangeRatio);
+    result.start.rangeRatio = Math.min(result.start.rangeRatio, result.end.rangeRatio - minGap);
+    ['start', 'end'].forEach(function (name) {
+      var item = result[name];
+      if (item.snap !== null && range) {
+        var position = timelineNotePosition(item.snap, range.start, range.end);
+        if (position === null) { item.snap = null; }
+        else { item.ratio = position / 100; }
+      }
+      if (item.snap === null) { item.ratio = item.rangeRatio; }
+    });
+    if (result.start.ratio > result.end.ratio) {
+      ['start', 'end'].forEach(function (name) {
+        result[name].snap = null;
+        result[name].ratio = result[name].rangeRatio;
+      });
+    }
     return result;
   }
 
   function timelineCursorMinutes(name) {
     var cursor = timelineCursors[name];
-    return cursor.snap !== null ? cursor.snap : timelineZoom.start + cursor.ratio * timelineZoomRange();
+    return cursor.snap !== null ? cursor.snap : cursor.rangeRatio * DAY_MINUTES;
   }
 
   function allNotes() {
@@ -3543,7 +3582,9 @@
   function updateTimelineNoteMarkerPositions() {
     Array.prototype.forEach.call(el.timelineNoteMarkers.querySelectorAll('[data-note-second]'), function (marker) {
       var minutes = Number(marker.getAttribute('data-note-second')) / 60;
-      var linked = ['start', 'end'].some(function (name) { return Math.abs(minutes - timelineCursorMinutes(name)) < 1e-7; });
+      var linked = ['start', 'end'].some(function (name) {
+        return timelineCursors[name].snap !== null && Math.abs(minutes - timelineCursorMinutes(name)) < 1e-7;
+      });
       var position = timelineNotePosition(minutes, timelineZoom.start, timelineZoom.end);
       marker.hidden = position === null;
       marker.style.left = (position === null ? 0 : position) + '%';
@@ -3562,7 +3603,8 @@
     var notePoints = notesByDate(state.viewDate).map(noteMinutes);
     ['start', 'end'].forEach(function (name) {
       var cursor = name === 'start' ? el.timelineStartCursor : el.timelineEndCursor;
-      var kind = timelineSnapKind(timelineCursorMinutes(name), logPoints, notePoints);
+      var kind = timelineCursors[name].snap !== null
+        ? timelineSnapKind(timelineCursorMinutes(name), logPoints, notePoints) : '';
       cursor.classList.toggle('note-linked', kind === 'note');
       cursor.classList.toggle('log-linked', kind === 'log');
     });
@@ -3615,6 +3657,7 @@
   });
 
   function updateTimelineZoomLabel() {
+    timelineCursors = normalizeTimelineCursors(timelineCursors, timelineZoom);
     var span = timelineZoom.end - timelineZoom.start;
     el.timelineAxis.innerHTML = [0, 1, 2, 3, 4].map(function (index) {
       var mark = Math.round((timelineZoom.start + span * index / 4) * 60) / 60;
@@ -3623,11 +3666,6 @@
     ['start', 'end'].forEach(function (name) {
       var item = timelineCursors[name];
       var cursor = name === 'start' ? el.timelineStartCursor : el.timelineEndCursor;
-      if (item.snap !== null) {
-        var position = timelineNotePosition(item.snap, timelineZoom.start, timelineZoom.end);
-        if (position === null) { item.snap = null; }
-        else { item.ratio = position / 100; }
-      }
       var minutes = timelineCursorMinutes(name);
       cursor.style.left = (item.ratio * 100) + '%';
       cursor.setAttribute('aria-valuemin', '0');
@@ -3636,7 +3674,8 @@
       cursor.setAttribute('aria-valuenow', String(minutes));
       cursor.setAttribute('aria-valuetext', toClock(minutes));
       cursor.setAttribute('data-value', toClock(minutes));
-      cursor.title = (name === 'start' ? '左' : '右') + '游标 ' + toClock(minutes) + '，拖动实时缩放';
+      cursor.title = (item.snap !== null ? '吸附 ' : (name === 'start' ? '开始 ' : '结束 ')) +
+        toClock(minutes) + '，拖动选择时间范围';
     });
     state.ui.timelineCursors = normalizeTimelineCursors(timelineCursors);
     updateTimelineNoteMarkerPositions();
@@ -3867,9 +3906,14 @@
     var points = [];
     byDate(state.viewDate).forEach(function (entry) { points.push((entry.start + entry.end) / 2); });
     notesByDate(state.viewDate).forEach(function (note) { points.push(noteMinutes(note)); });
-    return points.map(function (minutes) { return Math.round(minutes * 120) / 120; }).sort(function (a, b) {
+    return points.sort(function (a, b) {
       return a - b;
     }).filter(function (minutes, index, list) { return index === 0 || minutes !== list[index - 1]; });
+  }
+
+  function timelineZoomFromCursors() {
+    // rangeRatio 保存普通拖动选定的起止时间，吸附只改变 ratio 和 snap。
+    return { start: timelineCursors.start.rangeRatio * DAY_MINUTES, end: timelineCursors.end.rangeRatio * DAY_MINUTES };
   }
 
   function moveTimelineCursor(cursor, event, drag) {
@@ -3880,9 +3924,10 @@
     if (Math.abs(distance) < 1e-7) { return; }
     drag.lastX = event.clientX;
     var item = timelineCursors[cursor];
-    var previousPointerX = rect.left + item.ratio * rect.width;
+    var previousPointerX = Math.max(rect.left, Math.min(rect.right, previousX - drag.offset));
     var current = timelineCursorMinutes(cursor);
-    var minutesPerPixel = timelineZoomRange() / rect.width;
+    var minRatio = cursor === 'start' ? 0 : timelineCursors.start.rangeRatio + 60 / DAY_MINUTES;
+    var maxRatio = cursor === 'start' ? timelineCursors.end.rangeRatio - 60 / DAY_MINUTES : 1;
     if (drag.released && Math.abs(event.clientX - drag.released.x) > 18) { drag.released = null; }
     if (drag.snap) {
       var fromSnap = event.clientX - drag.snap.x;
@@ -3893,36 +3938,40 @@
     }
     var pointerX = Math.max(rect.left, Math.min(rect.right, event.clientX - drag.offset));
     var direction = distance > 0 ? 1 : -1;
-    // 每次移动都使用缩放后的屏幕位置，并取该位置对应的真实时刻。
-    var candidates = timelineSnapPoints().map(function (point) {
-      var position = timelineNotePosition(point, timelineZoom.start, timelineZoom.end);
-      return { minutes: point, x: position === null ? null : rect.left + position / 100 * rect.width };
-    }).filter(function (point) {
-      if (point.x === null ||
-          (drag.released && Math.abs(point.minutes - drag.released.minutes) < 1e-7)) { return false; }
-      if (Math.abs(point.minutes - current) < 1e-7) { return false; }
-      return Math.abs(point.x - pointerX) <= 6 || (direction > 0
-        ? point.x > previousPointerX && point.x <= pointerX
-        : point.x < previousPointerX && point.x >= pointerX);
+    // 吸附只选择当前画面上的时刻，保留控制缩放的 rangeRatio。
+    var candidates = [];
+    timelineSnapPoints().forEach(function (point) {
+      if ((item.snap !== null && Math.abs(point - current) < 1e-7) ||
+          (drag.released && Math.abs(point - drag.released.minutes) < 1e-7)) { return; }
+      var visible = timelineNotePosition(point, timelineZoom.start, timelineZoom.end);
+      if (visible === null) { return; }
+      var ratio = visible / 100;
+      if (cursor === 'start' ? ratio >= timelineCursors.end.ratio : ratio <= timelineCursors.start.ratio) { return; }
+      var x = rect.left + ratio * rect.width;
+      if (Math.abs(x - pointerX) <= 6 || (direction > 0
+        ? x > previousPointerX && x <= pointerX
+        : x < previousPointerX && x >= pointerX)) {
+        candidates.push({ minutes: point, ratio: ratio, x: x });
+      }
     });
     candidates.sort(function (a, b) { return Math.abs(a.x - pointerX) - Math.abs(b.x - pointerX); });
     if (candidates.length) {
       item.snap = candidates[0].minutes;
-      item.ratio = (candidates[0].x - rect.left) / rect.width;
+      item.ratio = candidates[0].ratio;
       drag.snap = { minutes: item.snap, x: event.clientX };
-      drag.rangeValue = timelineZoom[cursor];
-      // 吸附只选中当前轴上的时刻，不把它重新当作缩放边界。
       updateTimelineZoomLabel();
     } else {
       item.snap = null;
-      item.ratio = (pointerX - rect.left) / rect.width;
-      var min = cursor === 'start' ? 0 : timelineZoom.start + 60;
-      var max = cursor === 'start' ? timelineZoom.end - 60 : DAY_MINUTES;
-      drag.rangeValue = Math.max(min, Math.min(max, drag.rangeValue + distance * minutesPerPixel));
-      var boundary = Math.max(min, Math.min(max, Math.round(drag.rangeValue)));
-      if (cursor === 'start') { setTimelineZoom(boundary, timelineZoom.end, null, false); }
-      else { setTimelineZoom(timelineZoom.start, boundary, null, false); }
+      item.ratio = Math.max(minRatio, Math.min(maxRatio, (pointerX - rect.left) / rect.width));
+      var other = timelineCursors[cursor === 'start' ? 'end' : 'start'];
+      if (other.snap !== null) {
+        item.ratio = cursor === 'start' ? Math.min(item.ratio, other.ratio) : Math.max(item.ratio, other.ratio);
+      }
+      item.rangeRatio = item.ratio;
+      var range = timelineZoomFromCursors();
+      setTimelineZoom(range.start, range.end, null, false);
     }
+    if (drag.snap && timelineCursors[cursor].snap === null) { drag.snap = null; }
     prioritizeTimelineCursorNote(cursor);
   }
 
@@ -3946,9 +3995,7 @@
       drag = {
         offset: event.clientX - rect.left - timelineCursors[cursorName].ratio * rect.width,
         lastX: event.clientX,
-        rangeValue: timelineZoom[cursorName],
-        snap: timelineSnapPoints().some(function (point) { return Math.abs(point - current) < 1e-7; })
-          ? { minutes: current, x: event.clientX } : null,
+        snap: timelineCursors[cursorName].snap !== null ? { minutes: current, x: event.clientX } : null,
         released: null
       };
       cursorElement.classList.add('dragging');
@@ -3984,8 +4031,8 @@
       if (drag) { return; }
       var rect = el.timelineNoteMarkers.getBoundingClientRect();
       var x = rect.left + timelineCursors[cursorName].ratio * rect.width;
-      moveTimelineCursor(cursorName, { clientX: x + (event.key === 'ArrowLeft' ? -60 : 60) / timelineZoomRange() * rect.width }, {
-        offset: 0, lastX: x, rangeValue: timelineZoom[cursorName], snap: null, released: null
+      moveTimelineCursor(cursorName, { clientX: x + (event.key === 'ArrowLeft' ? -60 : 60) / DAY_MINUTES * rect.width }, {
+        offset: 0, lastX: x, snap: null, released: null
       });
       persist();
     });
