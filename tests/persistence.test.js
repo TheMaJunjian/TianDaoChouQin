@@ -14,6 +14,9 @@ const browserPath = [process.env.BROWSER_PATH,
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
   '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'
 ].find(candidate => candidate && fs.existsSync(candidate));
+if (process.env.REQUIRE_BROWSER_TESTS === '1' && !browserPath) {
+  throw new Error('Browser tests are required. Install Chrome/Edge/Chromium or set BROWSER_PATH.');
+}
 const root = path.resolve(__dirname, '..');
 const storageKey = 'tiandao.state.v2';
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -64,7 +67,7 @@ test('browser persistence and refresh recovery', { skip: !browserPath, timeout: 
   const server = http.createServer((request, response) => {
     const file = new URL(request.url, 'http://localhost').pathname.slice(1) || 'index.html';
     if (file === 'fixture') { response.end('<!doctype html><title>Fixture</title>'); return; }
-    if (!['index.html', 'app.js', 'backup.js', 'styles.css'].includes(file)) { response.writeHead(404).end(); return; }
+    if (!['index.html', 'app.js', 'backup.js', 'storage.js', 'backup-status.js', 'history.js', 'dialogs.js', 'styles.css'].includes(file)) { response.writeHead(404).end(); return; }
     response.setHeader('Content-Type', file.endsWith('.js') ? 'text/javascript; charset=utf-8' :
       file.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/html; charset=utf-8');
     response.end(fs.readFileSync(path.join(root, file)));
@@ -88,8 +91,8 @@ test('browser persistence and refresh recovery', { skip: !browserPath, timeout: 
     });
     client = await connect(endpoint);
 
-    async function page(data = fixture()) {
-      const { browserContextId } = await client.send('Target.createBrowserContext');
+    async function page(data = fixture(), sharedContext) {
+      const { browserContextId } = sharedContext ? { browserContextId: sharedContext } : await client.send('Target.createBrowserContext');
       const { targetId } = await client.send('Target.createTarget', { url: 'about:blank', browserContextId });
       const { sessionId } = await client.send('Target.attachToTarget', { targetId, flatten: true });
       const send = (method, params) => client.send(method, params, sessionId);
@@ -104,13 +107,35 @@ test('browser persistence and refresh recovery', { skip: !browserPath, timeout: 
         await send('Page.navigate', { url: target });
         await until(() => run(expected => location.href === expected && document.readyState === 'complete', target));
       }
-      await navigate(url + '/fixture');
-      await run((key, value) => localStorage.setItem(key, JSON.stringify(value)), storageKey, data);
+      if (!sharedContext) {
+        await navigate(url + '/fixture');
+        await run((key, value) => localStorage.setItem(key, JSON.stringify(value)), storageKey, data);
+      }
       await navigate(url + '/');
-      return { run,
+      return { run, send,
+        newTab: () => page(null, browserContextId),
+        async key(key, modifiers = 0) {
+          const windowsVirtualKeyCode = { Tab: 9, Escape: 27, ArrowDown: 40, ArrowUp: 38, Enter: 13 }[key];
+          await send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key, windowsVirtualKeyCode, modifiers });
+          await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode, modifiers });
+        },
+        failWrites: (key = storageKey) => run(key => {
+          const original = Storage.prototype.setItem;
+          window.restoreStorageWrites = () => { Storage.prototype.setItem = original; };
+          Storage.prototype.setItem = function (name, value) {
+            if (name === key) { throw new DOMException('Test quota', 'QuotaExceededError'); }
+            return original.call(this, name, value);
+          };
+        }, key),
+        restoreWrites: () => run(() => window.restoreStorageWrites()),
         leave: () => navigate(url + '/fixture'),
         load: () => navigate(url + '/'),
-        state: () => run(key => JSON.parse(localStorage.getItem(key)), storageKey),
+        state: () => run(key => {
+          const saved = JSON.parse(localStorage.getItem(key));
+          const ui = JSON.parse(localStorage.getItem(key + '.ui'));
+          if (ui && ui.dataRevision === saved.dataRevision) { Object.assign(saved, { ui: ui.ui, viewDate: ui.viewDate, entryCategory: ui.entryCategory }); }
+          return saved;
+        }, storageKey),
         click: selector => run(value => document.querySelector(value).click(), selector),
         set: (id, value, type = 'input') => run((id, value, type) => {
           const element = document.getElementById(id); element.value = value;
@@ -124,7 +149,7 @@ test('browser persistence and refresh recovery', { skip: !browserPath, timeout: 
           await send('Page.reload', { ignoreCache: true });
           await until(() => run(before => performance.timeOrigin !== before && document.readyState === 'complete', before));
         },
-        close: () => client.send('Target.disposeBrowserContext', { browserContextId })
+        close: () => sharedContext ? client.send('Target.closeTarget', { targetId }) : client.send('Target.disposeBrowserContext', { browserContextId })
       };
     }
 
@@ -353,6 +378,293 @@ test('browser persistence and refresh recovery', { skip: !browserPath, timeout: 
         assert.equal((await p.state()).notes.length, failedKey === storageKey ? 3 : 4);
         await p.close();
       }
+    });
+    await t.test('failed log, skill and quest saves retain input and can be retried once', async () => {
+      for (const item of [
+        { form: 'entryForm', field: 'activity', text: '日志重试', key: 'entries', success: '已记录：', fields: { startDate: '2026-11-06', startTime: '08:00:00', endDate: '2026-11-06', endTime: '09:00:00' } },
+        { form: 'skillForm', field: 'skillName', text: '技能重试', key: 'skills', success: '已录入技能', fields: {} },
+        { form: 'sideQuestForm', field: 'sideTitle', text: '支线重试', key: 'quests', success: '已发布支线任务', fields: {} }
+      ]) {
+        const p = await page();
+        await p.set(item.field, item.text);
+        for (const [id, value] of Object.entries(item.fields)) { await p.set(id, value); }
+        const before = await p.state();
+        await p.failWrites();
+        await p.submit(item.form);
+        assert.equal(await p.value(item.field), item.text);
+        assert.deepEqual((await p.state())[item.key], before[item.key]);
+        assert.equal(await p.run(text => document.getElementById('noticeView').textContent.includes(text), item.success), false);
+        await p.restoreWrites();
+        await p.click('[data-tab="entry"]');
+        assert.deepEqual((await p.state())[item.key], before[item.key], 'later saves cannot commit the failed operation');
+        await p.submit(item.form);
+        assert.equal(await p.value(item.field), '');
+        const saved = await p.state();
+        assert.equal(item.key === 'quests' ? saved.quests.side.length : saved[item.key].length, item.key === 'skills' ? 3 : 1);
+        await p.close();
+      }
+    });
+
+    await t.test('failed task completion keeps the dialog and credits rewards only on successful retry', async () => {
+      for (const kind of ['main', 'side']) {
+        const data = fixture({ quests: { mainAccepted: true, side: [{ id: 'retry', title: '重试任务', status: 'accepted', rewardAttr: 3, rewardAchievement: 2 }] } });
+        const p = await page(data);
+        await p.click('[data-tab="quest"]');
+        await p.click(kind === 'main' ? '#questSubmit' : '[data-submit="retry"]');
+        await p.failWrites();
+        await p.click('#taskSubmitConfirm');
+        assert.equal(await p.visible('taskSubmitModal'), true);
+        assert.equal((await p.state()).points.attribute, 0);
+        await p.restoreWrites();
+        await p.click('#taskSubmitConfirm');
+        assert.equal(await p.visible('taskSubmitModal'), false);
+        await p.reload();
+        const saved = await p.state();
+        assert.equal(saved.points.attribute, kind === 'main' ? 5 : 3);
+        assert.equal(saved.achievements.length, kind === 'main' ? 0 : 1);
+        assert.equal(kind === 'main' ? saved.quests.mainCompleted : saved.quests.side[0].completionCount, 1);
+        await p.close();
+      }
+    });
+
+    await t.test('failed log edits preserve the original and archive it only after successful retry', async () => {
+      const entry = { id: 'original', date: '2026-11-06', start: 480, end: 540, category: '阅读', activity: '原日志', level: 'INFO' };
+      const p = await page(fixture({ entries: [entry], ui: { activeTab: 'entry', entryDraft: {
+        startDate: entry.date, startTime: '08:00:00', endDate: entry.date, endTime: '09:00:00', category: '阅读', activity: '修改', level: 'INFO', editingEntryId: entry.id } } }));
+      await p.failWrites();
+      await p.submit('entryForm');
+      assert.equal(await p.value('activity'), '修改');
+      await p.restoreWrites();
+      await p.click('[data-tab="entry"]');
+      assert.equal((await p.state()).entries[0].activity, '原日志');
+      assert.equal((await p.state()).trashEntries.length, 0);
+      await p.submit('entryForm');
+      const saved = await p.state();
+      assert.equal(saved.entries.length, 1);
+      assert.equal(saved.entries[0].id, 'original');
+      assert.equal(saved.entries[0].activity, '修改');
+      assert.equal(saved.trashEntries.length, 1);
+      await p.close();
+    });
+    await t.test('dialogs trap keyboard focus, close on Escape, and restore the opener', async () => {
+      const p = await page();
+      await p.run(() => document.getElementById('hostName').focus());
+      await p.click('#hostName');
+      await p.run(() => document.getElementById('nameConfirm').focus());
+      await p.key('Tab');
+      assert.equal(await p.run(() => document.activeElement.id), 'nameInput');
+      await p.key('Tab', 8);
+      assert.equal(await p.run(() => document.activeElement.id), 'nameConfirm');
+      assert.equal(await p.run(() => document.querySelector('main').inert), true);
+      await p.key('Escape');
+      assert.equal(await p.visible('nameModal'), false);
+      assert.equal(await p.run(() => document.activeElement.id), 'hostName');
+      assert.equal(await p.run(() => document.querySelector('main').inert), false);
+      await p.close();
+    });
+
+    await t.test('nested confirmations return focus to the underlying note editor', async () => {
+      const p = await page();
+      await p.click('[data-tab="timeline"]');
+      await p.click('[data-note-edit="one"]');
+      await p.set('noteEditInput', '本页草稿');
+      await p.run(key => {
+        const saved = JSON.parse(localStorage.getItem(key));
+        saved.notes.find(note => note.id === 'one').text = '其他页面修改';
+        localStorage.setItem(key, JSON.stringify(saved));
+      }, storageKey);
+      await p.submit('noteEditForm');
+      assert.equal(await p.visible('confirmModal'), true);
+      await p.key('Escape');
+      assert.equal(await p.visible('confirmModal'), false);
+      assert.equal(await p.visible('noteEditModal'), true);
+      assert.equal(await p.run(() => document.getElementById('noteEditModal').contains(document.activeElement)), true);
+      assert.equal(await p.value('noteEditInput'), '本页草稿');
+      await p.key('Escape');
+      assert.equal(await p.visible('noteEditModal'), false);
+      await p.close();
+    });
+    await t.test('typing with 3000 logs writes only small UI snapshots and survives reload', async t => {
+      const data = fixture();
+      data.entries = Array.from({ length: 3000 }, (_, index) => {
+        const date = new Date(Date.UTC(2018, 0, index + 1)).toISOString().slice(0, 10);
+        return { id: 'perf-' + index, date, start: 480, end: 540, category: '阅读', activity: '历史日志 ' + index, level: 'INFO' };
+      });
+      const p = await page(data);
+      const result = await p.run(key => {
+        const initial = localStorage.getItem(key);
+        const original = Storage.prototype.setItem;
+        const writes = [];
+        Storage.prototype.setItem = function (name, value) { writes.push({ name, bytes: value.length * 2 }); return original.call(this, name, value); };
+        const started = performance.now();
+        for (let index = 1; index <= 100; index++) {
+          const field = document.getElementById('activity');
+          field.value = '草'.repeat(index);
+          field.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        Storage.prototype.setItem = original;
+        return { milliseconds: performance.now() - started, fullBytes: initial.length * 2,
+          primaryWrites: writes.filter(write => write.name === key || write.name === key + '.backup').length,
+          uiBytes: writes.reduce((sum, write) => sum + write.bytes, 0), unchanged: initial === localStorage.getItem(key) };
+      }, storageKey);
+      t.diagnostic(JSON.stringify(result));
+      assert.equal(result.primaryWrites, 0);
+      assert.equal(result.unchanged, true);
+      assert.ok(result.uiBytes < result.fullBytes * 10, '100 edits must not rewrite the history 100 times');
+      await p.reload();
+      assert.equal(await p.value('activity'), '草'.repeat(100));
+      assert.equal((await p.state()).entries.length, 3000);
+      await p.close();
+    });
+
+    await t.test('reset does not resurrect drafts from an older data revision', async () => {
+      const p = await page();
+      await p.set('activity', '旧草稿');
+      const oldUi = await p.run(key => localStorage.getItem(key + '.ui'), storageKey);
+      await p.click('[data-tab="entry"]');
+      await p.click('#resetAll');
+      await p.click('#confirmAccept');
+      await p.leave();
+      await p.run((key, oldUi) => { localStorage.setItem(key + '.ui', oldUi); localStorage.setItem(key + '.ui.backup', oldUi); }, storageKey, oldUi);
+      await p.load();
+      assert.equal(await p.value('activity'), '');
+      assert.equal((await p.state()).notes.length, 0);
+      await p.close();
+    });
+    await t.test('file backups track success, business changes, and persistent reminder preferences', async () => {
+      const p = await page();
+      await p.run(() => {
+        window.showDirectoryPicker = async () => ({ getFileHandle: async (name, options) => {
+          if (!options) { throw new DOMException('Missing', 'NotFoundError'); }
+          return { getFile: async () => ({ size: 0 }), createWritable: async () => ({
+            write: async value => { window.testBackupFile = value; }, close: async () => {}, abort: async () => {} }) };
+        } });
+      });
+      await p.click('[data-tab="entry"]');
+      await p.click('#exportData');
+      await p.click('#detailDownloadBackup');
+      await until(() => p.run(key => !!JSON.parse(localStorage.getItem(key + '.backup-status'))?.lastSavedAt, storageKey));
+      await p.click('#detailClose');
+      assert.equal(await p.run(() => document.getElementById('backupStatus').textContent), '当前业务数据已备份到文件');
+      await p.set('activity', '备份后的新备注');
+      assert.equal(await p.visible('backupReminder'), false, 'drafts do not change the backup status');
+      await p.click('#noteSubmit');
+      assert.equal(await p.run(() => document.getElementById('backupStatus').textContent), '上次备份后有新改动');
+      assert.equal(await p.visible('backupReminder'), true);
+      await p.click('#backupReminders');
+      await p.reload();
+      assert.equal(await p.visible('backupReminder'), false);
+      assert.equal(await p.run(() => document.getElementById('backupReminders').checked), false);
+      await p.close();
+    });
+
+    await t.test('cancelled writes and unconfirmed downloads never claim a successful backup', async () => {
+      const p = await page();
+      await p.click('[data-tab="entry"]');
+      await p.run(() => { window.showDirectoryPicker = async () => { throw new DOMException('Cancelled', 'AbortError'); }; });
+      await p.click('#exportData');
+      await p.click('#detailDownloadBackup');
+      assert.equal(await p.run(key => !!JSON.parse(localStorage.getItem(key + '.backup-status'))?.lastSavedAt, storageKey), false);
+      await p.run(() => { window.showDirectoryPicker = undefined; HTMLAnchorElement.prototype.click = function () {}; });
+      await p.click('#detailDownloadBackup');
+      await until(() => p.run(key => !!JSON.parse(localStorage.getItem(key + '.backup-status'))?.pendingDownload, storageKey));
+      assert.equal(await p.run(key => !!JSON.parse(localStorage.getItem(key + '.backup-status'))?.lastSavedAt, storageKey), false);
+      await p.click('#detailClose');
+      await p.set('activity', '导出预览之后又有修改');
+      await p.click('#noteSubmit');
+      await p.reload();
+      assert.equal(await p.visible('backupDownloadPending'), true);
+      await p.click('#backupConfirmDownloaded');
+      assert.equal(await p.visible('backupDownloadPending'), false);
+      assert.equal(await p.run(() => document.getElementById('backupStatus').textContent), '上次备份后有新改动');
+      await p.close();
+    });
+    await t.test('review searches across dates, restores filters and navigates to the matched day', async () => {
+      const p = await page(fixture({ entries: [
+        { id: 'cross', date: '2026-11-01', startDate: '2026-11-01', endDate: '2026-11-02', start: 1380, end: 60, category: '编程', activity: '跨日 JavaScript 练习', level: 'INFO' }
+      ] }));
+      await p.click('[data-tab="review"]');
+      await p.set('reviewAnchor', '2026-11-06', 'change');
+      await p.set('reviewStart', '2026-11-02', 'change');
+      await p.set('reviewEnd', '2026-11-02', 'change');
+      await p.set('reviewSkill', 'name:编程', 'change');
+      await p.set('reviewQuery', 'javascript 练习');
+      await until(() => p.run(() => document.getElementById('reviewCount').textContent.includes('找到 1 条')));
+      assert.equal(await p.run(() => document.getElementById('reviewChart').children.length), 7);
+      assert.equal(await p.run(() => document.getElementById('reviewSummary').textContent.includes('1.00 h')), true);
+      await p.reload();
+      assert.equal(await p.value('reviewQuery'), 'javascript 练习');
+      assert.equal(await p.value('reviewSkill'), 'name:编程');
+      assert.equal((await p.state()).ui.activeTab, 'review');
+      await p.click('[data-review-key="entry:cross"]');
+      assert.equal((await p.state()).viewDate, '2026-11-02');
+      assert.equal((await p.state()).ui.activeTab, 'timeline');
+      await p.close();
+    });
+
+    await t.test('review paginates notes, escapes their text and fits mobile screens', async () => {
+      const data = fixture({ notes: Array.from({ length: 55 }, (_, id) => ({ id: 'result-' + id,
+        date: '2026-11-02', createdAt: '2026-11-02T08:00:00Z', text: '<img src=x onerror=alert(1)> 备注 ' + id })) });
+      const p = await page(data);
+      await p.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+      await p.click('[data-tab="review"]');
+      await p.set('reviewPeriod', 'month', 'change');
+      await p.set('reviewAnchor', '2024-02-15', 'change');
+      assert.equal(await p.run(() => document.getElementById('reviewChart').children.length), 29);
+      assert.equal(await p.run(() => document.querySelectorAll('.review-result').length), 50);
+      assert.equal(await p.run(() => document.querySelectorAll('#reviewResults img').length), 0);
+      assert.equal(await p.run(() => document.documentElement.scrollWidth <= innerWidth), true);
+      await p.click('#reviewNext');
+      assert.equal(await p.run(() => document.querySelectorAll('.review-result').length), 5);
+      await p.set('reviewStart', '2026-11-03', 'change');
+      await p.set('reviewEnd', '2026-11-02', 'change');
+      assert.equal(await p.run(() => document.getElementById('reviewCount').textContent.includes('开始日期不能晚于结束日期')), true);
+      await p.click('#reviewClear');
+      assert.equal(await p.run(() => document.querySelectorAll('.review-result').length), 50);
+      await p.close();
+    });
+    await t.test('independent UI snapshots and business commits synchronize across real tabs', async () => {
+      const p = await page();
+      const other = await p.newTab();
+      await p.click('[data-tab="entry"]');
+      await p.set('activity', '跨标签页草稿');
+      await until(async () => await other.value('activity') === '跨标签页草稿');
+      await other.click('#noteSubmit');
+      await until(async () => await p.value('activity') === '');
+      assert.equal((await p.state()).notes.filter(note => note.text === '跨标签页草稿').length, 1);
+      await other.close();
+      await p.reload();
+      assert.equal(await p.value('activity'), '');
+      assert.equal((await p.state()).notes.length, 4);
+      await p.close();
+    });
+
+    await t.test('successful commits invalidate stale drafts even when UI writes fail', async () => {
+      const p = await page();
+      await p.set('skillName', '保存后清除草稿');
+      await p.failWrites(storageKey + '.ui');
+      await p.submit('skillForm');
+      await p.reload();
+      assert.equal(await p.value('skillName'), '');
+      assert.equal((await p.state()).skills.filter(skill => skill.name === '保存后清除草稿').length, 1);
+      await p.close();
+    });
+    await t.test('clipboard fallback remains usable inside the focused export dialog', async () => {
+      const p = await page();
+      await p.run(() => {
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+        document.execCommand = command => {
+          if (command !== 'copy') { return false; }
+          window.copiedExport = document.activeElement.value;
+          return document.getElementById('detailModal').contains(document.activeElement);
+        };
+      });
+      await p.click('[data-tab="entry"]');
+      await p.click('#exportData');
+      await p.click('#detailCopyBackup');
+      assert.equal(await p.run(() => JSON.parse(window.copiedExport).notes.length), 3);
+      assert.equal(await p.visible('detailModal'), true);
+      await p.close();
     });
     assert.deepEqual(client.errors, [], 'no uncaught application errors');
   } finally {

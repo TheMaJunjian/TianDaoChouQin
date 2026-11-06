@@ -53,7 +53,7 @@ function timeline() {
     timelineBlankSegments: () => [],
     setTimelineNotePriority: () => {},
     prioritizeTimelineCursorNote: () => {},
-    persist: () => {}
+    persist: () => {}, persistUi: () => context.persist()
   });
   const names = ['toClock', 'timelineZoomRange', 'normalizeTimelineCursors', 'timelineCursorMinutes', 'timelineNotePosition',
     'notesByDate', 'noteMinutes', 'timelineSnapPoints', 'timelineSnapKind', 'syncTimelineCursorSnapStyles',

@@ -5,6 +5,8 @@ on:
   # Runs on pushes targeting the default branch
   push:
     branches: ["main"]
+  pull_request:
+    branches: ["main"]
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -18,12 +20,41 @@ permissions:
 # Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
 # However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
 concurrency:
-  group: "pages"
+  group: pages-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
   cancel-in-progress: false
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Require a browser for regression tests
+        shell: bash
+        run: |
+          browser_path="$(command -v google-chrome || command -v chromium || true)"
+          if [ -z "$browser_path" ]; then
+            echo "::error::Chrome or Chromium is required; browser tests must not be skipped."
+            exit 1
+          fi
+          echo "BROWSER_PATH=$browser_path" >> "$GITHUB_ENV"
+      - name: Check JavaScript syntax
+        run: npm run check
+      - name: Run all regression tests
+        run: npm test
+        env:
+          REQUIRE_BROWSER_TESTS: "1"
+
   # Build job
   build:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

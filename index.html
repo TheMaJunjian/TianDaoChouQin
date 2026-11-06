@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
 <title>天道酬勤 · 系统面板</title>
-<link rel="stylesheet" href="styles.css?v=20261028-10">
+<link rel="stylesheet" href="styles.css?v=20261106-2">
 </head>
 <body>
 <div class="scanline"></div>
@@ -28,6 +28,7 @@
   <button type="button" class="tab-btn" data-tab="attr" role="tab">属性</button>
   <button type="button" class="tab-btn" data-tab="entry" role="tab">记录</button>
   <button type="button" class="tab-btn" data-tab="timeline" role="tab">结算</button>
+  <button type="button" class="tab-btn" data-tab="review" role="tab">复盘</button>
   <button type="button" class="tab-btn" data-tab="quest" role="tab">任务</button>
   <button type="button" class="tab-btn" data-tab="notice" role="tab">提示</button>
   <button type="button" class="tab-btn hidden" data-tab="debug" role="tab" id="debugTab">调试</button>
@@ -178,6 +179,18 @@
 
     <section class="card" data-hint="宿主的所有操作都会自动保存到本机浏览器，建议定期导出备份。">
       <h2>数据管理</h2>
+      <p class="backup-status" id="backupStatus" role="status"></p>
+      <p class="backup-meta" id="backupLastSaved"></p>
+      <label class="backup-preference"><input type="checkbox" id="backupReminders" checked>有新改动时显示备份提醒</label>
+      <div class="backup-reminder hidden" id="backupReminder">
+        <span>有尚未备份到文件的数据。</span>
+        <button type="button" class="btn ghost" id="backupRemindExport">现在导出</button>
+        <button type="button" class="btn ghost" id="backupReminderDismiss">本次稍后</button>
+      </div>
+      <div class="backup-download hidden" id="backupDownloadPending">
+        <p id="backupDownloadMessage"></p>
+        <button type="button" class="btn ghost" id="backupConfirmDownloaded">确认已保存下载文件</button>
+      </div>
       <div class="log-actions">
         <button type="button" class="btn ghost" id="exportData">导出数据</button>
         <button type="button" class="btn ghost" id="importBtn">导入数据</button>
@@ -238,6 +251,44 @@
     <section class="card" data-hint="技能统计汇总宿主全部复写记录，投入的小时会直接抬升对应技能等级。">
       <h2>技能 / 日志等级统计（全部记录）</h2>
       <ul class="cat-list" id="catList"></ul>
+    </section>
+  </section>
+
+  <!-- ========== 复盘 ========== -->
+  <section class="tab-panel" id="tab-review" data-tab-panel="review">
+    <section class="card" data-hint="按周或月查看投入。日志按实际时段计时，备注补记按完成日期计时；回收站日志不计入趋势。">
+      <h2>投入趋势</h2>
+      <div class="review-controls">
+        <label>统计周期<select id="reviewPeriod"><option value="week">按周（周一开始）</option><option value="month">按月</option></select></label>
+        <label>周期内日期<input type="date" id="reviewAnchor"></label>
+        <label>技能（同时筛选下方记录）<select id="reviewSkill"><option value="all">全部技能</option></select></label>
+      </div>
+      <p class="review-description" id="reviewRange"></p>
+      <div class="review-summary" id="reviewSummary" aria-live="polite"></div>
+      <p class="review-legend"><span>日志时长</span><span>备注补记</span></p>
+      <div class="review-chart-scroll"><ol class="review-chart" id="reviewChart" aria-label="每日投入小时"></ol></div>
+      <p class="review-description">日志按实际发生日期分配；备注补记按完成日期统计，删除备注仍保留已计入的小时。趋势不受下方关键词影响。</p>
+    </section>
+    <section class="card" data-hint="跨日期搜索日志和备注。多个关键词以空格分开，匹配包含所有关键词的记录。日志按时段相交筛选，备注按记录日期筛选。">
+      <h2>查找记录</h2>
+      <div class="review-controls">
+        <label class="review-query">关键词<input type="search" id="reviewQuery" placeholder="内容或技能，空格分隔多个词" autocomplete="off"></label>
+        <label>记录类型<select id="reviewKind"><option value="all">日志与备注</option><option value="entry">日志</option><option value="note">备注</option></select></label>
+        <label>开始日期<input type="date" id="reviewStart"></label>
+        <label>结束日期<input type="date" id="reviewEnd"></label>
+      </div>
+      <div class="review-search-actions">
+        <label><input type="checkbox" id="reviewTrash">包含回收站</label>
+        <button type="button" class="btn ghost" id="reviewClear">清除搜索条件</button>
+      </div>
+      <p class="review-description">日期留空可搜索全部日期；备注按记录日期搜索。回收站记录仅供查阅。</p>
+      <p id="reviewCount" role="status"></p>
+      <div class="review-results" id="reviewResults"></div>
+      <nav class="review-pagination" aria-label="搜索结果分页">
+        <button type="button" class="btn ghost" id="reviewPrevious">上一页</button>
+        <span id="reviewPage"></span>
+        <button type="button" class="btn ghost" id="reviewNext">下一页</button>
+      </nav>
     </section>
   </section>
 
@@ -395,8 +446,8 @@
 
 <!-- ========== 异常检测彩蛋 ========== -->
 <div class="egg-mask hidden" id="eggMask">
-  <div class="egg-box">
-    <h2>检测到数据异常</h2>
+  <div class="egg-box" role="dialog" aria-modal="true" aria-labelledby="eggTitle">
+    <h2 id="eggTitle">检测到数据异常</h2>
     <p>世界毁灭倒计时：<span id="eggCount">100</span></p>
     <div class="egg-actions">
       <button type="button" class="btn ghost" id="eggClose">关闭</button>
@@ -407,6 +458,10 @@
 </div>
 
 <script src="backup.js?v=20261028-3"></script>
-<script src="app.js?v=20261106-1"></script>
+<script src="storage.js?v=20261106-2"></script>
+<script src="backup-status.js?v=20261106-2"></script>
+<script src="history.js?v=20261106-2"></script>
+<script src="dialogs.js?v=20261106-2"></script>
+<script src="app.js?v=20261106-2"></script>
 </body>
 </html>

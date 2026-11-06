@@ -9,6 +9,7 @@
   var APP_VERSION = '0.2'; // 开发者代码版本：用于识别是否有新增主线任务
   var STORAGE_KEY = 'tiandao.state.v2';
   var STORAGE_BACKUP_KEY = 'tiandao.state.v2.backup';
+  var uiStorage = TianDaoStorage.create(function () { return window.localStorage; }, STORAGE_KEY);
   var LEGACY_ENTRIES_KEY = 'tiandao.entries.v1';
   var LEGACY_FOCUS_KEY = 'tiandao.focus.v1';
   var LEGACY_NAME_KEY = 'tiandao.host.v1';
@@ -78,6 +79,7 @@
   /* ---------- 默认状态 ---------- */
   function defaultState() {
     return {
+      dataRevision: '',
       entries: [],
       notes: [],
       noteCompletions: [],
@@ -126,6 +128,7 @@
         nameDraft: null,
         taskSubmitDraft: null,
         formDrafts: {},
+        review: { query: '', skill: 'all', kind: 'all', startDate: '', endDate: '', includeTrash: false, period: 'week', anchor: todayStr(), page: 0 },
         timelineZoom: { start: 0, end: DAY_MINUTES },
         timelineCursors: null,
         entryDraft: null
@@ -136,6 +139,8 @@
   }
 
   var state = loadState();
+  var backupStatus = loadBackupStatus();
+  var currentBackupFingerprint = TianDaoBackupStatus.fingerprint(state);
   var DEBUG_HOST_NAME = '马军健';
   var debugEnabled = state.host.name === DEBUG_HOST_NAME;
   var debugRecords = [];
@@ -215,7 +220,7 @@
       timelineCursors: normalizeTimelineCursors(timelineCursors),
       entryDraft: state.ui.entryDraft
     });
-    persist();
+    persistUi();
   }
 
   syncCollapseState();
@@ -243,11 +248,22 @@
     'level', 'prevDay', 'nextDay', 'viewDate', 'timeline', 'timelineRuler', 'timelineNoteMarkers', 'timelineStartCursor', 'timelineEndCursor', 'timelineAxis', 'coverageFill',
     'coverageHint', 'logDateLabel', 'logView', 'copyLog', 'exportData',
     'importBtn', 'importFile', 'resetAll', 'clearDay', 'catList',
+    'backupStatus', 'backupLastSaved', 'backupReminders', 'backupReminder', 'backupRemindExport', 'backupReminderDismiss',
+    'backupDownloadPending', 'backupDownloadMessage', 'backupConfirmDownloaded',
+    'reviewPeriod', 'reviewAnchor', 'reviewSkill', 'reviewRange', 'reviewSummary', 'reviewChart', 'reviewQuery', 'reviewKind',
+    'reviewStart', 'reviewEnd', 'reviewTrash', 'reviewClear', 'reviewCount', 'reviewResults', 'reviewPrevious', 'reviewNext', 'reviewPage',
     'mainQuestBody', 'sideQuestForm', 'sideTitle', 'sideDesc', 'sideRewardAttr', 'sideRewardAchievement',
     'sideQuestList', 'hiddenSideQuestsBlock', 'hiddenSideQuestToggle', 'hiddenSideQuestList', 'noticeView', 'clearNotices',
     'eggMask', 'eggCount', 'eggClose', 'eggPause', 'eggBoost'
   ].forEach(function (id) {
     el[id] = document.getElementById(id);
+  });
+  var dialogs = TianDaoDialogs.create(function () {
+    if (!openCustomSelect) { return false; }
+    var trigger = openCustomSelect.trigger;
+    closeCustomSelect(openCustomSelect);
+    trigger.focus({ preventScroll: true });
+    return true;
   });
 
   /* 单行文本区避免触发浏览器的密码、支付与地址填充入口。 */
@@ -453,7 +469,20 @@
         if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
           event.preventDefault();
           openSelectOptions(item);
+          var selected = list.querySelector('[aria-selected="true"]') || list.querySelector('button:not(:disabled)');
+          if (selected) { selected.focus({ preventScroll: true }); }
         }
+      });
+      list.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') { event.preventDefault(); closeCustomSelect(item); trigger.focus(); return; }
+        if (['ArrowDown', 'ArrowUp', 'Home', 'End'].indexOf(event.key) < 0) { return; }
+        event.preventDefault();
+        var options = Array.from(list.querySelectorAll('button:not(:disabled)'));
+        var index = options.indexOf(document.activeElement);
+        if (event.key === 'Home') { index = 0; }
+        else if (event.key === 'End') { index = options.length - 1; }
+        else { index = (index + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length; }
+        if (options[index]) { options[index].focus(); }
       });
       list.addEventListener('click', function (event) {
         var optionButton = event.target.closest('.custom-select-option');
@@ -490,7 +519,7 @@
         if (!isImportableState(parsed)) { throw new Error('invalid primary state'); }
         var primaryState = mergeDefaults(parsed);
         if (!preservesImportedArrays(parsed, primaryState)) { throw new Error('invalid primary state'); }
-        return primaryState;
+        return applySavedUi(primaryState);
       }
     } catch (e) { /* fall through to legacy / default */ }
 
@@ -501,7 +530,7 @@
         if (!isImportableState(backupState)) { throw new Error('invalid backup state'); }
         var normalizedBackup = mergeDefaults(backupState);
         if (!preservesImportedArrays(backupState, normalizedBackup)) { throw new Error('invalid backup state'); }
-        return normalizedBackup;
+        return applySavedUi(normalizedBackup);
       }
     } catch (e) { /* fall through to legacy / default */ }
 
@@ -541,6 +570,7 @@
     var base = defaultState();
     if (!parsed || typeof parsed !== 'object') { return base; }
     var merged = base;
+    merged.dataRevision = typeof parsed.dataRevision === 'string' ? parsed.dataRevision : '';
 
     function safe(fn) { try { fn(); } catch (e) { /* keep default for this field only */ } }
 
@@ -676,7 +706,7 @@
       merged.ui.noticeScrollTop = Number.isFinite(noticeScrollTop) ? Math.max(0, noticeScrollTop) : base.ui.noticeScrollTop;
       var pageScrollTop = Number(parsedUi.pageScrollTop);
       merged.ui.pageScrollTop = Number.isFinite(pageScrollTop) ? Math.max(0, pageScrollTop) : base.ui.pageScrollTop;
-      merged.ui.activeTab = ['attr', 'entry', 'timeline', 'quest', 'notice'].indexOf(parsedUi.activeTab) >= 0
+      merged.ui.activeTab = ['attr', 'entry', 'timeline', 'review', 'quest', 'notice'].indexOf(parsedUi.activeTab) >= 0
         ? parsedUi.activeTab : base.ui.activeTab;
       merged.ui.noteFilter = ['pending', 'completed', 'trash'].indexOf(parsedUi.noteFilter) >= 0 ? parsedUi.noteFilter : 'pending';
       ['pending', 'completed', 'trash'].forEach(function (filter) {
@@ -708,6 +738,15 @@
           if (typeof draft[field] === 'string') { merged.ui.formDrafts[key][field] = draft[field]; }
         });
       });
+      var review = parsedUi.review || {};
+      ['query', 'skill'].forEach(function (key) { if (typeof review[key] === 'string') { merged.ui.review[key] = review[key]; } });
+      ['startDate', 'endDate', 'anchor'].forEach(function (key) {
+        if (isValidDateString(review[key])) { merged.ui.review[key] = review[key]; }
+      });
+      merged.ui.review.kind = ['all', 'entry', 'note'].includes(review.kind) ? review.kind : 'all';
+      merged.ui.review.period = review.period === 'month' ? 'month' : 'week';
+      merged.ui.review.includeTrash = review.includeTrash === true;
+      merged.ui.review.page = Math.max(0, Math.floor(Number(review.page) || 0));
       if (parsedUi.timelineZoom && typeof parsedUi.timelineZoom === 'object') {
         var zoomStart = Number(parsedUi.timelineZoom.start);
         var zoomEnd = Number(parsedUi.timelineZoom.end);
@@ -783,7 +822,7 @@
   }
 
   function mergeConcurrentState(latest) {
-    var merged = mergeDefaults(latest);
+    var merged = applySavedUi(mergeDefaults(latest));
     var baseline = persistedSnapshot;
     ['entries', 'notes', 'noteCompletions', 'trashEntries', 'skills', 'achievements', 'notifications'].forEach(function (key) {
       merged[key] = mergeChangedArray(merged[key], state[key], baseline[key]);
@@ -819,9 +858,43 @@
   var sigTimer = null;
   var storageErrorShown = false;
   var backupErrorShown = false;
+  var uiErrorShown = false;
+  function applySavedUi(value) {
+    try {
+      var saved = uiStorage.readUi(value.dataRevision);
+      if (saved) {
+        var normalized = mergeDefaults({ ui: saved.ui, viewDate: saved.viewDate, entryCategory: saved.entryCategory });
+        value.ui = normalized.ui;
+        value.viewDate = normalized.viewDate;
+        value.entryCategory = normalized.entryCategory;
+      }
+    } catch (error) { /* 完整快照中的界面状态仍可用于恢复。 */ }
+    return value;
+  }
+
+  function persistUi() {
+    try {
+      var backupSaved = uiStorage.writeUi({ version: 1, dataRevision: state.dataRevision,
+        ui: state.ui, viewDate: state.viewDate, entryCategory: state.entryCategory });
+      if (!backupSaved && !uiErrorShown) {
+        toast('草稿已保存，但草稿备用副本更新失败。', { level: 'WARN', transient: true });
+      }
+      uiErrorShown = !backupSaved;
+      persistedSnapshot.ui = cloneState(state.ui);
+      persistedSnapshot.viewDate = state.viewDate;
+      persistedSnapshot.entryCategory = state.entryCategory;
+      return true;
+    } catch (error) {
+      if (!uiErrorShown) { toast('草稿暂时无法保存，请保留页面并稍后重试。', { level: 'ERROR', transient: true }); }
+      uiErrorShown = true;
+      return false;
+    }
+  }
+
   function persist(forceReplace) {
     var debugStart = debugStepStart();
     var serialized;
+    var previousRevision;
     try {
       if (!forceReplace) {
         var latestRaw = window.localStorage.getItem(STORAGE_KEY);
@@ -833,19 +906,23 @@
           }
         }
       }
+      previousRevision = state.dataRevision;
+      state.dataRevision = uid();
       serialized = JSON.stringify(state);
       window.localStorage.setItem(STORAGE_KEY, serialized);
       persistedSnapshot = cloneState(state);
       storageErrorShown = false;
     } catch (e) {
+      if (previousRevision !== undefined) { state.dataRevision = previousRevision; }
       if (!storageErrorShown) {
         storageErrorShown = true;
         console.error('[storage] FAILED', e);
-        toast('存储模块异常，本次记录可能无法持久化保存。', { level: 'ERROR' });
+        toast('存储模块异常，本次记录可能无法持久化保存。', { level: 'ERROR', transient: true });
       }
       debugStepEnd('persist.failed', debugStart, { message: String(e && e.message || e) });
       return false;
     }
+    persistUi();
     // 主存储已成功时，备份写入失败不能回滚已保存的记录。
     try {
       window.localStorage.setItem(STORAGE_BACKUP_KEY, serialized);
@@ -854,21 +931,48 @@
       if (!backupErrorShown) {
         backupErrorShown = true;
         console.error('[storage] BACKUP_FAILED', error);
-        toast('记录已保存，但本地备份更新失败，请及时导出备份。', { level: 'WARN' });
+        toast('记录已保存，但本地备份更新失败，请及时导出备份。', { level: 'WARN', transient: true });
       }
     }
     // 签名计算涉及多次数组遍历，防抖到空闲时统一计算一次，避免频繁操作（如逐字输入）时反复重算。
     if (sigTimer) { window.clearTimeout(sigTimer); }
     sigTimer = window.setTimeout(renderTamperSignature, 300);
+    currentBackupFingerprint = TianDaoBackupStatus.fingerprint(state);
+    renderBackupStatus();
     debugStepEnd('persist', debugStart, { bytes: serialized.length, forceReplace: forceReplace === true });
     return true;
   }
 
+  // 业务变更作为一个整体保存；失败时恢复内存，避免后续滚动或提示把失败操作写回。
+  function commitChange(change, failureMessage, forceReplace) {
+    var previous = cloneState(state);
+    try {
+      if (change() === false) { state = previous; return false; }
+    } catch (error) { state = previous; throw error; }
+    if (persist(forceReplace)) { return true; }
+    state = previous;
+    toast(failureMessage || '保存失败，内容已保留，请稍后重试。', { level: 'ERROR', transient: true });
+    return false;
+  }
+
   window.addEventListener('storage', function (event) {
+    if (event.key === STORAGE_KEY + '.backup-status') { backupStatus = loadBackupStatus(); renderBackupStatus(); return; }
+    if (event.key === STORAGE_KEY + '.ui') {
+      var previousUi = JSON.stringify([state.ui, state.viewDate, state.entryCategory]);
+      applySavedUi(state);
+      if (previousUi !== JSON.stringify([state.ui, state.viewDate, state.entryCategory])) {
+        persistedSnapshot.ui = cloneState(state.ui);
+        persistedSnapshot.viewDate = state.viewDate;
+        persistedSnapshot.entryCategory = state.entryCategory;
+        syncCollapseState(); fullRender();
+      }
+      return;
+    }
     if (event.key !== STORAGE_KEY) { return; }
     try {
       if (!event.newValue) {
         state = mergeConcurrentState(defaultState());
+        currentBackupFingerprint = TianDaoBackupStatus.fingerprint(state);
         persistedSnapshot = cloneState(state);
         syncCollapseState();
         fullRender();
@@ -877,6 +981,7 @@
       var incoming = mergeConcurrentState(JSON.parse(event.newValue));
       if (JSON.stringify(incoming) === JSON.stringify(state)) { return; }
       state = incoming;
+      currentBackupFingerprint = TianDaoBackupStatus.fingerprint(state);
       persistedSnapshot = cloneState(state);
       syncCollapseState();
       fullRender();
@@ -891,7 +996,8 @@
     captureEntryDraft();
     captureFormDrafts();
     captureDialogDrafts();
-    if (persist()) { renderTamperSignature(); }
+    persistUi();
+    renderTamperSignature();
   }
   window.addEventListener('pagehide', flushState);
   window.addEventListener('beforeunload', flushState);
@@ -902,7 +1008,7 @@
     if (pageScrollSaveTimer) { window.clearTimeout(pageScrollSaveTimer); }
     pageScrollSaveTimer = window.setTimeout(function () {
       pageScrollSaveTimer = null;
-      persist();
+      persistUi();
     }, 150);
   }, { passive: true });
 
@@ -1458,7 +1564,7 @@
 
   function scheduleEntryDraftSave() {
     captureEntryDraft();
-    persist();
+    persistUi();
   }
 
   function captureFormDraft(key) {
@@ -1489,7 +1595,7 @@
   function saveDialogDrafts() {
     if (restoringUi) { return; }
     captureDialogDrafts();
-    persist();
+    persistUi();
   }
 
   function restoreInteractionDrafts() {
@@ -1538,7 +1644,7 @@
       Object.keys(FORM_DRAFT_FIELDS).forEach(function (key) {
         if (FORM_DRAFT_FIELDS[key].indexOf(field) < 0) { return; }
         captureFormDraft(key);
-        persist();
+        persistUi();
       });
       if (['nameInput', 'noteEditInput', 'noteCompleteHours', 'noteCompleteSkill'].indexOf(field) >= 0) {
         if (field === 'noteCompleteSkill') { state.ui.noteCompleteSkillId = el.noteCompleteSkill.value; }
@@ -1653,6 +1759,7 @@
     text = text.replace(/([。！？；])(?=[^\n])/g, '$1\n');
     var level = notificationLevel(opts.level);
     toastQueue.push({ text: text, level: level });
+    if (opts.transient) { showNextToast(); return; }
 
     state.notifications.push({ id: uid(), text: text, level: level, ts: Date.now(), count: 1 });
     if (state.notifications.length > 300) {
@@ -1795,7 +1902,7 @@
 
   function setActiveTab(tab) {
     var debugStart = debugStepStart();
-    if (['attr', 'entry', 'timeline', 'quest', 'notice'].indexOf(tab) < 0 &&
+    if (['attr', 'entry', 'timeline', 'review', 'quest', 'notice'].indexOf(tab) < 0 &&
       !(tab === 'debug' && debugEnabled)) { tab = 'attr'; }
     state.ui.activeTab = tab;
     applyActiveTabView(tab);
@@ -1806,12 +1913,13 @@
     if (tab === 'notice') { el.noticeView.scrollTop = state.ui.noticeScrollTop; }
     updatePolishFloat();
     if (tab === 'quest') { onOpenQuestTab(); }
+    if (tab === 'review') { renderReview(); }
     if (tab === 'notice') {
       state.noticeSeenCount = state.notifications.length;
       persist();
       updateNoticeBadge();
     }
-    persist();
+    persistUi();
     debugStepEnd('setActiveTab.' + tab, debugStart);
   }
 
@@ -1819,6 +1927,7 @@
     hideLogEntryTooltip();
     document.querySelectorAll('.tab-btn').forEach(function (b) {
       b.classList.toggle('active', b.getAttribute('data-tab') === tab);
+      b.setAttribute('aria-selected', String(b.getAttribute('data-tab') === tab));
     });
     document.querySelectorAll('.tab-panel').forEach(function (p) {
       p.classList.toggle('active', p.getAttribute('data-tab-panel') === tab);
@@ -1829,21 +1938,23 @@
   function openNameModal(draft) {
     el.nameInput.placeholder = HOST_NAME_PLACEHOLDER;
     el.nameInput.value = typeof draft === 'string' ? draft : (state.host.name === DEFAULT_HOST_NAME ? '' : state.host.name);
-    el.nameModal.classList.remove('hidden');
+    dialogs.open(el.nameModal, closeNameModal, el.nameInput);
     el.nameInput.focus({ preventScroll: true });
     saveDialogDrafts();
   }
 
   function closeNameModal() {
-    el.nameModal.classList.add('hidden');
-    if (!restoringUi && state.ui.nameDraft !== null) { state.ui.nameDraft = null; persist(); }
+    dialogs.close(el.nameModal, !restoringUi);
+    if (!restoringUi && state.ui.nameDraft !== null) { state.ui.nameDraft = null; persistUi(); }
   }
 
   function confirmName() {
     var name = el.nameInput.value.trim() || HOST_NAME_PLACEHOLDER;
-    state.host.name = name;
-    if (!state.host.boundAt) { state.host.boundAt = String(currentStamp()); }
-    persist();
+    if (!commitChange(function () {
+      state.host.name = name;
+      if (!state.host.boundAt) { state.host.boundAt = String(currentStamp()); }
+      state.ui.nameDraft = null;
+    })) { return; }
     closeNameModal();
     toast('宿主称号已更新为「' + state.host.name + '」。系统已绑定。', { level: 'SYSTEM' });
     refreshAll();
@@ -1866,7 +1977,7 @@
   function closeConfirmModal() {
     pendingConfirm = null;
     el.confirmAccept.textContent = '确认';
-    el.confirmModal.classList.add('hidden');
+    dialogs.close(el.confirmModal, !restoringUi);
   }
 
   function openConfirmModal(message, onConfirm, acceptLabel) {
@@ -1877,8 +1988,7 @@
     pendingConfirm = onConfirm;
     el.confirmMessage.textContent = message;
     el.confirmAccept.textContent = acceptLabel || '确认';
-    el.confirmModal.classList.remove('hidden');
-    window.setTimeout(function () { el.confirmAccept.focus(); }, 30);
+    dialogs.open(el.confirmModal, closeConfirmModal, el.confirmAccept);
     return true;
   }
 
@@ -1933,7 +2043,7 @@
       el.category.innerHTML = options;
       if (state.entryCategory) {
         state.entryCategory = '';
-        persist();
+        persistUi();
       }
       return;
     }
@@ -1945,13 +2055,13 @@
     el.category.value = keep ? prev : '';
     if (state.entryCategory !== el.category.value) {
       state.entryCategory = el.category.value;
-      persist();
+      persistUi();
     }
   }
 
   el.category.addEventListener('change', function () {
     state.entryCategory = el.category.value;
-    persist();
+    persistUi();
   });
 
   /* ---------- 基础属性 ---------- */
@@ -2120,12 +2230,11 @@
 
     var existing = skillByName(name);
     var previousHours = existing ? effectiveHours(existing) : 0;
-    if (existing) {
-      existing.hours = hoursValue;
-    } else {
-      state.skills.push({ id: uid(), name: name, hours: hoursValue });
-    }
-    persist();
+    if (!commitChange(function () {
+      if (existing) { existing.hours = hoursValue; }
+      else { state.skills.push({ id: uid(), name: name, hours: hoursValue }); }
+      delete state.ui.formDrafts.skill;
+    })) { return; }
 
     var total = effectiveHours(skillByName(name));
     var lv = levelForHours(total);
@@ -2138,7 +2247,7 @@
     el.skillLevelWrap.classList.remove('hidden');
     el.skillHoursWrap.classList.add('hidden');
     delete state.ui.formDrafts.skill;
-    persist();
+    persistUi();
     refreshAll();
   });
 
@@ -2175,13 +2284,12 @@
     var skill = state.skills.filter(function (s2) { return s2.id === id; })[0];
     if (!skill) { return; }
     openConfirmModal('确认删除技能【' + skill.name + '】？删除后将同时移除该技能的累计记录。', function () {
-      state.skills = state.skills.filter(function (s2) { return s2.id !== id; });
-      state.hiddenSkills = state.hiddenSkills.filter(function (hiddenId) { return hiddenId !== id; });
-      state.entries = state.entries.filter(function (entry) {
-        return normalize(entry.category) !== normalize(skill.name);
-      });
-      if (normalize(skill.name) === normalize(state.focus)) { state.focus = ''; }
-      persist();
+      if (!commitChange(function () {
+        state.skills = state.skills.filter(function (s2) { return s2.id !== id; });
+        state.hiddenSkills = state.hiddenSkills.filter(function (hiddenId) { return hiddenId !== id; });
+        state.entries = state.entries.filter(function (entry) { return normalize(entry.category) !== normalize(skill.name); });
+        if (normalize(skill.name) === normalize(state.focus)) { state.focus = ''; }
+      })) { return; }
       toast('技能【' + skill.name + '】记录已从面板抹除。', { level: 'TRAIN' });
       refreshAll();
     });
@@ -2297,7 +2405,7 @@
     el.detailAchievementToggle.classList.add('hidden');
     el.detailAchievementToggle.removeAttribute('data-achievement-hide');
     el.detailAchievementToggle.removeAttribute('data-achievement-show');
-    el.detailModal.classList.remove('hidden');
+    dialogs.open(el.detailModal, closeDetailModal, el.detailClose);
     el.detailClose.focus();
   }
 
@@ -2306,7 +2414,7 @@
     backupSession++;
     pendingImport = null;
     pendingFileUpdate = null;
-    el.detailModal.classList.add('hidden');
+    dialogs.close(el.detailModal, !restoringUi);
     backupCopyText = '';
   }
 
@@ -2367,7 +2475,7 @@
       el.viewDate.value = entryStart.date;
       editingEntryId = entry.id;
       captureEntryDraft();
-      persist();
+      persistUi();
       pendingEntryEdit = null;
       closeDetailModal();
       setActiveTab('entry');
@@ -2388,7 +2496,8 @@
     syncCurrentField(el.endTime);
     state.viewDate = start.date;
     el.viewDate.value = start.date;
-    persist();
+    captureEntryDraft();
+    persistUi();
     pendingBlankRange = null;
     closeDetailModal();
     setActiveTab('entry');
@@ -2591,7 +2700,7 @@
       syncCurrentField(el.endDate);
       syncCurrentField(el.endTime);
       captureEntryDraft();
-      persist();
+      persistUi();
       return;
     }
     var skillBeforeEntry = skillByName(category);
@@ -2620,21 +2729,21 @@
         }, '更正并保留旧记录');
         return;
       }
-      if (editingEntryId) {
-        var original = state.entries.find(function (entry) { return entry.id === editingEntryId; });
-        if (original && !sameLogRecord(original, newEntry)) {
-          trashEntryRange(original, entryStartStamp(original), entryEndStamp(original), 'edited');
+      if (!commitChange(function () {
+        if (editingEntryId) {
+          var original = state.entries.find(function (entry) { return entry.id === editingEntryId; });
+          if (original && !sameLogRecord(original, newEntry)) {
+            trashEntryRange(original, entryStartStamp(original), entryEndStamp(original), 'edited');
+          }
+          state.entries = state.entries.filter(function (entry) { return entry.id !== editingEntryId; });
         }
-        state.entries = state.entries.filter(function (entry) { return entry.id !== editingEntryId; });
-      }
-      if (rewrite) {
-        rewriteOverlappingEntries(startStamp, endStamp, newEntry);
-      } else {
-        state.entries.push(newEntry);
-      }
+        if (rewrite) { rewriteOverlappingEntries(startStamp, endStamp, newEntry); }
+        else { state.entries.push(newEntry); }
+        state.ui.entryDraft = null;
+        state.viewDate = startDate;
+      })) { return; }
       editingEntryId = null;
       entryEndSecond = null;
-      persist();
 
       state.viewDate = startDate;
       el.viewDate.value = startDate;
@@ -2642,7 +2751,7 @@
       applyEntryDefaults();
       el.startDate.value = endDate;
       state.ui.entryDraft = null;
-      persist();
+      persistUi();
 
       var rangeLabel = startDate === endDate
         ? startDate + ' ' + toClock(start) + '-' + toClock(end)
@@ -2671,10 +2780,10 @@
   function closeNoteEditModal() {
     var id = pendingNoteEdit && pendingNoteEdit.id;
     pendingNoteEdit = null;
-    el.noteEditModal.classList.add('hidden');
+    dialogs.close(el.noteEditModal, !restoringUi);
     el.noteEditInput.value = '';
     var trigger = Array.prototype.find.call(el.noteView.querySelectorAll('[data-note-edit]'), function (item) { return item.dataset.noteEdit === id; });
-    if (!restoringUi && state.ui.noteEditDraft) { state.ui.noteEditDraft = null; persist(); }
+    if (!restoringUi && state.ui.noteEditDraft) { state.ui.noteEditDraft = null; persistUi(); }
     if (trigger && !restoringUi) { trigger.focus({ preventScroll: true }); }
   }
 
@@ -2685,7 +2794,7 @@
     pendingNoteEdit = { id: id, originalText: draft ? draft.originalText : note.text };
     el.noteEditMeta.textContent = '记录于 ' + formatCreatedAt(note.createdAt) + (completionForNote(id) ? ' · 已完成' : ' · 未完成');
     el.noteEditInput.value = draft ? draft.text : note.text;
-    el.noteEditModal.classList.remove('hidden');
+    dialogs.open(el.noteEditModal, closeNoteEditModal, el.noteEditInput);
     el.noteEditInput.focus({ preventScroll: true });
     saveDialogDrafts();
     return true;
@@ -2710,16 +2819,7 @@
       }, '替换并保存');
       return;
     }
-    var previousText = note.text;
-    var id = note.id;
-    note.text = text;
-    if (!persist()) {
-      var previous = state.notes.find(function (item) { return item.id === id; });
-      if (previous) { previous.text = previousText; }
-      persist(true);
-      toast('备注保存失败，请稍后重试。', { level: 'ERROR' });
-      return;
-    }
+    if (!commitChange(function () { note.text = text; state.ui.noteEditDraft = null; })) { return; }
     refreshAll();
     closeNoteEditModal();
     toast('备注已修改。');
@@ -2736,9 +2836,9 @@
 
   function closeNoteCompleteModal() {
     pendingNoteId = null;
-    el.noteCompleteModal.classList.add('hidden');
+    dialogs.close(el.noteCompleteModal, !restoringUi);
     if (openCustomSelect && openCustomSelect.select === el.noteCompleteSkill) { closeCustomSelect(openCustomSelect); }
-    if (!restoringUi && state.ui.noteCompleteDraft) { state.ui.noteCompleteDraft = null; persist(); }
+    if (!restoringUi && state.ui.noteCompleteDraft) { state.ui.noteCompleteDraft = null; persistUi(); }
   }
 
   function preferredNoteSkillId(draftSkillId) {
@@ -2766,7 +2866,7 @@
     el.noteCompleteAddSkill.classList.toggle('hidden', !empty);
     el.noteCompleteAccept.disabled = empty;
     syncCustomSelects();
-    el.noteCompleteModal.classList.remove('hidden');
+    dialogs.open(el.noteCompleteModal, closeNoteCompleteModal, el.noteCompleteHours);
     if (empty) { el.noteCompleteAddSkill.focus({ preventScroll: true }); }
     else { el.noteCompleteHours.focus({ preventScroll: true }); }
     saveDialogDrafts();
@@ -2806,14 +2906,11 @@
     var previousHours = effectiveHours(skill);
     var completion = { id: note.id, skillId: skill.id, skillName: skill.name, hours: hoursValue, completedAt: new Date().toISOString(),
       noteText: note.text, noteDate: note.date, noteCreatedAt: note.createdAt };
-    state.noteCompletions.push(completion);
-    state.ui.noteCompleteSkillId = skill.id;
-    if (!persist()) {
-      state.noteCompletions = state.noteCompletions.filter(function (item) { return item.id !== completion.id; });
-      persist(true);
-      toast('完成记录保存失败，请稍后重试。', { level: 'ERROR' });
-      return;
-    }
+    if (!commitChange(function () {
+      state.noteCompletions.push(completion);
+      state.ui.noteCompleteSkillId = skill.id;
+      state.ui.noteCompleteDraft = null;
+    })) { return; }
     closeNoteCompleteModal();
     refreshAll();
     var saved = completionForNote(note.id);
@@ -2824,7 +2921,7 @@
   el.noteFilter.addEventListener('change', function () {
     if (el.noteView.clientHeight) { state.ui.noteScrollTops[state.ui.noteFilter] = el.noteView.scrollTop; }
     state.ui.noteFilter = el.noteFilter.value;
-    persist();
+    persistUi();
     renderNotes();
   });
 
@@ -2841,18 +2938,16 @@
       createdAt: now.toISOString(),
       text: text
     };
-    state.notes.push(note);
-    if (!persist()) {
-      state.notes = state.notes.filter(function (item) { return item.id !== note.id; });
-      toast('备注保存失败，输入内容已保留，请稍后重试。', { level: 'ERROR' });
-      return;
-    }
+    if (!commitChange(function () {
+      state.notes.push(note);
+      if (state.ui.entryDraft) { state.ui.entryDraft.activity = ''; }
+    })) { return; }
     state.ui.noteFilter = 'pending';
     state.viewDate = note.date;
     el.viewDate.value = note.date;
     el.activity.value = '';
     captureEntryDraft();
-    persist();
+    persistUi();
     render();
     flashTab('timeline');
     toast('备注已记录：' + formatCreatedAt(note.createdAt));
@@ -2870,7 +2965,7 @@
     var restore = event.target.closest('[data-note-restore]');
     if (restore) {
       var restored = state.notes.find(function (item) { return item.id === restore.dataset.noteRestore; });
-      if (restored) { delete restored.deletedAt; persist(); refreshAll(); toast('备注已恢复。'); }
+      if (restored && commitChange(function () { delete restored.deletedAt; })) { refreshAll(); toast('备注已恢复。'); }
       return;
     }
     var button = event.target.closest('[data-note-del]');
@@ -2884,15 +2979,13 @@
     var note = state.notes.filter(function (item) { return item.id === id; })[0];
     if (!note) { return; }
     if (!note.deletedAt) {
-      note.deletedAt = new Date().toISOString();
-      persist();
+      if (!commitChange(function () { note.deletedAt = new Date().toISOString(); })) { return; }
       refreshAll();
       toast('备注已移入回收站。');
       return;
     }
     openConfirmModal('确认彻底删除这条备注？删除后无法恢复，已计入的技能小时会保留。', function () {
-      state.notes = state.notes.filter(function (item) { return item.id !== id; });
-      persist();
+      if (!commitChange(function () { state.notes = state.notes.filter(function (item) { return item.id !== id; }); })) { return; }
       refreshAll();
       toast('备注已彻底删除。');
     }, '彻底删除');
@@ -2954,7 +3047,7 @@
     state.ui.timelineZoom = { start: 0, end: DAY_MINUTES };
     state.ui.timelineCursors = normalizeTimelineCursors(timelineCursors);
     el.viewDate.value = dateStr;
-    persist();
+    persistUi();
     refreshAll();
   }
 
@@ -2992,12 +3085,13 @@
     var message = trash ? '确认彻底删除回收站中的 ' + ids.length + ' 条备注？此操作无法恢复，已计入的技能小时会保留。' :
       '确认将当前分类的全部 ' + ids.length + ' 条备注移入回收站？';
     openConfirmModal(message, function () {
-      if (trash) { state.notes = state.notes.filter(function (note) { return ids.indexOf(note.id) < 0; }); }
-      else {
-        var deletedAt = new Date().toISOString();
-        state.notes.forEach(function (note) { if (ids.indexOf(note.id) >= 0) { note.deletedAt = deletedAt; } });
-      }
-      persist();
+      if (!commitChange(function () {
+        if (trash) { state.notes = state.notes.filter(function (note) { return ids.indexOf(note.id) < 0; }); }
+        else {
+          var deletedAt = new Date().toISOString();
+          state.notes.forEach(function (note) { if (ids.indexOf(note.id) >= 0) { note.deletedAt = deletedAt; } });
+        }
+      })) { return; }
       refreshAll();
       toast(trash ? '备注回收站已清空。' : '备注已移入回收站。');
     }, trash ? '彻底删除' : '移入回收站');
@@ -3010,8 +3104,7 @@
     if (!entry) { return; }
     var dateStr = state.viewDate;
     openConfirmModal('确认将 ' + dateStr + ' ' + toClock(entry.start) + '-' + toClock(entry.end) + ' 的日志移入回收站？', function () {
-      removeEntrySlice(id, dateStr);
-      persist();
+      if (!commitChange(function () { removeEntrySlice(id, dateStr); })) { return; }
       toast('该段日志已移入回收站，可查阅原记录。', { level: 'TRAIN' });
       refreshAll();
     });
@@ -3035,26 +3128,27 @@
   el.clearDay.addEventListener('click', function () {
     var dateStr = state.viewDate;
     openConfirmModal('确认将 ' + dateStr + ' 的全部日志移入回收站？', function () {
-      var dayStart = dateTimeStamp(dateStr, 0);
-      var dayEnd = dayStart + DAY_MINUTES;
-      var retained = [];
-      state.entries.forEach(function (entry) {
-        var entryStart = entryStartStamp(entry);
-        var entryEnd = entryEndStamp(entry);
-        if (entryEnd <= dayStart || entryStart >= dayEnd) {
-          retained.push(entry);
-          return;
-        }
-        trashEntryRange(entry, Math.max(entryStart, dayStart), Math.min(entryEnd, dayEnd));
-        if (entryStart < dayStart) {
-          retained.push(entryWithRange(entry, entryStart, dayStart, entry.id));
-        }
-        if (entryEnd > dayEnd) {
-          retained.push(entryWithRange(entry, dayEnd, entryEnd, entryStart < dayStart ? uid() : entry.id));
-        }
-      });
-      state.entries = retained;
-      persist();
+      if (!commitChange(function () {
+        var dayStart = dateTimeStamp(dateStr, 0);
+        var dayEnd = dayStart + DAY_MINUTES;
+        var retained = [];
+        state.entries.forEach(function (entry) {
+          var entryStart = entryStartStamp(entry);
+          var entryEnd = entryEndStamp(entry);
+          if (entryEnd <= dayStart || entryStart >= dayEnd) {
+            retained.push(entry);
+            return;
+          }
+          trashEntryRange(entry, Math.max(entryStart, dayStart), Math.min(entryEnd, dayEnd));
+          if (entryStart < dayStart) {
+            retained.push(entryWithRange(entry, entryStart, dayStart, entry.id));
+          }
+          if (entryEnd > dayEnd) {
+            retained.push(entryWithRange(entry, dayEnd, entryEnd, entryStart < dayStart ? uid() : entry.id));
+          }
+        });
+        state.entries = retained;
+      })) { return; }
       toast('当日日志已移入回收站。', { level: 'SYSTEM' });
       refreshAll();
     });
@@ -3089,8 +3183,7 @@
     if (!item) { renderLogTrashModal(); return; }
     if (copy) { copyTrashedLog(item.entry); return; }
     openConfirmModal('确认彻底删除这段日志？此操作无法恢复。', function () {
-      state.trashEntries = state.trashEntries.filter(function (candidate) { return candidate.id !== id; });
-      persist();
+      if (!commitChange(function () { state.trashEntries = state.trashEntries.filter(function (candidate) { return candidate.id !== id; }); })) { return; }
       refreshAll();
       toast('日志已彻底删除。');
     }, '彻底删除');
@@ -3117,7 +3210,7 @@
       textarea.setAttribute('readonly', 'readonly');
       textarea.style.position = 'fixed';
       textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
+      (dialogs.activeMask() || document.body).appendChild(textarea);
       textarea.select();
       try { copied = document.execCommand('copy'); } catch (error) { copied = false; }
       textarea.remove();
@@ -3130,14 +3223,59 @@
     if (!logTrashOpen || !state.trashEntries.length) { return; }
     var ids = state.trashEntries.map(function (item) { return item.id; });
     openConfirmModal('确认彻底删除回收站中的 ' + ids.length + ' 段日志？此操作无法恢复。', function () {
-      state.trashEntries = state.trashEntries.filter(function (item) { return ids.indexOf(item.id) < 0; });
-      persist();
+      if (!commitChange(function () { state.trashEntries = state.trashEntries.filter(function (item) { return ids.indexOf(item.id) < 0; }); })) { return; }
       refreshAll();
       toast('个人日志回收站已清空。');
     }, '彻底删除');
   });
 
   /* ---------- 数据导入 / 导出 ---------- */
+  function loadBackupStatus() {
+    try { return TianDaoBackupStatus.normalize(JSON.parse(window.localStorage.getItem(STORAGE_KEY + '.backup-status'))); }
+    catch (error) { return TianDaoBackupStatus.normalize(null); }
+  }
+
+  function saveBackupStatus(next) {
+    try {
+      window.localStorage.setItem(STORAGE_KEY + '.backup-status', JSON.stringify(next));
+      backupStatus = next;
+      renderBackupStatus();
+      return true;
+    } catch (error) {
+      toast('备份状态暂时无法保存，请稍后重试。', { level: 'WARN', transient: true });
+      renderBackupStatus();
+      return false;
+    }
+  }
+
+  function renderBackupStatus() {
+    var changed = currentBackupFingerprint !== backupStatus.lastSavedFingerprint;
+    el.backupStatus.textContent = !backupStatus.lastSavedAt ? '尚无已确认的文件备份' : changed ? '上次备份后有新改动' : '当前业务数据已备份到文件';
+    el.backupLastSaved.textContent = backupStatus.lastSavedAt ? '最近保存：' + formatCreatedAt(backupStatus.lastSavedAt) + ' · ' + backupStatus.lastSavedName : '浏览器内的备用副本与主数据保存在同一设备，导出文件可额外保留一份。';
+    el.backupReminders.checked = backupStatus.enabled;
+    var hasData = state.entries.length || state.notes.length || state.skills.length || state.quests.side.length || state.host.name !== DEFAULT_HOST_NAME;
+    el.backupReminder.classList.toggle('hidden', !backupStatus.enabled || !hasData || !changed || backupStatus.dismissedFingerprint === currentBackupFingerprint);
+    el.backupDownloadPending.classList.toggle('hidden', !backupStatus.pendingDownload);
+    el.backupDownloadMessage.textContent = backupStatus.pendingDownload ? '已发起下载「' + backupStatus.pendingDownload.name + '」。请在下载完成并保留文件后确认。' : '';
+  }
+
+  function recordBackupSaved(fingerprint, filename) {
+    return saveBackupStatus(Object.assign({}, backupStatus, { lastSavedAt: new Date().toISOString(),
+      lastSavedFingerprint: fingerprint, lastSavedName: filename, pendingDownload: null, dismissedFingerprint: '' }));
+  }
+
+  el.backupReminders.addEventListener('change', function () {
+    saveBackupStatus(Object.assign({}, backupStatus, { enabled: el.backupReminders.checked }));
+  });
+  el.backupReminderDismiss.addEventListener('click', function () {
+    saveBackupStatus(Object.assign({}, backupStatus, { dismissedFingerprint: currentBackupFingerprint }));
+  });
+  el.backupRemindExport.addEventListener('click', exportDataBackup);
+  el.backupConfirmDownloaded.addEventListener('click', function () {
+    var pending = backupStatus.pendingDownload;
+    if (pending) { recordBackupSaved(pending.fingerprint, pending.name); }
+  });
+
   function isImportableState(parsed) {
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
       Array.isArray(parsed.entries) && parsed.host && typeof parsed.host === 'object' &&
@@ -3221,6 +3359,7 @@
       if (window.showDirectoryPicker) {
         var directory = await window.showDirectoryPicker({ mode: 'readwrite' });
         var savedName = await TianDaoBackup.writeNewFile(directory, filename, json);
+        recordBackupSaved(TianDaoBackupStatus.fingerprint(JSON.parse(json)), savedName);
         toast('已另存为「' + savedName + '」。', { level: 'SYSTEM' });
       } else {
         var blob = new Blob([json], { type: 'application/json;charset=utf-8' });
@@ -3232,6 +3371,8 @@
         link.click();
         link.remove();
         window.setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+        saveBackupStatus(Object.assign({}, backupStatus, { pendingDownload: { fingerprint: TianDaoBackupStatus.fingerprint(JSON.parse(json)),
+          name: filename, startedAt: new Date().toISOString() } }));
         toast('已开始下载新备份「' + filename + '」。', { level: 'SYSTEM' });
       }
     } catch (error) { backupError(error); }
@@ -3296,7 +3437,9 @@
       }
       var plan = TianDaoBackup.planMerge(pending.existing, state, {}, defaultState());
       if (plan.conflicts.length) { renderBackupUpdate(); return; }
+      var coveredFingerprint = TianDaoBackupStatus.fingerprint(state);
       await TianDaoBackup.writeFile(pending.handle, JSON.stringify(plan.state, null, 2), pending.raw);
+      recordBackupSaved(coveredFingerprint, pending.name);
       if (pendingFileUpdate === pending) { closeDetailModal(); }
       toast('已检查并更新「' + pending.name + '」。', { level: 'SYSTEM' });
     } catch (error) {
@@ -3441,7 +3584,7 @@
     state = TianDaoBackup.preserveDisplacedEntries(previousState, state, new Date().toISOString());
     if (!persist(true)) {
       state = previousState;
-      // 第二份存储写入失败时，也恢复已写入的第一份，保留原备份。
+      // 主存储失败时，尽力恢复导入前的快照。
       try {
         if (previousPrimary === null) { window.localStorage.removeItem(STORAGE_KEY); }
         else { window.localStorage.setItem(STORAGE_KEY, previousPrimary); }
@@ -3473,11 +3616,11 @@
     textarea.setAttribute('readonly', 'readonly');
     textarea.style.position = 'fixed';
     textarea.style.opacity = '0';
-    document.body.appendChild(textarea);
+    (dialogs.activeMask() || document.body).appendChild(textarea);
     textarea.select();
     var copiedByCommand = false;
     try { copiedByCommand = document.execCommand('copy'); } catch (e) { copiedByCommand = false; }
-    document.body.removeChild(textarea);
+    textarea.remove();
     if (copiedByCommand) { copied(); } else { failed(); }
   }
 
@@ -3545,10 +3688,9 @@
 
   el.resetAll.addEventListener('click', function () {
     openConfirmModal('确认重置全部本地数据？此操作不可撤销，请宿主先导出备份。', function () {
+      if (!commitChange(function () { state = defaultState(); }, '重置保存失败，原数据已保留，请稍后重试。', true)) { return; }
       clearQuestUpgradeTimers();
-      state = defaultState();
       syncCollapseState();
-      persist(true);
       toast('系统已解绑，并恢复为初始状态。', { level: 'SYSTEM' });
       fullRender();
     });
@@ -3861,7 +4003,7 @@
     state.ui.timelineZoom = { start: timelineZoom.start, end: timelineZoom.end };
     setTimelineNotePriority(null);
     renderTimeline(byDate(state.viewDate));
-    if (save !== false) { persist(); }
+    if (save !== false) { persistUi(); }
   }
 
   function timelineBlankSegments(dateStr) {
@@ -4151,7 +4293,7 @@
       if (!drag) { return; }
       drag = null;
       cursorElement.classList.remove('dragging');
-      persist();
+      persistUi();
       prioritizeTimelineCursorNote(cursorName);
     }
     cursorElement.addEventListener('pointerenter', function () { prioritizeTimelineCursorNote(cursorName); });
@@ -4204,7 +4346,7 @@
       moveTimelineCursor(cursorName, { clientX: x + (event.key === 'ArrowLeft' ? -60 : 60) / DAY_MINUTES * rect.width }, {
         offset: 0, lastX: x, snap: null, released: null
       });
-      persist();
+      persistUi();
     });
   }
 
@@ -4292,7 +4434,7 @@
     if (!el.noteView.clientHeight) { return; }
     state.ui.noteScrollTops[state.ui.noteFilter] = Math.max(0, el.noteView.scrollTop);
     if (saveTimer) { window.clearTimeout(saveTimer); }
-    saveTimer = window.setTimeout(function () { saveTimer = null; persist(); }, 150);
+    saveTimer = window.setTimeout(function () { saveTimer = null; persistUi(); }, 150);
   }, { passive: true });
 
   function timelineSlotsForEntry(entryId) {
@@ -4403,7 +4545,7 @@
     if (saveTimer) { window.clearTimeout(saveTimer); }
     saveTimer = window.setTimeout(function () {
       saveTimer = null;
-      persist();
+      persistUi();
     }, 150);
   }, { passive: true });
 
@@ -4649,6 +4791,101 @@
     persist();
   }
 
+  /* ---------- 跨日期检索与投入复盘 ---------- */
+  var reviewTimer = null;
+  var reviewRows = [];
+  function reviewSkillValue() {
+    return state.ui.review.skill === 'all' ? null : state.ui.review.skill.slice(5);
+  }
+  function renderReview() {
+    var review = state.ui.review;
+    var names = TianDaoHistory.skillNames(state);
+    var choices = '<option value="all">全部技能</option><option value="name:">未指定技能</option>' + names.map(function (name) {
+      return '<option value="name:' + escapeHtml(name) + '">' + escapeHtml(name) + '</option>';
+    }).join('');
+    if (el.reviewSkill.innerHTML !== choices) { el.reviewSkill.innerHTML = choices; }
+    if (review.skill !== 'all' && review.skill !== 'name:' && !names.includes(review.skill.slice(5))) { review.skill = 'all'; }
+    [['reviewPeriod', 'period'], ['reviewAnchor', 'anchor'], ['reviewSkill', 'skill'], ['reviewQuery', 'query'],
+      ['reviewKind', 'kind'], ['reviewStart', 'startDate'], ['reviewEnd', 'endDate']].forEach(function (pair) {
+      if (el[pair[0]].value !== review[pair[1]]) { el[pair[0]].value = review[pair[1]]; }
+    });
+    el.reviewTrash.checked = review.includeTrash;
+    ['reviewPeriod', 'reviewSkill', 'reviewKind'].forEach(function (id) {
+      var item = customSelects.find(function (select) { return select.select === el[id]; });
+      if (item) { syncCustomSelect(item); }
+    });
+    try {
+      var trend = TianDaoHistory.trend(state, review.anchor, review.period, reviewSkillValue());
+      el.reviewRange.textContent = trend.startDate + ' 至 ' + trend.endDate;
+      el.reviewSummary.innerHTML = [['累计投入', trend.totalHours.toFixed(2) + ' h'], ['日志时长', trend.logHours.toFixed(2) + ' h'],
+        ['备注补记', trend.noteHours.toFixed(2) + ' h'], ['有投入的日期', trend.activeDays + ' 天'],
+        [review.period === 'month' ? '较上月' : '较上周', (trend.changeHours > 0 ? '+' : '') + trend.changeHours.toFixed(2) + ' h']].map(function (item) {
+        return '<div><span>' + item[0] + '</span><b>' + item[1] + '</b></div>';
+      }).join('');
+      var maximum = Math.max(1, ...trend.days.map(function (day) { return day.totalHours; }));
+      el.reviewChart.innerHTML = trend.days.map(function (day) {
+        var label = day.date + '：日志 ' + day.logHours.toFixed(2) + ' 小时，备注补记 ' + day.noteHours.toFixed(2) + ' 小时';
+        return '<li tabindex="0" aria-label="' + label + '" title="' + label + '"><div class="review-bar" aria-hidden="true">' +
+          '<span class="review-bar-label">' + (day.totalHours ? day.totalHours.toFixed(1) : '') + '</span>' +
+          '<span class="review-bar-note" style="height:' + (day.noteHours / maximum * 120) + 'px"></span>' +
+          '<span class="review-bar-log" style="height:' + (day.logHours / maximum * 120) + 'px"></span></div>' + day.date.slice(5) + '</li>';
+      }).join('');
+    } catch (error) {
+      el.reviewRange.textContent = error.message;
+      el.reviewSummary.innerHTML = ''; el.reviewChart.innerHTML = '';
+    }
+    try {
+      var results = TianDaoHistory.search(state, Object.assign({}, review, { skill: reviewSkillValue() }));
+      review.page = results.page;
+      reviewRows = results.rows;
+      el.reviewCount.textContent = '找到 ' + results.total + ' 条记录，按日期从新到旧排列';
+      el.reviewResults.innerHTML = results.rows.length ? results.rows.map(function (row) {
+        var label = row.kind === 'entry' ? '日志' : row.completed ? '已完成备注' : '未完成备注';
+        var date = row.kind === 'entry' ? row.date + ' ' + toClock(row.start) + ' → ' + row.endDate + ' ' + toClock(row.end) : row.date;
+        return '<article class="review-result"><div class="review-result-meta">' + label + (row.trash ? ' · 回收站' : '') + ' · ' + date +
+          '<br>' + escapeHtml(row.skill || '未指定技能') + (row.hours ? ' · ' + Number(row.hours).toFixed(2) + ' 小时' : '') + '</div>' +
+          '<div class="review-result-text">' + escapeHtml(row.text) + '</div>' +
+          (!row.trash ? '<button type="button" class="btn ghost" data-review-key="' + escapeHtml(row.key) + '">' +
+            (row.kind === 'entry' ? '查看当日时间轴' : '修改备注') + '</button>' : '') + '</article>';
+      }).join('') : '<p class="empty">没有匹配的记录，可调整关键词、日期或技能。</p>';
+      el.reviewPage.textContent = (results.page + 1) + ' / ' + results.pages;
+      el.reviewPrevious.disabled = results.page <= 0;
+      el.reviewNext.disabled = results.page + 1 >= results.pages;
+    } catch (error) {
+      reviewRows = [];
+      el.reviewCount.textContent = error.message;
+      el.reviewResults.innerHTML = ''; el.reviewPage.textContent = '';
+      el.reviewPrevious.disabled = true; el.reviewNext.disabled = true;
+    }
+  }
+
+  var reviewFields = { reviewPeriod: 'period', reviewAnchor: 'anchor', reviewSkill: 'skill', reviewQuery: 'query',
+    reviewKind: 'kind', reviewStart: 'startDate', reviewEnd: 'endDate', reviewTrash: 'includeTrash' };
+  Object.keys(reviewFields).forEach(function (id) {
+    el[id].addEventListener(id === 'reviewQuery' ? 'input' : 'change', function () {
+      state.ui.review[reviewFields[id]] = id === 'reviewTrash' ? el[id].checked : el[id].value;
+      state.ui.review.page = 0;
+      persistUi();
+      window.clearTimeout(reviewTimer);
+      if (id === 'reviewQuery') { reviewTimer = window.setTimeout(renderReview, 150); }
+      else { renderReview(); }
+    });
+  });
+  el.reviewClear.addEventListener('click', function () {
+    Object.assign(state.ui.review, { query: '', skill: 'all', kind: 'all', startDate: '', endDate: '', includeTrash: false, page: 0 });
+    persistUi(); renderReview();
+  });
+  [el.reviewPrevious, el.reviewNext].forEach(function (button, index) {
+    button.addEventListener('click', function () { state.ui.review.page += index ? 1 : -1; renderReview(); persistUi(); });
+  });
+  el.reviewResults.addEventListener('click', function (event) {
+    var button = event.target.closest('[data-review-key]');
+    var row = button && reviewRows.find(function (item) { return item.key === button.dataset.reviewKey; });
+    if (!row) { return; }
+    if (row.kind === 'note') { openNoteEditModal(row.id); }
+    else { setViewDate(row.jumpDate); setActiveTab('timeline'); }
+  });
+
   var questUpgradeTimers = [];
   var pendingTaskSubmission = null;
 
@@ -4663,11 +4900,12 @@
 
   function closeTaskSubmitModal() {
     pendingTaskSubmission = null;
-    el.taskSubmitModal.classList.add('hidden');
-    if (!restoringUi && state.ui.taskSubmitDraft) { state.ui.taskSubmitDraft = null; persist(); }
+    dialogs.close(el.taskSubmitModal, !restoringUi);
+    if (!restoringUi && state.ui.taskSubmitDraft) { state.ui.taskSubmitDraft = null; persistUi(); }
   }
 
   function openTaskSubmitModal(task, draftProgress) {
+    task.mainCompleted = state.quests.mainCompleted;
     pendingTaskSubmission = task;
     var progress = Math.max(0, Math.min(99, Number(task.progress) || 0));
     el.taskSubmitTitle.textContent = '提交当前任务';
@@ -4677,7 +4915,7 @@
     el.taskProgressPreviousCursor.setAttribute('data-value', progress + '%');
     el.taskProgress.value = String(typeof draftProgress === 'number' ? draftProgress : 100);
     updateTaskProgressVisual();
-    el.taskSubmitModal.classList.remove('hidden');
+    dialogs.open(el.taskSubmitModal, closeTaskSubmitModal, el.taskProgressCursor);
     el.taskProgressCursor.focus({ preventScroll: true });
   }
 
@@ -4722,27 +4960,35 @@
   });
   el.taskSubmitConfirm.addEventListener('click', function () {
     if (!pendingTaskSubmission) { return; }
-    var progress = Number(el.taskProgress.value);
+    var progress = Math.max(0, Math.min(100, Number(el.taskProgress.value) || 0));
     var task = pendingTaskSubmission;
-    closeTaskSubmitModal();
+    syncBackupState();
     if (task.kind === 'main') {
+      if (!state.quests.mainAccepted || task.mainCompleted !== state.quests.mainCompleted) {
+        closeTaskSubmitModal(); refreshAll(); toast('任务已变化，请查看最新进度。', { level: 'WARN' }); return;
+      }
       if (progress >= 100) {
-        submitMainQuest();
+        if (!submitMainQuest()) { return; }
       } else {
-        state.quests.mainProgress = progress;
-        persist();
+        if (!commitChange(function () { state.quests.mainProgress = progress; state.ui.taskSubmitDraft = null; })) { return; }
         renderMainQuest();
         updatePolishFloat();
         toast('主线任务当前进展已记录：' + progress + '%。', { level: 'SYSTEM' });
       }
+      closeTaskSubmitModal();
       return;
     }
-    task.quest.progress = progress;
-    persist();
+    var quest = state.quests.side.find(function (item) { return item.id === task.quest.id && item.status === 'accepted'; });
+    if (!quest) { closeTaskSubmitModal(); refreshAll(); toast('任务已变化，请查看最新进度。', { level: 'WARN' }); return; }
+    if (progress >= 100) {
+      if (!completeSideQuest(quest)) { return; }
+    } else {
+      if (!commitChange(function () { quest.progress = progress; state.ui.taskSubmitDraft = null; })) { return; }
+      toast('支线任务当前进展已记录：' + progress + '%。', { level: 'SYSTEM' });
+    }
+    closeTaskSubmitModal();
     renderSideQuests();
     updatePolishFloat();
-    if (progress >= 100) { completeSideQuest(task.quest); }
-    else { toast('支线任务当前进展已记录：' + progress + '%。', { level: 'SYSTEM' }); }
   });
 
   function clearQuestUpgradeTimers() {
@@ -4812,8 +5058,7 @@
     var acceptBtn = document.getElementById('questAccept');
     if (acceptBtn) {
       acceptBtn.addEventListener('click', function () {
-        state.quests.mainAccepted = true;
-        persist();
+        if (!commitChange(function () { state.quests.mainAccepted = true; })) { return; }
         var blessing = MAIN_QUEST_BLESSINGS[Math.floor(Math.random() * MAIN_QUEST_BLESSINGS.length)];
         toast('已领取主线任务线索 ' + (completed + 1) + '，祝宿主' + blessing + '。', { level: 'SYSTEM' });
         renderMainQuest();
@@ -4828,12 +5073,14 @@
   }
 
   function submitMainQuest() {
+    if (!commitChange(function () {
+      state.quests.mainCompleted += 1;
+      state.quests.mainAccepted = false;
+      state.quests.mainProgress = 0;
+      state.points.attribute += 5;
+      state.ui.taskSubmitDraft = null;
+    })) { return false; }
     clearQuestUpgradeTimers();
-    state.quests.mainCompleted += 1;
-    state.quests.mainAccepted = false;
-    state.quests.mainProgress = 0;
-    state.points.attribute += 5;
-    persist();
     renderPoints();
     renderVersion();
     updatePolishFloat();
@@ -4842,24 +5089,26 @@
     toast('系统正在升级……', { level: 'REWARD' });
     toast('系统升级完成。', { level: 'REWARD' });
     toast('系统等级已提升至 ' + userVersionText() + '，获得属性点 +5。', { level: 'REWARD' });
+    return true;
   }
 
   function completeSideQuest(quest) {
-    quest.completionCount = (Number(quest.completionCount) || 0) + 1;
-    quest.status = 'done';
-    quest.progress = 0;
-    state.points.attribute += quest.rewardAttr;
     var contributionReward = quest.rewardAttr + quest.rewardAchievement;
-    state.points.contribution += contributionReward;
-    state.points.achievement += quest.rewardAchievement;
-    state.achievements.push({
-      id: uid(), name: quest.title, points: quest.rewardAchievement,
-      desc: quest.desc || '完成支线任务结算', questId: quest.id
-    });
-    persist();
+    if (!commitChange(function () {
+      quest.completionCount = (Number(quest.completionCount) || 0) + 1;
+      quest.status = 'done';
+      quest.progress = 0;
+      state.points.attribute += quest.rewardAttr;
+      state.points.contribution += contributionReward;
+      state.points.achievement += quest.rewardAchievement;
+      state.achievements.push({ id: uid(), name: quest.title, points: quest.rewardAchievement,
+        desc: quest.desc || '完成支线任务结算', questId: quest.id });
+      state.ui.taskSubmitDraft = null;
+    })) { return false; }
     toast('支线任务【' + quest.title + '】已完成，属性点 +' + quest.rewardAttr +
       '，成就点 +' + quest.rewardAchievement + '，贡献点 +' + contributionReward + '。', { level: 'REWARD' });
     refreshAll();
+    return true;
   }
 
   el.sideQuestForm.addEventListener('submit', function (event) {
@@ -4876,18 +5125,17 @@
     var achievementValue = Number(el.sideRewardAchievement.value);
     var rewardAttr = Number.isFinite(attrValue) ? Math.floor(attrValue) : 0;
     var rewardAchievement = Number.isFinite(achievementValue) ? Math.floor(achievementValue) : 0;
-    state.quests.side.push({
-      id: uid(), title: title, desc: desc,
-      rewardAttr: rewardAttr, rewardAchievement: rewardAchievement,
-      status: 'open', completionCount: 0
-    });
-    persist();
+    if (!commitChange(function () {
+      state.quests.side.push({ id: uid(), title: title, desc: desc,
+        rewardAttr: rewardAttr, rewardAchievement: rewardAchievement, status: 'open', completionCount: 0 });
+      delete state.ui.formDrafts.sideQuest;
+    })) { return; }
     toast('宿主已发布支线任务【' + title + '】。', { level: 'SYSTEM' });
     el.sideQuestForm.reset();
     el.sideRewardAttr.value = 1;
     el.sideRewardAchievement.value = 1;
     delete state.ui.formDrafts.sideQuest;
-    persist();
+    persistUi();
     // 发布后立即刷新「已发布支线任务」，不需要切换标签页。
     refreshAll();
   });
@@ -4902,8 +5150,7 @@
     if (!quest) { return; }
 
     if (target.hasAttribute('data-accept')) {
-      quest.status = 'accepted';
-      persist();
+      if (!commitChange(function () { quest.status = 'accepted'; })) { return; }
       var blessing = SIDE_QUEST_BLESSINGS[Math.floor(Math.random() * SIDE_QUEST_BLESSINGS.length)];
       toast('已领取支线任务【' + quest.title + '】，祝宿主' + blessing + '。', { level: 'SYSTEM' });
     } else if (target.hasAttribute('data-submit') && quest.status === 'accepted') {
@@ -4911,15 +5158,13 @@
       return;
     } else if (target.hasAttribute('data-del-quest')) {
       openConfirmModal('确认删除支线任务【' + quest.title + '】？已获得的奖励和成就不会撤销。', function () {
-        state.quests.side = state.quests.side.filter(function (q) { return q.id !== id; });
-        persist();
+        if (!commitChange(function () { state.quests.side = state.quests.side.filter(function (q) { return q.id !== id; }); })) { return; }
         toast('支线任务【' + quest.title + '】已删除。', { level: 'SYSTEM' });
         refreshAll();
       });
       return;
     } else if (target.hasAttribute('data-hide-quest')) {
-      quest.hidden = true;
-      persist();
+      if (!commitChange(function () { quest.hidden = true; })) { return; }
       toast('支线任务【' + quest.title + '】已隐藏。', { level: 'SYSTEM' });
     }
     refreshAll();
@@ -4934,15 +5179,13 @@
     var quest = state.quests.side.filter(function (q) { return q.id === id; })[0];
     if (!quest) { return; }
     if (target.hasAttribute('data-show-quest')) {
-      quest.hidden = false;
-      persist();
+      if (!commitChange(function () { quest.hidden = false; })) { return; }
       toast('支线任务【' + quest.title + '】已重新显示。', { level: 'SYSTEM' });
       refreshAll();
       return;
     }
     if (target.hasAttribute('data-accept')) {
-      quest.status = 'accepted';
-      persist();
+      if (!commitChange(function () { quest.status = 'accepted'; })) { return; }
       var hiddenBlessing = SIDE_QUEST_BLESSINGS[Math.floor(Math.random() * SIDE_QUEST_BLESSINGS.length)];
       toast('已领取支线任务【' + quest.title + '】，祝宿主' + hiddenBlessing + '。', { level: 'SYSTEM' });
     } else if (target.hasAttribute('data-submit') && quest.status === 'accepted') {
@@ -4950,8 +5193,7 @@
       return;
     } else if (target.hasAttribute('data-del-quest')) {
       openConfirmModal('确认删除支线任务【' + quest.title + '】？已获得的奖励和成就不会撤销。', function () {
-        state.quests.side = state.quests.side.filter(function (q) { return q.id !== id; });
-        persist();
+        if (!commitChange(function () { state.quests.side = state.quests.side.filter(function (q) { return q.id !== id; }); })) { return; }
         toast('支线任务【' + quest.title + '】已删除。', { level: 'SYSTEM' });
         refreshAll();
       });
@@ -5060,7 +5302,7 @@
     if (saveTimer) { window.clearTimeout(saveTimer); }
     saveTimer = window.setTimeout(function () {
       saveTimer = null;
-      persist();
+      persistUi();
     }, 150);
   }, { passive: true });
 
@@ -5094,7 +5336,7 @@
     eggValue = 100;
     el.eggCount.textContent = eggValue;
     el.eggCount.classList.remove('negative');
-    el.eggMask.classList.remove('hidden');
+    dialogs.open(el.eggMask, closeEgg, el.eggClose);
     startEggTimer();
   }
 
@@ -5111,10 +5353,8 @@
     if (eggTimer) { window.clearInterval(eggTimer); eggTimer = null; }
   }
 
-  el.eggClose.addEventListener('click', function () {
-    stopEggTimer();
-    el.eggMask.classList.add('hidden');
-  });
+  function closeEgg() { stopEggTimer(); dialogs.close(el.eggMask); }
+  el.eggClose.addEventListener('click', closeEgg);
 
   el.eggPause.addEventListener('click', function () {
     stopEggTimer();
@@ -5221,6 +5461,7 @@
 
     stepStart = debugStepStart();
     syncCustomSelects();
+    if (state.ui.activeTab === 'review') { renderReview(); }
     debugStepEnd('refresh.syncCustomSelects', stepStart);
     debugStepEnd('refreshAll.total', refreshStart, { activeTab: state.ui.activeTab });
   }
@@ -5239,6 +5480,7 @@
     restoreEntryDraft();
     restoreInteractionDrafts();
     renderNotifications();
+    renderBackupStatus();
   }
 
   /* ---------- 初始化 ---------- */
