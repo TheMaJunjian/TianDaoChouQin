@@ -53,6 +53,36 @@
 
 * { box-sizing: border-box; }
 
+/* 页面与复盘图表的滚动条沿用面板配色；高对比度模式保留系统样式。 */
+@media (forced-colors: none) {
+  html, .review-chart-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #3b6b7e #0a1720;
+  }
+
+  @supports selector(::-webkit-scrollbar) {
+    html, .review-chart-scroll { scrollbar-width: auto; scrollbar-color: auto; }
+    html::-webkit-scrollbar { width: 8px; height: 8px; }
+    .review-chart-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+    html::-webkit-scrollbar-track,
+    .review-chart-scroll::-webkit-scrollbar-track {
+      background: #0a1720;
+      border-radius: 999px;
+    }
+    html::-webkit-scrollbar-thumb,
+    .review-chart-scroll::-webkit-scrollbar-thumb {
+      background: #3b6b7e;
+      border-radius: 999px;
+    }
+    html::-webkit-scrollbar-thumb:hover,
+    .review-chart-scroll::-webkit-scrollbar-thumb:hover { background: #66a9bd; }
+    html::-webkit-scrollbar-thumb:active,
+    .review-chart-scroll::-webkit-scrollbar-thumb:active { background: var(--cyan); }
+    html::-webkit-scrollbar-corner,
+    .review-chart-scroll::-webkit-scrollbar-corner { background: transparent; }
+  }
+}
+
 body {
   margin: 0;
   /* 为底部浮动条保留滚动余量，避免到达页面边界后按钮无法继续上移。 */
