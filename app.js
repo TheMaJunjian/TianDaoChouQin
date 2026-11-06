@@ -19,6 +19,10 @@
   var TOAST_GAP_MS = 700;
   var DEFAULT_HOST_NAME = '未绑定';
   var HOST_NAME_PLACEHOLDER = '修行者';
+  var FORM_DRAFT_FIELDS = {
+    skill: ['skillName', 'skillMode', 'skillLevel', 'skillHours'],
+    sideQuest: ['sideTitle', 'sideDesc', 'sideRewardAttr', 'sideRewardAchievement']
+  };
 
   var SKILL_LEVELS = [
     { key: 'aware', label: '了解', minHours: 20, locked: false },
@@ -115,6 +119,13 @@
         pageScrollTop: 0,
         activeTab: 'attr',
         noteFilter: 'pending',
+        noteScrollTops: { pending: 0, completed: 0, trash: 0 },
+        noteCompleteSkillId: '',
+        noteEditDraft: null,
+        noteCompleteDraft: null,
+        nameDraft: null,
+        taskSubmitDraft: null,
+        formDrafts: {},
         timelineZoom: { start: 0, end: DAY_MINUTES },
         timelineCursors: null,
         entryDraft: null
@@ -158,6 +169,7 @@
   var pendingNoteId = null;
   var pendingNoteEdit = null;
   var logTrashOpen = false;
+  var restoringUi = false;
 
   function syncCollapseState() {
     var ui = state.ui || {};
@@ -188,7 +200,7 @@
   }
 
   function persistCollapseState() {
-    state.ui = {
+    Object.assign(state.ui, {
       skillListCollapsed: skillListCollapsed,
       hiddenSkillListCollapsed: hiddenSkillListCollapsed,
       hiddenAchievementListCollapsed: hiddenAchievementListCollapsed,
@@ -202,7 +214,7 @@
       timelineZoom: { start: timelineZoom.start, end: timelineZoom.end },
       timelineCursors: normalizeTimelineCursors(timelineCursors),
       entryDraft: state.ui.entryDraft
-    };
+    });
     persist();
   }
 
@@ -667,6 +679,35 @@
       merged.ui.activeTab = ['attr', 'entry', 'timeline', 'quest', 'notice'].indexOf(parsedUi.activeTab) >= 0
         ? parsedUi.activeTab : base.ui.activeTab;
       merged.ui.noteFilter = ['pending', 'completed', 'trash'].indexOf(parsedUi.noteFilter) >= 0 ? parsedUi.noteFilter : 'pending';
+      ['pending', 'completed', 'trash'].forEach(function (filter) {
+        var top = Number(parsedUi.noteScrollTops && parsedUi.noteScrollTops[filter]);
+        merged.ui.noteScrollTops[filter] = Number.isFinite(top) ? Math.max(0, top) : 0;
+      });
+      merged.ui.noteCompleteSkillId = typeof parsedUi.noteCompleteSkillId === 'string' ? parsedUi.noteCompleteSkillId : '';
+      merged.ui.nameDraft = typeof parsedUi.nameDraft === 'string' ? parsedUi.nameDraft : null;
+      ['noteEditDraft', 'noteCompleteDraft'].forEach(function (key) {
+        var draft = parsedUi[key];
+        if (!draft || typeof draft.id !== 'string') { return; }
+        var fields = key === 'noteEditDraft' ? ['id', 'originalText', 'text'] : ['id', 'skillId', 'hours'];
+        merged.ui[key] = {};
+        fields.forEach(function (field) { merged.ui[key][field] = typeof draft[field] === 'string' ? draft[field] : ''; });
+      });
+      var taskDraft = parsedUi.taskSubmitDraft;
+      if (taskDraft && ['main', 'side'].indexOf(taskDraft.kind) >= 0 && Number.isFinite(Number(taskDraft.progress))) {
+        merged.ui.taskSubmitDraft = {
+          kind: taskDraft.kind, questId: typeof taskDraft.questId === 'string' ? taskDraft.questId : '',
+          mainCompleted: Math.max(0, Math.floor(Number(taskDraft.mainCompleted) || 0)),
+          progress: Math.max(0, Math.min(100, Number(taskDraft.progress)))
+        };
+      }
+      Object.keys(FORM_DRAFT_FIELDS).forEach(function (key) {
+        var draft = parsedUi.formDrafts && parsedUi.formDrafts[key];
+        if (!draft || typeof draft !== 'object') { return; }
+        merged.ui.formDrafts[key] = {};
+        FORM_DRAFT_FIELDS[key].forEach(function (field) {
+          if (typeof draft[field] === 'string') { merged.ui.formDrafts[key][field] = draft[field]; }
+        });
+      });
       if (parsedUi.timelineZoom && typeof parsedUi.timelineZoom === 'object') {
         var zoomStart = Number(parsedUi.timelineZoom.start);
         var zoomEnd = Number(parsedUi.timelineZoom.end);
@@ -681,10 +722,9 @@
         ['startDate', 'startTime', 'endDate', 'endTime', 'category', 'activity', 'level'].forEach(function (key) {
           merged.ui.entryDraft[key] = typeof parsedUi.entryDraft[key] === 'string' ? parsedUi.entryDraft[key] : '';
         });
-        merged.ui.entryDraft.startSecond = Number.isFinite(Number(parsedUi.entryDraft.startSecond))
-          ? Number(parsedUi.entryDraft.startSecond) : null;
-        merged.ui.entryDraft.endSecond = Number.isFinite(Number(parsedUi.entryDraft.endSecond))
-          ? Number(parsedUi.entryDraft.endSecond) : null;
+        merged.ui.entryDraft.startSecond = normalizeDraftSecond(parsedUi.entryDraft.startSecond);
+        merged.ui.entryDraft.endSecond = normalizeDraftSecond(parsedUi.entryDraft.endSecond);
+        merged.ui.entryDraft.editingEntryId = typeof parsedUi.entryDraft.editingEntryId === 'string' ? parsedUi.entryDraft.editingEntryId : null;
       }
     });
     safe(function () {
@@ -778,6 +818,7 @@
   var saveTimer = null;
   var sigTimer = null;
   var storageErrorShown = false;
+  var backupErrorShown = false;
   function persist(forceReplace) {
     var debugStart = debugStepStart();
     var serialized;
@@ -794,7 +835,6 @@
       }
       serialized = JSON.stringify(state);
       window.localStorage.setItem(STORAGE_KEY, serialized);
-      window.localStorage.setItem(STORAGE_BACKUP_KEY, serialized);
       persistedSnapshot = cloneState(state);
       storageErrorShown = false;
     } catch (e) {
@@ -805,6 +845,17 @@
       }
       debugStepEnd('persist.failed', debugStart, { message: String(e && e.message || e) });
       return false;
+    }
+    // 主存储已成功时，备份写入失败不能回滚已保存的记录。
+    try {
+      window.localStorage.setItem(STORAGE_BACKUP_KEY, serialized);
+      backupErrorShown = false;
+    } catch (error) {
+      if (!backupErrorShown) {
+        backupErrorShown = true;
+        console.error('[storage] BACKUP_FAILED', error);
+        toast('记录已保存，但本地备份更新失败，请及时导出备份。', { level: 'WARN' });
+      }
     }
     // 签名计算涉及多次数组遍历，防抖到空闲时统一计算一次，避免频繁操作（如逐字输入）时反复重算。
     if (sigTimer) { window.clearTimeout(sigTimer); }
@@ -838,7 +889,9 @@
   function flushState() {
     state.ui.pageScrollTop = Math.max(0, window.scrollY || window.pageYOffset || 0);
     captureEntryDraft();
-    persist();
+    captureFormDrafts();
+    captureDialogDrafts();
+    if (persist()) { renderTamperSignature(); }
   }
   window.addEventListener('pagehide', flushState);
   window.addEventListener('beforeunload', flushState);
@@ -1111,12 +1164,11 @@
 
   function cancelDeferredSavesBeforeBackground() {
     cancelNativeFocusDelayedScroll();
-    [pageScrollSaveTimer, saveTimer, draftSaveTimer, sigTimer].forEach(function (timer) {
+    [pageScrollSaveTimer, saveTimer, sigTimer].forEach(function (timer) {
       if (timer !== null) { window.clearTimeout(timer); }
     });
     pageScrollSaveTimer = null;
     saveTimer = null;
-    draftSaveTimer = null;
     sigTimer = null;
   }
 
@@ -1374,20 +1426,29 @@
       endSecond: entryEndSecond,
       category: el.category.value,
       activity: el.activity.value,
-      level: el.level.value
+      level: el.level.value,
+      editingEntryId: editingEntryId
     };
+  }
+
+  function normalizeDraftSecond(value) {
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value < 60 ? value : null;
   }
 
   function restoreEntryDraft() {
     var draft = state.ui.entryDraft;
+    editingEntryId = null;
+    el.activity.value = '';
+    el.level.value = 'INFO';
     if (!draft) { return; }
     el.startDate.value = draft.startDate;
     el.startTime.value = draft.startTime;
     el.endDate.value = draft.endDate;
     el.endTime.value = draft.endTime;
-    entryStartSecond = Number.isFinite(Number(draft.startSecond)) ? Number(draft.startSecond) : null;
-    entryEndSecond = Number.isFinite(Number(draft.endSecond)) ? Number(draft.endSecond) : null;
-    el.category.value = draft.category;
+    entryStartSecond = normalizeDraftSecond(draft.startSecond);
+    entryEndSecond = normalizeDraftSecond(draft.endSecond);
+    editingEntryId = state.entries.some(function (entry) { return entry.id === draft.editingEntryId; }) ? draft.editingEntryId : null;
+    el.category.value = skillByName(draft.category) ? draft.category : '';
     el.activity.value = draft.activity;
     el.level.value = draft.level || 'INFO';
     syncCurrentField(el.endDate);
@@ -1395,15 +1456,96 @@
     syncCustomSelects();
   }
 
-  var draftSaveTimer = null;
   function scheduleEntryDraftSave() {
     captureEntryDraft();
-    if (draftSaveTimer) { window.clearTimeout(draftSaveTimer); }
-    draftSaveTimer = window.setTimeout(function () {
-      draftSaveTimer = null;
-      persist();
-    }, 150);
+    persist();
   }
+
+  function captureFormDraft(key) {
+    var draft = {};
+    FORM_DRAFT_FIELDS[key].forEach(function (field) { draft[field] = el[field].value; });
+    state.ui.formDrafts[key] = draft;
+  }
+
+  function captureFormDrafts() {
+    Object.keys(FORM_DRAFT_FIELDS).forEach(captureFormDraft);
+  }
+
+  function captureDialogDrafts() {
+    if (!el.nameModal.classList.contains('hidden')) { state.ui.nameDraft = el.nameInput.value; }
+    if (pendingNoteEdit) {
+      state.ui.noteEditDraft = { id: pendingNoteEdit.id, originalText: pendingNoteEdit.originalText, text: el.noteEditInput.value };
+    }
+    if (pendingNoteId) {
+      state.ui.noteCompleteDraft = { id: pendingNoteId, skillId: el.noteCompleteSkill.value, hours: el.noteCompleteHours.value };
+    }
+    if (pendingTaskSubmission) {
+      state.ui.taskSubmitDraft = { kind: pendingTaskSubmission.kind,
+        questId: pendingTaskSubmission.quest ? pendingTaskSubmission.quest.id : '',
+        mainCompleted: state.quests.mainCompleted, progress: Number(el.taskProgress.value) };
+    }
+  }
+
+  function saveDialogDrafts() {
+    if (restoringUi) { return; }
+    captureDialogDrafts();
+    persist();
+  }
+
+  function restoreInteractionDrafts() {
+    restoringUi = true;
+    try {
+      el.skillForm.reset();
+      el.sideQuestForm.reset();
+      Object.keys(FORM_DRAFT_FIELDS).forEach(function (key) {
+        var draft = state.ui.formDrafts[key] || {};
+        FORM_DRAFT_FIELDS[key].forEach(function (field) {
+          if (typeof draft[field] === 'string') { el[field].value = draft[field]; }
+        });
+      });
+      if (!['level', 'hours'].includes(el.skillMode.value)) { el.skillMode.value = 'level'; }
+      var level = SKILL_LEVELS.find(function (item) { return item.key === el.skillLevel.value && !item.locked; });
+      el.skillLevel.value = level ? level.key : SKILL_LEVELS[0].key;
+      lastSkillLevel = el.skillLevel.value;
+      el.skillLevelWrap.classList.toggle('hidden', el.skillMode.value !== 'level');
+      el.skillHoursWrap.classList.toggle('hidden', el.skillMode.value === 'level');
+
+      closeNameModal();
+      closeNoteEditModal();
+      closeNoteCompleteModal();
+      closeTaskSubmitModal();
+      if (state.ui.nameDraft !== null) { openNameModal(state.ui.nameDraft); }
+      var edit = state.ui.noteEditDraft;
+      if (edit && !openNoteEditModal(edit.id, edit)) { state.ui.noteEditDraft = null; }
+      var complete = state.ui.noteCompleteDraft;
+      if (complete && !openNoteCompleteModal(complete.id, complete)) { state.ui.noteCompleteDraft = null; }
+      var task = state.ui.taskSubmitDraft;
+      if (task) {
+        var quest = state.quests.side.find(function (item) { return item.id === task.questId && item.status === 'accepted'; });
+        if (task.kind === 'main' && state.quests.mainAccepted && task.mainCompleted === state.quests.mainCompleted && MAIN_QUEST_CLUES[task.mainCompleted]) {
+          openTaskSubmitModal({ kind: 'main', title: MAIN_QUEST_CLUES[task.mainCompleted], desc: '系统升级任务', progress: state.quests.mainProgress }, task.progress);
+        } else if (task.kind === 'side' && quest) {
+          openTaskSubmitModal({ kind: 'side', title: quest.title, desc: quest.desc, progress: quest.progress, quest: quest }, task.progress);
+        } else { state.ui.taskSubmitDraft = null; }
+      }
+      syncCustomSelects();
+    } finally { restoringUi = false; }
+  }
+
+  ['input', 'change'].forEach(function (eventName) {
+    document.addEventListener(eventName, function (event) {
+      var field = event.target.id;
+      Object.keys(FORM_DRAFT_FIELDS).forEach(function (key) {
+        if (FORM_DRAFT_FIELDS[key].indexOf(field) < 0) { return; }
+        captureFormDraft(key);
+        persist();
+      });
+      if (['nameInput', 'noteEditInput', 'noteCompleteHours', 'noteCompleteSkill'].indexOf(field) >= 0) {
+        if (field === 'noteCompleteSkill') { state.ui.noteCompleteSkillId = el.noteCompleteSkill.value; }
+        saveDialogDrafts();
+      }
+    });
+  });
 
   function syncCurrentField(input) {
     input.classList.toggle('current-field-empty', !input.value);
@@ -1657,7 +1799,10 @@
       !(tab === 'debug' && debugEnabled)) { tab = 'attr'; }
     state.ui.activeTab = tab;
     applyActiveTabView(tab);
-    if (tab === 'timeline') { el.logView.scrollTop = state.ui.logScrollTop; }
+    if (tab === 'timeline') {
+      el.logView.scrollTop = state.ui.logScrollTop;
+      el.noteView.scrollTop = state.ui.noteScrollTops[state.ui.noteFilter];
+    }
     if (tab === 'notice') { el.noticeView.scrollTop = state.ui.noticeScrollTop; }
     updatePolishFloat();
     if (tab === 'quest') { onOpenQuestTab(); }
@@ -1681,14 +1826,18 @@
   }
 
   /* ---------- 宿主称号：自定义弹窗，替代原生 prompt ---------- */
-  function openNameModal() {
+  function openNameModal(draft) {
     el.nameInput.placeholder = HOST_NAME_PLACEHOLDER;
-    el.nameInput.value = state.host.name === DEFAULT_HOST_NAME ? '' : state.host.name;
+    el.nameInput.value = typeof draft === 'string' ? draft : (state.host.name === DEFAULT_HOST_NAME ? '' : state.host.name);
     el.nameModal.classList.remove('hidden');
-    window.setTimeout(function () { el.nameInput.focus(); }, 30);
+    el.nameInput.focus({ preventScroll: true });
+    saveDialogDrafts();
   }
 
-  function closeNameModal() { el.nameModal.classList.add('hidden'); }
+  function closeNameModal() {
+    el.nameModal.classList.add('hidden');
+    if (!restoringUi && state.ui.nameDraft !== null) { state.ui.nameDraft = null; persist(); }
+  }
 
   function confirmName() {
     var name = el.nameInput.value.trim() || HOST_NAME_PLACEHOLDER;
@@ -1988,6 +2137,8 @@
     fillSkillLevelSelect();
     el.skillLevelWrap.classList.remove('hidden');
     el.skillHoursWrap.classList.add('hidden');
+    delete state.ui.formDrafts.skill;
+    persist();
     refreshAll();
   });
 
@@ -2523,18 +2674,21 @@
     el.noteEditModal.classList.add('hidden');
     el.noteEditInput.value = '';
     var trigger = Array.prototype.find.call(el.noteView.querySelectorAll('[data-note-edit]'), function (item) { return item.dataset.noteEdit === id; });
-    if (trigger) { trigger.focus({ preventScroll: true }); }
+    if (!restoringUi && state.ui.noteEditDraft) { state.ui.noteEditDraft = null; persist(); }
+    if (trigger && !restoringUi) { trigger.focus({ preventScroll: true }); }
   }
 
-  function openNoteEditModal(id) {
-    syncBackupState();
+  function openNoteEditModal(id, draft) {
+    if (!restoringUi) { syncBackupState(); }
     var note = state.notes.find(function (item) { return item.id === id; });
-    if (!note || note.deletedAt) { return; }
-    pendingNoteEdit = { id: id, originalText: note.text };
+    if (!note || note.deletedAt) { return false; }
+    pendingNoteEdit = { id: id, originalText: draft ? draft.originalText : note.text };
     el.noteEditMeta.textContent = '记录于 ' + formatCreatedAt(note.createdAt) + (completionForNote(id) ? ' · 已完成' : ' · 未完成');
-    el.noteEditInput.value = note.text;
+    el.noteEditInput.value = draft ? draft.text : note.text;
     el.noteEditModal.classList.remove('hidden');
-    el.noteEditInput.focus();
+    el.noteEditInput.focus({ preventScroll: true });
+    saveDialogDrafts();
+    return true;
   }
 
   function saveNoteEdit(confirmedText) {
@@ -2584,27 +2738,39 @@
     pendingNoteId = null;
     el.noteCompleteModal.classList.add('hidden');
     if (openCustomSelect && openCustomSelect.select === el.noteCompleteSkill) { closeCustomSelect(openCustomSelect); }
+    if (!restoringUi && state.ui.noteCompleteDraft) { state.ui.noteCompleteDraft = null; persist(); }
   }
 
-  function openNoteCompleteModal(id) {
+  function preferredNoteSkillId(draftSkillId) {
+    var preferred = [draftSkillId, state.ui.noteCompleteSkillId];
+    for (var index = 0; index < preferred.length; index++) {
+      if (state.skills.some(function (skill) { return skill.id === preferred[index]; })) { return preferred[index]; }
+    }
+    var focus = skillByName(state.focus);
+    var first = sortedSkills()[0];
+    return focus ? focus.id : (first ? first.id : '');
+  }
+
+  function openNoteCompleteModal(id, draft) {
     var note = state.notes.find(function (item) { return item.id === id; });
-    if (!note || note.deletedAt || completionForNote(id)) { return; }
+    if (!note || note.deletedAt || completionForNote(id)) { return false; }
     pendingNoteId = id;
     el.noteCompleteText.textContent = note.text;
-    el.noteCompleteHours.value = '';
+    el.noteCompleteHours.value = draft ? draft.hours : '';
     el.noteCompleteSkill.innerHTML = sortedSkills().map(function (skill) {
       return '<option value="' + escapeHtml(skill.id) + '">' + escapeHtml(skill.name) + '</option>';
     }).join('');
-    var focus = skillByName(state.focus);
-    if (focus) { el.noteCompleteSkill.value = focus.id; }
+    el.noteCompleteSkill.value = preferredNoteSkillId(draft && draft.skillId);
     var empty = !state.skills.length;
     el.noteCompleteEmpty.classList.toggle('hidden', !empty);
     el.noteCompleteAddSkill.classList.toggle('hidden', !empty);
     el.noteCompleteAccept.disabled = empty;
     syncCustomSelects();
     el.noteCompleteModal.classList.remove('hidden');
-    if (empty) { el.noteCompleteAddSkill.focus(); }
-    else { el.noteCompleteHours.focus(); }
+    if (empty) { el.noteCompleteAddSkill.focus({ preventScroll: true }); }
+    else { el.noteCompleteHours.focus({ preventScroll: true }); }
+    saveDialogDrafts();
+    return true;
   }
 
   el.noteCompleteCancel.addEventListener('click', closeNoteCompleteModal);
@@ -2641,6 +2807,7 @@
     var completion = { id: note.id, skillId: skill.id, skillName: skill.name, hours: hoursValue, completedAt: new Date().toISOString(),
       noteText: note.text, noteDate: note.date, noteCreatedAt: note.createdAt };
     state.noteCompletions.push(completion);
+    state.ui.noteCompleteSkillId = skill.id;
     if (!persist()) {
       state.noteCompletions = state.noteCompletions.filter(function (item) { return item.id !== completion.id; });
       persist(true);
@@ -2655,8 +2822,8 @@
   });
 
   el.noteFilter.addEventListener('change', function () {
+    if (el.noteView.clientHeight) { state.ui.noteScrollTops[state.ui.noteFilter] = el.noteView.scrollTop; }
     state.ui.noteFilter = el.noteFilter.value;
-    el.noteView.scrollTop = 0;
     persist();
     renderNotes();
   });
@@ -2675,6 +2842,11 @@
       text: text
     };
     state.notes.push(note);
+    if (!persist()) {
+      state.notes = state.notes.filter(function (item) { return item.id !== note.id; });
+      toast('备注保存失败，输入内容已保留，请稍后重试。', { level: 'ERROR' });
+      return;
+    }
     state.ui.noteFilter = 'pending';
     state.viewDate = note.date;
     el.viewDate.value = note.date;
@@ -3281,8 +3453,6 @@
       return;
     }
     clearQuestUpgradeTimers();
-    closeNoteCompleteModal();
-    closeNoteEditModal();
     editingEntryId = null;
     syncCollapseState();
     closeDetailModal();
@@ -4092,7 +4262,6 @@
   }
 
   function renderNotes() {
-    var scrollTop = el.noteView.scrollTop;
     var notes = filteredNotes();
     var filter = state.ui.noteFilter || 'pending';
     var label = { pending: '未完成', completed: '已完成', trash: '回收站' }[filter];
@@ -4116,8 +4285,15 @@
         (completion ? '<div class="note-completion">已完成 · ' + escapeHtml(completion.skillName) + ' +' + completion.hours + ' 小时</div>' : '') +
         (note.deletedAt ? '<div class="trash-entry-meta">删除于 ' + escapeHtml(formatCreatedAt(note.deletedAt)) + '</div>' : '') + '</div></div>';
     }).join('') : '<div class="empty">' + (filter === 'trash' ? '回收站为空。' : '暂无' + label + '备注。') + '</div>';
-    el.noteView.scrollTop = scrollTop;
+    el.noteView.scrollTop = state.ui.noteScrollTops[filter];
   }
+
+  el.noteView.addEventListener('scroll', function () {
+    if (!el.noteView.clientHeight) { return; }
+    state.ui.noteScrollTops[state.ui.noteFilter] = Math.max(0, el.noteView.scrollTop);
+    if (saveTimer) { window.clearTimeout(saveTimer); }
+    saveTimer = window.setTimeout(function () { saveTimer = null; persist(); }, 150);
+  }, { passive: true });
 
   function timelineSlotsForEntry(entryId) {
     return Array.prototype.filter.call(el.timeline.querySelectorAll('.slot[data-entry-id]'), function (slot) {
@@ -4482,14 +4658,16 @@
     el.taskProgressCursor.style.left = progress + '%';
     el.taskProgressCursor.setAttribute('aria-valuenow', String(progress));
     el.taskProgressCursor.setAttribute('data-value', progress + '%');
+    saveDialogDrafts();
   }
 
   function closeTaskSubmitModal() {
     pendingTaskSubmission = null;
     el.taskSubmitModal.classList.add('hidden');
+    if (!restoringUi && state.ui.taskSubmitDraft) { state.ui.taskSubmitDraft = null; persist(); }
   }
 
-  function openTaskSubmitModal(task) {
+  function openTaskSubmitModal(task, draftProgress) {
     pendingTaskSubmission = task;
     var progress = Math.max(0, Math.min(99, Number(task.progress) || 0));
     el.taskSubmitTitle.textContent = '提交当前任务';
@@ -4497,10 +4675,10 @@
       '<div class="task-submit-description">' + escapeHtml(task.desc || '当前任务') + '</div>';
     el.taskProgressPreviousCursor.style.left = progress + '%';
     el.taskProgressPreviousCursor.setAttribute('data-value', progress + '%');
-    el.taskProgress.value = '100';
+    el.taskProgress.value = String(typeof draftProgress === 'number' ? draftProgress : 100);
     updateTaskProgressVisual();
     el.taskSubmitModal.classList.remove('hidden');
-    el.taskProgressCursor.focus();
+    el.taskProgressCursor.focus({ preventScroll: true });
   }
 
   el.taskProgressCursor.addEventListener('pointerdown', function (event) {
@@ -4708,6 +4886,8 @@
     el.sideQuestForm.reset();
     el.sideRewardAttr.value = 1;
     el.sideRewardAchievement.value = 1;
+    delete state.ui.formDrafts.sideQuest;
+    persist();
     // 发布后立即刷新「已发布支线任务」，不需要切换标签页。
     refreshAll();
   });
@@ -4875,6 +5055,7 @@
   }
 
   el.noticeView.addEventListener('scroll', function () {
+    if (!el.noticeView.clientHeight) { return; }
     state.ui.noticeScrollTop = Math.max(0, el.noticeView.scrollTop);
     if (saveTimer) { window.clearTimeout(saveTimer); }
     saveTimer = window.setTimeout(function () {
@@ -5045,6 +5226,7 @@
   }
 
   function fullRender() {
+    applyActiveTabView(state.ui.activeTab);
     el.viewDate.value = state.viewDate;
     el.attrWeight.value = state.host.weight;
     el.attrEdu.value = state.host.education;
@@ -5055,6 +5237,7 @@
     refreshAll();
     applyEntryDefaults();
     restoreEntryDraft();
+    restoreInteractionDrafts();
     renderNotifications();
   }
 
