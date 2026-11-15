@@ -7,6 +7,7 @@ const path = require('node:path');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
 const { once } = require('node:events');
+const { memoryDirectory } = require('./folder-fixture.js');
 
 // Use a disposable browser profile: never read or change the user's site data.
 const browserPath = [process.env.BROWSER_PATH,
@@ -67,7 +68,7 @@ test('browser persistence and refresh recovery', { skip: !browserPath, timeout: 
   const server = http.createServer((request, response) => {
     const file = new URL(request.url, 'http://localhost').pathname.slice(1) || 'index.html';
     if (file === 'fixture') { response.end('<!doctype html><title>Fixture</title>'); return; }
-    if (!['index.html', 'app.js', 'backup.js', 'storage.js', 'backup-status.js', 'history.js', 'dialogs.js', 'styles.css'].includes(file)) { response.writeHead(404).end(); return; }
+    if (!['index.html', 'app.js', 'backup.js', 'folder-backup.js', 'backup-locations.js', 'storage.js', 'backup-status.js', 'history.js', 'dialogs.js', 'styles.css'].includes(file)) { response.writeHead(404).end(); return; }
     response.setHeader('Content-Type', file.endsWith('.js') ? 'text/javascript; charset=utf-8' :
       file.endsWith('.css') ? 'text/css; charset=utf-8' : 'text/html; charset=utf-8');
     response.end(fs.readFileSync(path.join(root, file)));
@@ -360,6 +361,151 @@ test('browser persistence and refresh recovery', { skip: !browserPath, timeout: 
       await p.close();
     });
 
+    await t.test('editing text, duration, time and skill recalculates hours without counting archived logs', async () => {
+      const entry = { id: 'original', date: '2026-11-06', start: 480, end: 540, category: '阅读', activity: '原日志', level: 'INFO' };
+      const p = await page(fixture({ entries: [entry], viewDate: entry.date }));
+      for (const [index, change] of [
+        { fields: {}, reading: '21.0', coding: '30.0' },
+        { fields: { endTime: '10:00:00' }, reading: '22.0', coding: '30.0' },
+        { fields: { startTime: '12:00:00', endTime: '13:00:00' }, reading: '21.0', coding: '30.0' },
+        { fields: { category: '编程' }, reading: '20.0', coding: '31.0' }
+      ].entries()) {
+        await p.click('[data-tab="timeline"]');
+        await p.click('[data-entry-id="original"]');
+        await p.click('#detailFillBlank');
+        await p.set('activity', '修改 ' + index);
+        for (const [field, value] of Object.entries(change.fields)) { await p.set(field, value); }
+        await p.reload();
+        await p.submit('entryForm');
+        await p.reload();
+        assert.equal((await p.state()).entries.length, 1);
+        for (const [name, expected] of [['阅读', change.reading], ['编程', change.coding]]) {
+          assert.match(await p.run(name => Array.from(document.querySelectorAll('.skill-item'))
+            .find(item => item.querySelector('.skill-name').textContent === name).textContent, name), new RegExp('累计 ' + expected + ' 小时'));
+        }
+      }
+      await p.close();
+    });
+
+    await t.test('regression records negative hours once, lowers skill level, and survives refresh and repeated import', async () => {
+      const entry = { id: 'practice', date: '2026-11-06', start: 480, end: 540, category: '阅读', activity: '阅读', level: 'INFO' };
+      const p = await page(fixture({ entries: [entry], skills: [{ id: 'reading', name: '阅读', hours: 300 }] }));
+      await p.click('[data-tab="entry"]');
+      await p.set('category', '阅读', 'change');
+      await p.set('activity', '修正多记的时间');
+      const before = await p.state();
+      assert.equal(await p.run(() => document.querySelectorAll('#entryActions button').length), 2);
+      assert.equal(await p.run(() => document.querySelectorAll('#regressionForm > label').length), 2);
+      assert.equal(await p.run(() => document.querySelectorAll('#regressionForm > button').length), 1);
+      await p.set('regressionSkill', 'reading', 'change');
+      await p.set('regressionHours', '2.5');
+      await p.click('#regressionSubmit');
+      await p.click('#regressionSubmit');
+      await p.reload();
+      const saved = await p.state();
+      assert.deepEqual(saved.entries, before.entries);
+      assert.equal(saved.noteCompletions.length, 1);
+      assert.equal(saved.noteCompletions[0].hours, -2.5);
+      assert.deepEqual(saved.notes, before.notes);
+      assert.equal(saved.ui.regressionDraft, null);
+      assert.equal(await p.value('regressionHours'), '');
+      assert.equal(await p.value('activity'), '修正多记的时间');
+      assert.match(await p.run(() => document.getElementById('skillList').textContent), /了解.*累计 298.5 小时/);
+      assert.equal(await p.run(() => document.getElementById('focusPercent').textContent), '2.985%');
+      await p.click('[data-tab="timeline"]');
+      assert.match(await p.run(() => document.getElementById('regressionView').textContent), /阅读 · -2.5 小时/);
+      assert.doesNotMatch(await p.run(() => document.getElementById('noteView').textContent), /退步|-2.5/);
+      for (let index = 0; index < 2; index++) {
+        await p.click('[data-tab="entry"]');
+        await p.set('backupFormat', 'file', 'change');
+        await p.click('#importBtn');
+        await p.set('importJsonInput', JSON.stringify(saved));
+        await p.click('#detailUploadImport');
+        assert.equal(await p.run(() => document.getElementById('detailUploadImport').disabled), false);
+        await p.click('#detailUploadImport');
+        assert.equal(await p.visible('detailModal'), false);
+        assert.equal((await p.state()).noteCompletions.length, 1);
+      }
+      assert.match(await p.run(() => document.getElementById('skillList').textContent), /累计 298.5 小时/);
+      await p.close();
+    });
+
+    await t.test('regression drafts recover, invalid hours do not save, and failed saves can retry safely', async () => {
+      const p = await page();
+      await p.click('[data-tab="entry"]');
+      await p.set('regressionSkill', 'reading', 'change');
+      await p.set('regressionHours', '-1.25');
+      const draftId = (await p.state()).ui.regressionDraft.id;
+      await p.reload();
+      assert.equal(await p.visible('noteCompleteModal'), false);
+      assert.equal(await p.value('regressionHours'), '-1.25');
+      assert.equal((await p.state()).ui.regressionDraft.id, draftId);
+      for (const value of ['', '0', 'abc', 'Infinity', '-50000.1', '50000.1']) {
+        await p.set('regressionHours', value);
+        await p.submit('regressionForm');
+        assert.equal((await p.state()).noteCompletions.length, 0);
+      }
+      await p.set('regressionHours', '21.25');
+      const retryId = (await p.state()).ui.regressionDraft.id;
+      await p.failWrites();
+      await p.submit('regressionForm');
+      assert.equal((await p.state()).notes.length, 3);
+      assert.equal((await p.state()).noteCompletions.length, 0);
+      assert.equal(await p.value('regressionHours'), '21.25');
+      await p.restoreWrites();
+      await p.submit('regressionForm');
+      await p.reload();
+      const saved = await p.state();
+      assert.equal(saved.noteCompletions.length, 1);
+      assert.equal(saved.noteCompletions[0].hours, -21.25);
+      assert.equal(saved.noteCompletions[0].id, retryId);
+      assert.equal(await p.run(() => document.getElementById('focusFill').style.width), '0%');
+      assert.equal(await p.run(() => document.getElementById('focusPercent').textContent), '0.000%');
+      assert.equal(await p.value('regressionHours'), '');
+      await p.set('regressionHours', '-2');
+      await p.set('regressionHours', '');
+      await p.reload();
+      assert.equal(await p.value('regressionHours'), '');
+      assert.equal((await p.state()).noteCompletions.length, 1);
+      await p.click('[data-tab="timeline"]');
+      await p.set('noteFilter', 'pending', 'change');
+      await p.click('[data-note-complete="one"]');
+      assert.equal(await p.run(() => document.getElementById('noteCompleteTitle').textContent), '完成备注');
+      await p.set('noteCompleteHours', '-1');
+      await p.submit('noteCompleteForm');
+      assert.equal((await p.state()).noteCompletions.length, 1, 'normal note completion still requires positive hours');
+      await p.close();
+    });
+
+    await t.test('legacy regression notes and drafts appear only in the separate regression sections', async () => {
+      const oldNote = { id: 'old-loss', date: '2026-11-06', createdAt: '2026-11-06T08:00:00Z', text: '旧版退步说明' };
+      const oldLoss = { id: oldNote.id, skillId: 'reading', skillName: '阅读', hours: -2,
+        completedAt: oldNote.createdAt, noteText: oldNote.text, noteDate: oldNote.date, noteCreatedAt: oldNote.createdAt };
+      const p = await page(fixture({ notes: [oldNote], noteCompletions: [oldLoss], viewDate: oldNote.date,
+        ui: { noteCompleteDraft: { id: 'legacy-draft', mode: 'regression', text: '旧草稿', skillId: 'coding', hours: '-0.5' } } }));
+      assert.equal(await p.visible('noteCompleteModal'), false);
+      assert.equal(await p.value('regressionHours'), '-0.5');
+      assert.equal(await p.value('regressionSkill'), 'coding');
+      await p.click('[data-tab="timeline"]');
+      for (const filter of ['pending', 'completed', 'trash']) {
+        await p.set('noteFilter', filter, 'change');
+        assert.doesNotMatch(await p.run(() => document.getElementById('noteView').textContent), /旧版退步说明/);
+      }
+      assert.equal(await p.run(() => document.getElementById('regressionCountLabel').textContent), '1 条');
+      assert.match(await p.run(() => document.getElementById('regressionView').textContent), /阅读 · -2 小时/);
+      await p.click('[data-tab="review"]');
+      await p.set('reviewKind', 'regression', 'change');
+      assert.equal(await p.run(() => document.querySelectorAll('#reviewResults .review-result').length), 1);
+      assert.equal(await p.run(() => document.querySelectorAll('#reviewResults [data-review-key]').length), 0);
+      await p.reload();
+      assert.equal(await p.value('reviewKind'), 'regression');
+      await p.click('[data-tab="entry"]');
+      await p.submit('regressionForm');
+      assert.equal((await p.state()).noteCompletions.length, 2);
+      assert.equal((await p.state()).noteCompletions[1].id, 'legacy-draft');
+      await p.close();
+    });
+
     await t.test('failed primary writes retain note input and backup-only failure retains saved notes', async () => {
       for (const failedKey of [storageKey, storageKey + '.backup']) {
         const p = await page();
@@ -531,8 +677,447 @@ test('browser persistence and refresh recovery', { skip: !browserPath, timeout: 
       assert.equal((await p.state()).notes.length, 0);
       await p.close();
     });
+    async function folderSetup(p) {
+      await p.run(source => {
+        window.makeTestDirectory = (0, eval)('(' + source + ')');
+        window.folderRoot = window.makeTestDirectory('备份测试');
+        window.showDirectoryPicker = async () => window.folderRoot;
+      }, memoryDirectory.toString());
+    }
+
+    await t.test('folder is the default and export, import and update locations survive reload independently', async () => {
+      const p = await page();
+      assert.equal(await p.value('backupFormat'), 'folder');
+      assert.equal(await p.run(() => document.getElementById('exportData').textContent), '导出文件夹');
+      const data = await p.state();
+      await p.run(async data => {
+        const root = await navigator.storage.getDirectory();
+        window.exportParent = await root.getDirectoryHandle('导出位置', { create: true });
+        window.importDirectory = await root.getDirectoryHandle('另一个导入目录', { create: true });
+        await TianDaoFolder.writeDirectory(window.importDirectory, data, 'source');
+        window.showDirectoryPicker = async () => window.exportParent;
+      }, data);
+      await p.click('[data-tab="entry"]');
+      await p.click('#backupRemindExport');
+      await until(() => p.run(key => !!JSON.parse(localStorage.getItem(key + '.backup-status'))?.lastSavedAt, storageKey));
+      const exportedName = await p.run(key => JSON.parse(localStorage.getItem(key + '.backup-status')).lastSavedName.slice(0, -1), storageKey);
+      assert.equal(exportedName, '天道酬勤');
+      await p.run(() => { window.showDirectoryPicker = async options => {
+        window.firstImportStart = options.startIn?.name;
+        return window.importDirectory;
+      }; });
+      await p.click('#importBtn');
+      await until(() => p.run(() => !!document.querySelector('[data-folder-document]')));
+      assert.equal(await p.run(() => window.firstImportStart), exportedName);
+      await p.click('#detailClose');
+      await p.set('backupFormat', 'file', 'change');
+      assert.equal(await p.run(() => document.getElementById('exportData').textContent), '导出文件');
+      assert.equal(await p.visible('updateFolder'), false);
+      assert.equal(await p.visible('folderPathControl'), false);
+      assert.equal(await p.visible('folderImportPathControl'), false);
+      await p.reload();
+      assert.equal(await p.value('backupFormat'), 'folder');
+      await until(() => p.run(() => document.getElementById('folderImportLocation').textContent === '导入位置：另一个导入目录'));
+      await p.run(() => {
+        window.locationCalls = [];
+        window.showDirectoryPicker = async options => {
+          window.locationCalls.push({ id: options.id, name: options.startIn?.name, mode: options.mode, kind: options.startIn?.kind });
+          throw new DOMException('Cancelled', 'AbortError');
+        };
+      });
+      await p.click('#exportData');
+      await until(async () => !await p.visible('detailModal'));
+      await p.click('#importBtn');
+      await until(() => p.run(() => !!document.querySelector('[data-folder-document]')));
+      assert.match(await p.run(() => document.getElementById('detailBody').textContent), /另一个导入目录/);
+      assert.deepEqual((await p.state()).notes, data.notes, 'opening the remembered folder only offers document selection');
+      await p.click('#detailClose');
+      assert.deepEqual(await p.run(() => window.locationCalls), [
+        { id: 'tiandao-export-folder', name: '导出位置', mode: 'readwrite', kind: 'directory' }
+      ]);
+      await p.click('#updateFolder');
+      await until(() => p.run(() => document.getElementById('detailTitle').textContent === '检查文件夹更新'));
+      assert.equal(await p.run(() => window.locationCalls.length), 1, 'updates reuse the persisted directory without a picker');
+      await p.click('#detailFolderAction');
+      await until(async () => !await p.visible('detailModal'));
+      assert.equal(await p.run(async () => {
+        const parent = await (await navigator.storage.getDirectory()).getDirectoryHandle('导出位置');
+        const versions = await (await parent.getDirectoryHandle('天道酬勤')).getDirectoryHandle('版本');
+        let count = 0; for await (const name of versions.keys()) { count++; } return count;
+      }), 2);
+      await p.click('#changeFolderPath');
+      await until(async () => !await p.visible('detailModal'));
+      assert.deepEqual(await p.run(() => window.locationCalls.at(-1)),
+        { id: 'tiandao-update-folder', name: exportedName, mode: 'readwrite', kind: 'directory' });
+      assert.equal(await p.run(() => document.getElementById('folderUpdateLocation').textContent), '更新位置：' + exportedName);
+      assert.equal((await p.state()).entries.length, data.entries.length, 'remembering or cancelling does not import');
+      await p.close();
+    });
+
+    await t.test('changing the import path opens documents first, preserves cancelled paths and survives reload', async () => {
+      const p = await page();
+      const original = await p.state();
+      await p.run(async data => {
+        const root = await navigator.storage.getDirectory();
+        window.firstImport = await root.getDirectoryHandle('原导入目录', { create: true });
+        window.nextImport = await root.getDirectoryHandle('新导入目录', { create: true });
+        window.invalidImport = await root.getDirectoryHandle('无效导入目录', { create: true });
+        await TianDaoFolder.writeDirectory(window.firstImport, data, 'source');
+        data.notes = [{ id: 'new-folder-note', text: '从新目录选择的备注', date: '2026-11-16', createdAt: '2026-11-16T08:00:00Z' }];
+        await TianDaoFolder.writeDirectory(window.nextImport, data, 'source');
+        window.showDirectoryPicker = async () => window.firstImport;
+      }, original);
+      await p.click('[data-tab="entry"]'); await p.click('#importBtn');
+      await until(() => p.run(() => !!document.querySelector('[data-folder-document]')));
+      await p.click('#detailClose');
+      await p.run(() => { window.showDirectoryPicker = async () => { throw new DOMException('Cancelled', 'AbortError'); }; });
+      await p.click('#changeImportFolderPath');
+      await until(async () => !await p.visible('detailModal'));
+      assert.equal(await p.run(() => document.getElementById('folderImportLocation').textContent), '导入位置：原导入目录');
+      await p.run(() => { window.showDirectoryPicker = async () => window.invalidImport; });
+      await p.click('#changeImportFolderPath');
+      await until(async () => !await p.visible('detailModal'));
+      assert.equal(await p.run(() => document.getElementById('folderImportLocation').textContent), '导入位置：原导入目录');
+      await p.run(() => { window.showDirectoryPicker = async options => { window.importPickerMode = options.mode; return window.nextImport; }; });
+      await p.click('#changeImportFolderPath');
+      await until(() => p.run(() => !!document.querySelector('[data-folder-document]')));
+      assert.equal(await p.run(() => window.importPickerMode), 'read');
+      assert.equal(await p.run(() => document.getElementById('folderImportLocation').textContent), '导入位置：新导入目录');
+      assert.deepEqual((await p.state()).notes, original.notes);
+      await p.click('[data-folder-select="none"]');
+      await p.run(() => Array.from(document.querySelectorAll('.folder-document')).find(item => item.textContent.includes('2026-11-16')).querySelector('input').click());
+      await p.click('#detailFolderAction');
+      await until(() => p.run(() => document.getElementById('detailTitle').textContent === '检查导入数据'));
+      assert.deepEqual((await p.state()).notes, original.notes);
+      await p.click('#detailUploadImport');
+      assert.equal((await p.state()).notes.filter(note => note.id === 'new-folder-note').length, 1);
+      await p.reload();
+      await until(() => p.run(() => document.getElementById('folderImportLocation').textContent === '导入位置：新导入目录'));
+      await p.click('[data-tab="entry"]');
+      await p.run(() => {
+        window.pickerCalls = 0;
+        window.showDirectoryPicker = async () => { window.pickerCalls++; throw new Error('Unexpected picker'); };
+      });
+      await p.click('#importBtn');
+      await until(() => p.run(() => !!document.querySelector('[data-folder-document]')));
+      assert.equal(await p.run(() => window.pickerCalls), 0);
+      assert.match(await p.run(() => document.getElementById('detailBody').textContent), /新导入目录/);
+      assert.equal((await p.state()).notes.filter(note => note.id === 'new-folder-note').length, 1);
+      await p.close();
+    });
+
+    await t.test('remembered folder imports request only read permission and never write or reopen a picker', async () => {
+      const p = await page(); await folderSetup(p);
+      const original = await p.state();
+      await p.run(async data => { await TianDaoFolder.writeDirectory(window.folderRoot, data, 'source'); }, original);
+      await p.click('[data-tab="entry"]'); await p.click('#importBtn');
+      await until(() => p.run(() => !!document.querySelector('[data-folder-document]')));
+      await p.click('#detailClose');
+      await p.run(() => {
+        window.permission = 'prompt'; window.permissionReply = 'denied'; window.permissionRequests = 0; window.pickerCalls = 0;
+        window.folderRoot.control.writes = 0;
+        window.folderRoot.queryPermission = async options => { window.queryMode = options.mode; return window.permission; };
+        window.folderRoot.requestPermission = async options => { window.permissionRequests++; window.requestMode = options.mode; return window.permissionReply; };
+        window.showDirectoryPicker = async () => { window.pickerCalls++; throw new Error('Unexpected picker'); };
+      });
+      await p.click('#importBtn');
+      await until(async () => !await p.visible('detailModal'));
+      assert.equal(await p.run(() => window.permissionRequests), 1);
+      assert.deepEqual(await p.run(() => [window.queryMode, window.requestMode]), ['read', 'read']);
+      assert.deepEqual((await p.state()).notes, original.notes);
+      await p.run(() => { window.permissionReply = 'granted'; });
+      await p.click('#importBtn');
+      await until(() => p.run(() => !!document.querySelector('[data-folder-document]')));
+      assert.equal(await p.run(() => window.permissionRequests), 2);
+      assert.deepEqual((await p.state()).notes, original.notes);
+      await p.click('#detailClose');
+      await p.run(() => {
+        window.permission = 'granted';
+        window.folderRoot.getFileHandle = async () => { throw new DOMException('Missing directory', 'NotFoundError'); };
+      });
+      await p.click('#importBtn');
+      await until(async () => !await p.visible('detailModal'));
+      assert.equal(await p.run(() => window.pickerCalls), 0);
+      assert.equal(await p.run(() => window.folderRoot.control.writes), 0);
+      assert.equal(await p.run(() => document.getElementById('folderImportLocation').textContent), '导入位置：备份测试');
+      await p.close();
+    });
+
+    await t.test('first update selects a folder and changing the path persists without writing either backup', async () => {
+      const p = await page();
+      await p.run(async data => {
+        const root = await navigator.storage.getDirectory();
+        window.firstFolder = await root.getDirectoryHandle('原更新目录', { create: true });
+        window.nextFolder = await root.getDirectoryHandle('新更新目录', { create: true });
+        window.emptyFolder = await root.getDirectoryHandle('无效目录', { create: true });
+        await TianDaoFolder.writeDirectory(window.firstFolder, data, 'original');
+        await TianDaoFolder.writeDirectory(window.nextFolder, data, 'original');
+        window.beforeChange = { first: (await TianDaoFolder.readDirectory(window.firstFolder)).raw,
+          next: (await TianDaoFolder.readDirectory(window.nextFolder)).raw };
+        window.pickerCalls = 0;
+        window.showDirectoryPicker = async () => { window.pickerCalls++; return window.firstFolder; };
+      }, await p.state());
+      await p.click('[data-tab="entry"]'); await p.click('#updateFolder');
+      await until(() => p.run(() => document.getElementById('detailTitle').textContent === '检查文件夹更新'));
+      assert.equal(await p.run(() => window.pickerCalls), 1);
+      await p.click('#detailClose');
+      await p.run(() => { window.showDirectoryPicker = async () => window.nextFolder; });
+      await p.click('#changeFolderPath');
+      await until(async () => !await p.visible('detailModal'));
+      assert.equal(await p.run(() => document.getElementById('folderUpdateLocation').textContent), '更新位置：新更新目录');
+      assert.equal(await p.run(async () => (await TianDaoFolder.readDirectory(window.firstFolder)).raw === window.beforeChange.first &&
+        (await TianDaoFolder.readDirectory(window.nextFolder)).raw === window.beforeChange.next), true);
+      await p.run(() => { window.showDirectoryPicker = async () => window.emptyFolder; });
+      await p.click('#changeFolderPath');
+      await until(async () => !await p.visible('detailModal'));
+      assert.equal(await p.run(() => document.getElementById('folderUpdateLocation').textContent), '更新位置：新更新目录');
+      await p.reload();
+      await until(() => p.run(() => document.getElementById('folderUpdateLocation').textContent === '更新位置：新更新目录'));
+      await p.run(() => {
+        window.pickerCalls = 0;
+        window.showDirectoryPicker = async () => { window.pickerCalls++; throw new Error('Unexpected picker'); };
+      });
+      await p.click('#updateFolder');
+      await until(() => p.run(() => document.getElementById('detailTitle').textContent === '检查文件夹更新'));
+      assert.match(await p.run(() => document.getElementById('detailBody').textContent), /新更新目录/);
+      await p.click('#detailFolderAction');
+      await until(async () => !await p.visible('detailModal'));
+      assert.equal(await p.run(() => window.pickerCalls), 0);
+      await p.close();
+    });
+
+    await t.test('remembered update paths request expired permission without opening a picker or writing on denial', async () => {
+      const p = await page(); await folderSetup(p);
+      await p.click('[data-tab="entry"]'); await p.click('#exportData');
+      await until(() => p.run(key => !!JSON.parse(localStorage.getItem(key + '.backup-status'))?.lastSavedAt, storageKey));
+      await p.run(async () => {
+        window.targetFolder = Array.from(window.folderRoot.children.values())[0];
+        window.beforePermission = (await TianDaoFolder.readDirectory(window.targetFolder)).raw;
+        window.permission = 'prompt'; window.permissionReply = 'denied'; window.permissionRequests = 0; window.pickerCalls = 0;
+        window.targetFolder.queryPermission = async options => { window.permissionMode = options.mode; return window.permission; };
+        window.targetFolder.requestPermission = async () => { window.permissionRequests++; return window.permissionReply; };
+        window.showDirectoryPicker = async () => { window.pickerCalls++; throw new Error('Unexpected picker'); };
+      });
+      await p.click('#updateFolder');
+      await until(async () => !await p.visible('detailModal'));
+      assert.equal(await p.run(() => window.permissionRequests), 1);
+      assert.equal(await p.run(() => window.permissionMode), 'readwrite');
+      assert.equal(await p.run(async () => (await TianDaoFolder.readDirectory(window.targetFolder)).raw === window.beforePermission), true);
+      await p.run(() => { window.permissionReply = 'granted'; });
+      await p.click('#updateFolder');
+      await until(() => p.run(() => document.getElementById('detailTitle').textContent === '检查文件夹更新'));
+      await p.click('#detailFolderAction');
+      await until(async () => !await p.visible('detailModal'));
+      assert.equal(await p.run(() => window.permissionRequests), 2);
+      assert.equal(await p.run(() => window.pickerCalls), 0);
+      await p.run(() => {
+        window.permission = 'granted';
+        window.targetFolder.getFileHandle = async () => { throw new DOMException('Missing directory', 'NotFoundError'); };
+      });
+      await p.click('#updateFolder');
+      await until(async () => !await p.visible('detailModal'));
+      assert.equal(await p.run(() => window.permissionRequests), 2);
+      assert.equal(await p.run(() => window.pickerCalls), 0, 'missing remembered folders never silently open a picker');
+      assert.equal(await p.run(() => document.getElementById('folderUpdateLocation').textContent), '更新位置：天道酬勤');
+      await p.close();
+    });
+
+    await t.test('folder export uses a stable name and adds a suffix without overwriting an existing backup', async () => {
+      const p = await page(); await folderSetup(p);
+      await p.click('[data-tab="entry"]'); await p.click('#exportData');
+      await until(() => p.run(key => !!JSON.parse(localStorage.getItem(key + '.backup-status'))?.lastSavedAt, storageKey));
+      await p.run(async () => { window.originalManifest = (await TianDaoFolder.readDirectory(window.folderRoot.children.get('天道酬勤'))).raw; });
+      await p.click('#exportData');
+      await until(() => p.run(key => JSON.parse(localStorage.getItem(key + '.backup-status'))?.lastSavedName === '天道酬勤-1/', storageKey));
+      assert.deepEqual(await p.run(() => Array.from(window.folderRoot.children.keys())), ['天道酬勤', '天道酬勤-1']);
+      assert.equal(await p.run(async () => (await TianDaoFolder.readDirectory(window.folderRoot.children.get('天道酬勤'))).raw === window.originalManifest), true);
+      assert.equal(await p.run(() => document.getElementById('folderUpdateLocation').textContent), '更新位置：天道酬勤-1');
+      await p.close();
+    });
+
+    await t.test('single-file locations are remembered separately and native file import still reviews before applying', async () => {
+      const p = await page();
+      const data = await p.state();
+      await p.set('backupFormat', 'file', 'change');
+      await p.run(async data => {
+        const root = await navigator.storage.getDirectory();
+        window.fileExportParent = await root.getDirectoryHandle('单文件导出位置', { create: true });
+        window.importHandle = await root.getFileHandle('完整备份.json', { create: true });
+        data.host.name = '尚未确认的导入';
+        const writer = await window.importHandle.createWritable();
+        await writer.write(JSON.stringify(data)); await writer.close();
+        window.showDirectoryPicker = async () => window.fileExportParent;
+        window.showOpenFilePicker = async () => [window.importHandle];
+      }, data);
+      await p.click('[data-tab="entry"]'); await p.click('#exportData'); await p.click('#detailDownloadBackup');
+      await until(() => p.run(key => !!JSON.parse(localStorage.getItem(key + '.backup-status'))?.lastSavedAt, storageKey));
+      await p.click('#detailClose');
+      await p.click('#importBtn'); await p.click('#detailChooseImport');
+      await until(() => p.run(() => document.getElementById('detailTitle').textContent === '检查导入数据'));
+      assert.equal((await p.state()).host.name, data.host.name);
+      await p.click('#detailClose'); await p.reload();
+      await p.set('backupFormat', 'file', 'change');
+      await until(() => p.run(() => document.getElementById('backupLocationHint').textContent.includes('完整备份.json')));
+      await p.run(() => {
+        window.locationCalls = [];
+        window.showDirectoryPicker = window.showOpenFilePicker = async options => {
+          window.locationCalls.push({ id: options.id, name: options.startIn?.name });
+          throw new DOMException('Cancelled', 'AbortError');
+        };
+      });
+      await p.click('#exportData'); await p.click('#detailDownloadBackup');
+      await until(() => p.run(() => window.locationCalls.length === 1));
+      await p.click('#detailClose'); await p.click('#importBtn'); await p.click('#detailChooseImport');
+      await until(() => p.run(() => window.locationCalls.length === 2));
+      assert.deepEqual(await p.run(() => window.locationCalls), [
+        { id: 'tiandao-export-file', name: '单文件导出位置' }, { id: 'tiandao-import-file', name: '完整备份.json' }
+      ]);
+      await p.close();
+    });
+
+    await t.test('unavailable location storage does not block pickers or alter backup data', async () => {
+      const p = await page();
+      const result = await p.run(async () => {
+        const memory = TianDaoBackupLocations.create(() => { throw new DOMException('Denied', 'SecurityError'); });
+        await memory.ready;
+        const handle = { name: '本次选择', kind: 'directory' };
+        const saved = await memory.remember('export-folder', handle);
+        return { saved, options: memory.options('export-folder', { mode: 'readwrite' }),
+          importOptions: memory.options('import-folder', { mode: 'read' }) };
+      });
+      assert.equal(result.saved, false);
+      assert.deepEqual(result.options, { mode: 'readwrite', id: 'tiandao-export-folder', startIn: { name: '本次选择', kind: 'directory' } });
+      assert.deepEqual(result.importOptions, { mode: 'read', id: 'tiandao-import-folder' });
+      await p.close();
+    });
+
+    await t.test('folder export and update preserve data and offer conflict choices before writing', async () => {
+      const p = await page();
+      await folderSetup(p);
+      await p.click('[data-tab="entry"]');
+      await p.click('#exportData');
+      await until(() => p.run(key => !!JSON.parse(localStorage.getItem(key + '.backup-status'))?.lastSavedAt, storageKey));
+      assert.equal(await p.visible('detailModal'), false);
+      const initial = await p.run(async () => {
+        window.folderRoot = Array.from(window.folderRoot.children.values())[0];
+        const snapshot = await TianDaoFolder.readDirectory(window.folderRoot);
+        return snapshot.records.map(item => ({ name: item.name, error: item.error }));
+      });
+      assert.ok(initial.some(item => item.name === '属性.json'));
+      assert.ok(initial.some(item => item.name === '日期/2026-11-06.json'));
+      assert.ok(initial.every(item => !item.error));
+      await p.click('#hostName');
+      await p.set('nameInput', '更新文件夹的宿主');
+      await p.click('#nameConfirm');
+      await p.click('#updateFolder');
+      await until(() => p.run(() => document.getElementById('detailTitle').textContent === '检查文件夹更新'));
+      assert.equal(await p.run(() => document.getElementById('detailFolderAction').disabled), true);
+      await p.click('[data-folder-choice="incoming"]');
+      assert.equal(await p.run(() => document.getElementById('detailFolderAction').disabled), false);
+      await p.click('#detailFolderAction');
+      await until(async () => !await p.visible('detailModal'));
+      const updated = await p.run(async () => {
+        const snapshot = await TianDaoFolder.readDirectory(window.folderRoot);
+        return { host: snapshot.records.find(item => item.document.type === 'profile').document.data.host.name,
+          versions: (await window.folderRoot.getDirectoryHandle('版本')).children.size };
+      });
+      assert.equal(updated.host, '更新文件夹的宿主');
+      assert.equal(updated.versions, 2);
+      await p.close();
+    });
+
+    await t.test('selected folder dates import without changing unselected attributes, points or skill baselines', async () => {
+      const p = await page();
+      await folderSetup(p);
+      const before = await p.state();
+      const incoming = structuredClone(before);
+      incoming.host.name = '不应导入的宿主'; incoming.points.attribute = 99; incoming.skills[0].hours = 999;
+      incoming.notes = []; incoming.noteCompletions = []; incoming.notifications = [];
+      incoming.entries = ['2026-11-13', '2026-11-14'].map((date, index) => ({ id: 'folder-' + index, date, startDate: date, endDate: date,
+        start: 60, end: 120, category: '阅读', activity: '按日期导入', level: 'INFO' }));
+      await p.run(async incoming => { await TianDaoFolder.writeDirectory(window.folderRoot, incoming, 'source'); }, incoming);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await p.click('[data-tab="entry"]'); await p.click('#importBtn');
+        await until(() => p.run(() => !!document.querySelector('[data-folder-select="none"]')));
+        await p.click('[data-folder-select="none"]');
+        assert.equal(await p.run(() => document.getElementById('detailFolderAction').disabled), true);
+        await p.run(() => Array.from(document.querySelectorAll('.folder-document')).find(item => item.textContent.includes('2026-11-14')).querySelector('input').click());
+        await p.click('#detailFolderAction');
+        await until(() => p.run(() => document.getElementById('detailTitle').textContent === '检查导入数据'));
+        assert.equal(await p.run(() => !!document.querySelector('input[name="backupImportMode"][value="replace"]')), false);
+        await p.click('#detailUploadImport');
+        assert.equal(await p.visible('detailModal'), false);
+      }
+      const saved = await p.state();
+      assert.equal(saved.entries.length, 1);
+      assert.equal(saved.entries[0].date, '2026-11-14');
+      assert.deepEqual(saved.host, before.host); assert.deepEqual(saved.points, before.points); assert.deepEqual(saved.skills, before.skills);
+      assert.deepEqual(saved.notes, before.notes);
+      await p.click('#importBtn');
+      await until(() => p.run(() => !!document.querySelector('[data-folder-document]')));
+      await p.click('#detailFolderAction');
+      await until(() => p.run(() => document.getElementById('detailTitle').textContent === '检查导入数据'));
+      await p.click('input[name="backupImportMode"][value="replace"]');
+      await p.click('#detailUploadImport');
+      assert.equal((await p.state()).host.name, incoming.host.name);
+      assert.equal((await p.state()).entries.length, 2);
+      await p.close();
+    });
+
+    await t.test('folder failures never claim success and damaged documents remain excluded from partial import', async () => {
+      const p = await page(); await folderSetup(p);
+      await p.run(() => { window.folderRoot.control.failAt = 2; });
+      await p.click('[data-tab="entry"]'); await p.click('#exportData');
+      await until(async () => !await p.visible('detailModal'));
+      assert.equal(await p.run(key => !!JSON.parse(localStorage.getItem(key + '.backup-status'))?.lastSavedAt, storageKey), false);
+      await p.run(async data => {
+        window.folderRoot = window.makeTestDirectory('损坏备份');
+        await TianDaoFolder.writeDirectory(window.folderRoot, data, 'source');
+        const version = await (await window.folderRoot.getDirectoryHandle('版本')).getDirectoryHandle('source');
+        (await version.getFileHandle('属性.json')).contents = '{broken';
+      }, await p.state());
+      await p.click('#importBtn');
+      await until(() => p.run(() => !!document.querySelector('.folder-document.invalid')));
+      assert.equal(await p.run(() => document.querySelector('.folder-document.invalid input').disabled), true);
+      await p.click('#detailFolderAction');
+      await until(() => p.run(() => document.getElementById('detailTitle').textContent === '检查导入数据'));
+      assert.equal(await p.run(() => !!document.querySelector('input[value="replace"]')), false);
+      await p.click('#detailFolderBack');
+      assert.equal(await p.run(() => !!document.querySelector('.folder-document.invalid')), true);
+      await p.close();
+    });
+
+    await t.test('folder ZIP export and directory file input work without directory picker support', async () => {
+      const p = await page();
+      await p.run(() => {
+        window.showDirectoryPicker = undefined;
+        HTMLAnchorElement.prototype.click = function () { window.folderDownloadName = this.download; };
+      });
+      await p.click('[data-tab="entry"]'); await p.click('#exportData');
+      await until(() => p.run(() => !!window.folderDownloadName));
+      assert.equal(await p.run(() => window.folderDownloadName), '天道酬勤.zip');
+      assert.equal(await p.run(key => !!JSON.parse(localStorage.getItem(key + '.backup-status'))?.lastSavedAt, storageKey), false);
+      await p.run(() => { document.getElementById('importFolderFiles').click = function () {}; });
+      await p.click('#importBtn');
+      await p.run(data => {
+        const bundle = TianDaoFolder.packageFiles(data, 'source');
+        const transfer = new DataTransfer();
+        for (const [path, text] of bundle.files) {
+          const file = new File([text], path.split('/').at(-1), { type: 'application/json' });
+          Object.defineProperty(file, 'webkitRelativePath', { value: '备份/' + path });
+          transfer.items.add(file);
+        }
+        const input = document.getElementById('importFolderFiles'); input.files = transfer.files;
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }, await p.state());
+      await until(() => p.run(() => !!document.querySelector('[data-folder-document]')));
+      assert.equal(await p.run(() => document.querySelectorAll('.folder-document.invalid').length), 0);
+      await p.close();
+    });
+
     await t.test('file backups track success, business changes, and persistent reminder preferences', async () => {
       const p = await page();
+      await p.set('backupFormat', 'file', 'change');
       await p.run(() => {
         window.showDirectoryPicker = async () => ({ getFileHandle: async (name, options) => {
           if (!options) { throw new DOMException('Missing', 'NotFoundError'); }
@@ -560,6 +1145,7 @@ test('browser persistence and refresh recovery', { skip: !browserPath, timeout: 
 
     await t.test('cancelled writes and unconfirmed downloads never claim a successful backup', async () => {
       const p = await page();
+      await p.set('backupFormat', 'file', 'change');
       await p.click('[data-tab="entry"]');
       await p.run(() => { window.showDirectoryPicker = async () => { throw new DOMException('Cancelled', 'AbortError'); }; });
       await p.click('#exportData');
@@ -651,6 +1237,7 @@ test('browser persistence and refresh recovery', { skip: !browserPath, timeout: 
     });
     await t.test('clipboard fallback remains usable inside the focused export dialog', async () => {
       const p = await page();
+      await p.set('backupFormat', 'file', 'change');
       await p.run(() => {
         Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
         document.execCommand = command => {

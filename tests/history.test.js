@@ -32,6 +32,35 @@ test('monthly trends respect leap days, adjacent months and skill filters', () =
   assert.equal(history.trend(state, '2024-02-10', 'month', null).totalHours, 4);
 });
 
+test('regressions subtract from trends once, remain searchable, and respect skill and period boundaries', () => {
+  const loss = { id: 'loss', skillId: 'read', skillName: '阅读', hours: -2.5, completedAt: '2026-11-03T12:00:00' };
+  const state = { skills: [{ id: 'read', name: '阅读' }],
+    entries: [entry('practice', '2026-11-03', '2026-11-03', 0, 60)],
+    notes: [{ id: 'loss', date: '2026-11-03', text: '修正时间' }],
+    noteCompletions: [loss, loss,
+      { ...loss, id: 'credit', hours: 0.5 },
+      { ...loss, id: 'other-skill', skillId: 'code', skillName: '编程', hours: -10 },
+      { ...loss, id: 'previous', hours: -3, completedAt: '2026-11-01T12:00:00' }] };
+  const result = history.trend(state, '2026-11-06', 'week', '阅读');
+  assert.equal(result.logHours, 1);
+  assert.equal(result.noteHours, 0.5);
+  assert.equal(result.regressionHours, -2.5);
+  assert.equal(result.totalHours, -1);
+  assert.equal(result.previousHours, -3);
+  assert.equal(result.changeHours, 2);
+  assert.equal(result.activeDays, 1, 'deduction does not erase a day with actual practice');
+  assert.equal(result.days[1].totalHours, -1);
+  assert.equal(history.trend(state, '2026-11-06', 'month', '阅读').regressionHours, -5.5);
+  const regressions = history.search(state, { kind: 'regression', skill: '阅读', startDate: '2026-11-02' });
+  assert.equal(regressions.rows.length, 1);
+  assert.equal(regressions.rows[0].hours, -2.5);
+  assert.equal(regressions.rows[0].kind, 'regression');
+  assert.equal(history.search(state, { kind: 'note' }).total, 0);
+  state.notes = [];
+  assert.equal(history.search(state, { kind: 'regression', query: '退步' }).total, 3);
+  assert.equal(history.trend(state, '2026-11-06', 'week', '阅读').totalHours, -1, 'deleting a note retains its adjustment');
+});
+
 test('search combines keywords, skill and intersecting date ranges without mutating records', () => {
   const state = { entries: [entry('cross', '2026-11-01', '2026-11-02', 1380, 60, '编程', 'Practice JavaScript'),
     entry('other', '2026-11-02', '2026-11-02', 60, 120, '阅读')] };

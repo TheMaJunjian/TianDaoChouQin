@@ -252,7 +252,7 @@
     await writeFile(handle, text);
     return candidate;
   }
-  async function writeFile(handle, text, expectedText) {
+  async function writeFile(handle, text, expectedText, beforeCommit) {
     // 在打开写入流前和提交前复查，发现文件在预览后变化就中止。
     if (expectedText !== undefined && await (await handle.getFile()).text() !== expectedText) {
       throw new Error('文件在检查后已发生变化，请重新选择并检查。');
@@ -260,6 +260,7 @@
     var writable = await handle.createWritable();
     try {
       await writable.write(text);
+      if (beforeCommit) { await beforeCommit(); }
       if (expectedText !== undefined && await (await handle.getFile()).text() !== expectedText) {
         throw new Error('文件在检查后已发生变化，更新已取消。');
       }

@@ -39,7 +39,7 @@
   }
   function summarize(state, start, end, skill) {
     var days = [];
-    for (var day = start; day < end; day += DAY) { days.push({ date: dateString(day), logHours: 0, noteHours: 0 }); }
+    for (var day = start; day < end; day += DAY) { days.push({ date: dateString(day), logHours: 0, noteHours: 0, regressionHours: 0 }); }
     (state.entries || []).forEach(function (entry) {
       if (skill !== null && (entry.category || '') !== skill) { return; }
       var range = bounds(entry);
@@ -57,16 +57,19 @@
       if (skill !== null && skillName(state, completion) !== skill) { return; }
       var day = dateMinute(completedDate(completion.completedAt));
       var hours = Number(completion.hours);
-      if (day >= start && day < end && Number.isFinite(hours) && hours > 0) { days[(day - start) / DAY].noteHours += hours; }
+      if (day >= start && day < end && Number.isFinite(hours)) {
+        days[(day - start) / DAY][hours < 0 ? 'regressionHours' : 'noteHours'] += hours;
+      }
     });
-    var result = { days: days, logHours: 0, noteHours: 0, activeDays: 0 };
+    var result = { days: days, logHours: 0, noteHours: 0, regressionHours: 0, activeDays: 0 };
     days.forEach(function (day) {
-      day.totalHours = day.logHours + day.noteHours;
+      day.totalHours = day.logHours + day.noteHours + day.regressionHours;
       result.logHours += day.logHours;
       result.noteHours += day.noteHours;
-      if (day.totalHours > 0) { result.activeDays++; }
+      result.regressionHours += day.regressionHours;
+      if (day.logHours + day.noteHours > 0) { result.activeDays++; }
     });
-    result.totalHours = result.logHours + result.noteHours;
+    result.totalHours = result.logHours + result.noteHours + result.regressionHours;
     return result;
   }
   function trend(state, anchor, mode, skill) {
@@ -109,11 +112,22 @@
       (state.notes || []).forEach(function (note) {
         if (note.deletedAt && !filters.includeTrash) { return; }
         var completion = completions.get(note.id);
+        if (completion && completion.hours < 0) { return; }
         var day = dateMinute(note.date);
         if (!Number.isFinite(day)) { return; }
         accept({ id: note.id, key: 'note:' + note.id, kind: 'note', trash: !!note.deletedAt, date: note.date,
           text: note.text, skill: completion ? skillName(state, completion) : '', hours: completion ? completion.hours : 0,
           completed: !!completion, sort: day, jumpDate: note.date }, day, day + DAY);
+      });
+    }
+    if (!filters.kind || filters.kind === 'all' || filters.kind === 'regression') {
+      completions.forEach(function (item) {
+        if (!(Number(item.hours) < 0)) { return; }
+        var date = completedDate(item.completedAt);
+        var day = dateMinute(date);
+        if (!Number.isFinite(day)) { return; }
+        accept({ id: item.id, key: 'regression:' + item.id, kind: 'regression', trash: false, date: date,
+          text: '退步', skill: skillName(state, item), hours: Number(item.hours), sort: day }, day, day + DAY);
       });
     }
     matches.sort(function (a, b) { return b.sort - a.sort || a.key.localeCompare(b.key); });

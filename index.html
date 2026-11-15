@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
 <title>天道酬勤 · 系统面板</title>
-<link rel="stylesheet" href="styles.css?v=20261106-3">
+<link rel="stylesheet" href="styles.css?v=20261115-4">
 </head>
 <body>
 <div class="scanline"></div>
@@ -177,27 +177,55 @@
       </form>
     </section>
 
-    <section class="card" data-hint="宿主的所有操作都会自动保存到本机浏览器，建议定期导出备份。">
-      <h2>数据管理</h2>
-      <p class="backup-status" id="backupStatus" role="status"></p>
-      <p class="backup-meta" id="backupLastSaved"></p>
-      <label class="backup-preference"><input type="checkbox" id="backupReminders" checked>有新改动时显示备份提醒</label>
-      <div class="backup-reminder hidden" id="backupReminder">
-        <span>有尚未备份到文件的数据。</span>
-        <button type="button" class="btn ghost" id="backupRemindExport">现在导出</button>
-        <button type="button" class="btn ghost" id="backupReminderDismiss">本次稍后</button>
-      </div>
-      <div class="backup-download hidden" id="backupDownloadPending">
-        <p id="backupDownloadMessage"></p>
-        <button type="button" class="btn ghost" id="backupConfirmDownloaded">确认已保存下载文件</button>
-      </div>
-      <div class="log-actions">
-        <button type="button" class="btn ghost" id="exportData">导出数据</button>
-        <button type="button" class="btn ghost" id="importBtn">导入数据</button>
-        <input type="file" id="importFile" accept=".json,.txt,application/json,text/plain" class="hidden">
-        <button type="button" class="btn ghost danger" id="resetAll">重置全部数据</button>
-      </div>
-    </section>
+    <div class="entry-side-column">
+      <section class="card" data-hint="宿主的所有操作都会自动保存到本机浏览器，建议定期导出备份。">
+        <h2>数据管理</h2>
+        <p class="backup-status" id="backupStatus" role="status"></p>
+        <p class="backup-meta" id="backupLastSaved"></p>
+        <label class="backup-preference"><input type="checkbox" id="backupReminders" checked>有新改动时显示备份提醒</label>
+        <div class="backup-reminder hidden" id="backupReminder">
+          <span>有尚未备份到文件的数据。</span>
+          <button type="button" class="btn ghost" id="backupRemindExport">现在导出</button>
+          <button type="button" class="btn ghost" id="backupReminderDismiss">本次稍后</button>
+        </div>
+        <div class="backup-download hidden" id="backupDownloadPending">
+          <p id="backupDownloadMessage"></p>
+          <button type="button" class="btn ghost" id="backupConfirmDownloaded">确认已保存下载文件</button>
+        </div>
+        <label class="backup-format"><span>备份形式</span><select id="backupFormat" aria-label="备份形式">
+          <option value="folder" selected>文件夹（默认）</option>
+          <option value="file">单文件（JSON）</option>
+        </select></label>
+        <div class="log-actions folder-backup-actions">
+          <button type="button" class="btn ghost" id="exportData">导出文件夹</button>
+          <button type="button" class="btn ghost" id="updateFolder">更新文件夹</button>
+          <button type="button" class="btn ghost" id="importBtn">从文件夹导入</button>
+          <input type="file" id="importFolderFiles" webkitdirectory multiple class="hidden">
+          <input type="file" id="importFile" accept=".json,.txt,application/json,text/plain" class="hidden">
+        </div>
+        <div class="backup-path-control" id="folderPathControl">
+          <p class="backup-meta" id="folderUpdateLocation" role="status">更新位置：尚未选择</p>
+          <button type="button" class="btn ghost" id="changeFolderPath" aria-label="更改更新文件夹路径">更改路径</button>
+        </div>
+        <div class="backup-path-control" id="folderImportPathControl">
+          <p class="backup-meta" id="folderImportLocation" role="status">导入位置：尚未选择</p>
+          <button type="button" class="btn ghost" id="changeImportFolderPath" aria-label="更改导入文件夹路径">更改路径</button>
+        </div>
+        <p class="backup-meta" id="backupLocationHint" role="status">更新和导入直接使用上次路径，首次使用时选择文件夹。</p>
+        <div class="log-actions">
+          <button type="button" class="btn ghost danger" id="resetAll">重置全部数据</button>
+        </div>
+      </section>
+
+      <section class="card" id="regressionCard" data-hint="填写需扣减的小时数，无需负号，提交后自动扣减。记录会单独显示在结算页的退步记录中。">
+        <h2>退步</h2>
+        <form id="regressionForm" class="entry-form" autocomplete="off" novalidate>
+          <label class="wide"><span>时间（小时）</span><textarea id="regressionHours" class="single-line-input" rows="1" wrap="off" inputmode="decimal" autocomplete="off" aria-label="退步时间（小时）" aria-multiline="false" placeholder="例如 1.5"></textarea></label>
+          <label class="wide"><span>技能</span><select id="regressionSkill" aria-label="退步技能"></select></label>
+          <button type="submit" class="btn" id="regressionSubmit">提交</button>
+        </form>
+      </section>
+    </div>
   </section>
 
   <!-- ========== 结算 ========== -->
@@ -246,6 +274,10 @@
           <button type="button" class="btn ghost danger" id="clearNotes">移入回收站</button>
         </div>
       </section>
+      <section class="card" data-hint="退步单独记录扣减时间与技能，按提交时间排列。">
+        <h2>退步记录 · <span id="regressionCountLabel"></span></h2>
+        <div class="log-view regression-view" id="regressionView" aria-live="polite"></div>
+      </section>
     </div>
 
     <section class="card" data-hint="技能统计汇总宿主全部复写记录，投入的小时会直接抬升对应技能等级。">
@@ -265,15 +297,15 @@
       </div>
       <p class="review-description" id="reviewRange"></p>
       <div class="review-summary" id="reviewSummary" aria-live="polite"></div>
-      <p class="review-legend"><span>日志时长</span><span>备注补记</span></p>
+      <p class="review-legend"><span>日志时长</span><span>备注补记</span><span>退步扣减</span></p>
       <div class="review-chart-scroll"><ol class="review-chart" id="reviewChart" aria-label="每日投入小时"></ol></div>
-      <p class="review-description">日志按实际发生日期分配；备注补记按完成日期统计，删除备注仍保留已计入的小时。趋势不受下方关键词影响。</p>
+      <p class="review-description">日志按实际发生日期分配；备注补记与退步扣减按提交日期统计，删除备注仍保留已计入的小时。趋势不受下方关键词影响。</p>
     </section>
     <section class="card" data-hint="跨日期搜索日志和备注。多个关键词以空格分开，匹配包含所有关键词的记录。日志按时段相交筛选，备注按记录日期筛选。">
       <h2>查找记录</h2>
       <div class="review-controls">
         <label class="review-query">关键词<input type="search" id="reviewQuery" placeholder="内容或技能，空格分隔多个词" autocomplete="off"></label>
-        <label>记录类型<select id="reviewKind"><option value="all">日志与备注</option><option value="entry">日志</option><option value="note">备注</option></select></label>
+        <label>记录类型<select id="reviewKind"><option value="all">全部记录</option><option value="entry">日志</option><option value="note">备注</option><option value="regression">退步</option></select></label>
         <label>开始日期<input type="date" id="reviewStart"></label>
         <label>结束日期<input type="date" id="reviewEnd"></label>
       </div>
@@ -414,7 +446,7 @@
     <p class="note-complete-text" id="noteCompleteText"></p>
     <div class="note-complete-fields">
       <label><span>计入技能</span><select id="noteCompleteSkill" aria-label="计入技能"><option value="">请选择技能</option></select></label>
-      <label><span>投入小时</span><textarea id="noteCompleteHours" class="single-line-input" rows="1" wrap="off" inputmode="decimal" autocomplete="off" aria-label="投入小时" aria-multiline="false" placeholder="例如 1.5"></textarea></label>
+      <label><span id="noteCompleteHoursLabel">投入小时</span><textarea id="noteCompleteHours" class="single-line-input" rows="1" wrap="off" inputmode="decimal" autocomplete="off" aria-labelledby="noteCompleteHoursLabel" aria-multiline="false" placeholder="例如 1.5"></textarea></label>
     </div>
     <p class="hint hidden" id="noteCompleteEmpty">还没有可选技能，请先添加技能。</p>
     <div class="modal-actions">
@@ -436,6 +468,8 @@
       <button type="button" class="btn ghost hidden" id="detailPasteImport">粘贴</button>
       <button type="button" class="btn hidden" id="detailUploadImport">上传数据</button>
       <button type="button" class="btn ghost hidden" id="detailChooseImport">选择文件</button>
+      <button type="button" class="btn ghost hidden" id="detailFolderBack">重新选择文档</button>
+      <button type="button" class="btn hidden" id="detailFolderAction">检查所选文档</button>
       <button type="button" class="btn ghost danger hidden" id="detailTrashClear">清空回收站</button>
       <button type="button" class="btn ghost hidden" id="detailAchievementToggle">隐藏</button>
       <button type="button" class="btn" id="detailClose">关闭</button>
@@ -457,11 +491,13 @@
   </div>
 </div>
 
-<script src="backup.js?v=20261028-3"></script>
+<script src="backup.js?v=20261115-1"></script>
+<script src="folder-backup.js?v=20261115-1"></script>
+<script src="backup-locations.js?v=20261115-1"></script>
 <script src="storage.js?v=20261106-2"></script>
 <script src="backup-status.js?v=20261106-2"></script>
-<script src="history.js?v=20261106-2"></script>
+<script src="history.js?v=20261115-1"></script>
 <script src="dialogs.js?v=20261106-2"></script>
-<script src="app.js?v=20261106-2"></script>
+<script src="app.js?v=20261115-4"></script>
 </body>
 </html>

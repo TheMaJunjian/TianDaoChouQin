@@ -125,6 +125,8 @@
         noteCompleteSkillId: '',
         noteEditDraft: null,
         noteCompleteDraft: null,
+        regressionSkillId: '',
+        regressionDraft: null,
         nameDraft: null,
         taskSubmitDraft: null,
         formDrafts: {},
@@ -169,6 +171,8 @@
   var backupBusy = false;
   var pendingImport = null;
   var pendingFileUpdate = null;
+  var pendingFolderImport = null;
+  var pendingFolderUpdate = null;
   var importMode = 'merge';
   var importReadVersion = 0;
   var pendingNoteId = null;
@@ -234,10 +238,14 @@
     'nameModal', 'nameInput', 'nameConfirm', 'nameCancel',
     'confirmModal', 'confirmMessage', 'confirmCancel', 'confirmAccept',
     'noteCompleteModal', 'noteCompleteForm', 'noteCompleteText', 'noteCompleteSkill', 'noteCompleteHours', 'noteCompleteCancel', 'noteCompleteAccept', 'noteCompleteEmpty', 'noteCompleteAddSkill',
+    'regressionForm', 'regressionHours', 'regressionSkill', 'regressionSubmit', 'regressionView', 'regressionCountLabel',
     'noteEditModal', 'noteEditForm', 'noteEditMeta', 'noteEditInput', 'noteEditCancel', 'noteEditSave',
     'taskSubmitModal', 'taskSubmitTitle', 'taskSubmitBody', 'taskProgress', 'taskProgressRuler', 'taskProgressFill', 'taskProgressCursor', 'taskProgressPreviousCursor', 'taskSubmitCancel', 'taskSubmitConfirm',
     'detailModal', 'detailTitle', 'detailBody', 'detailClose', 'detailFillBlank', 'detailAchievementToggle',
     'detailCopyBackup', 'detailDownloadBackup', 'detailUpdateBackup', 'detailPasteImport', 'detailUploadImport', 'detailChooseImport', 'detailTrashClear',
+    'backupFormat', 'backupLocationHint', 'updateFolder', 'folderPathControl', 'folderUpdateLocation', 'changeFolderPath',
+    'folderImportPathControl', 'folderImportLocation', 'changeImportFolderPath',
+    'importFolderFiles', 'detailFolderBack', 'detailFolderAction',
     'focusLabel', 'focusPercent', 'focusFill', 'focusHint',
     'attrWeight', 'attrEdu', 'attrTalent', 'attrProperty', 'attrStatus',
     'polishPercent', 'polishFill',
@@ -284,7 +292,7 @@
         event.isComposing || event.keyCode === 229) { return; }
     event.preventDefault();
     var form = event.target.form;
-    if (form && ['skillForm', 'sideQuestForm', 'noteCompleteForm'].indexOf(form.id) >= 0) {
+    if (form && ['skillForm', 'sideQuestForm', 'noteCompleteForm', 'regressionForm'].indexOf(form.id) >= 0) {
       if (form.requestSubmit) { form.requestSubmit(); }
       else { form.querySelector('button[type="submit"]').click(); }
     }
@@ -590,7 +598,7 @@
       merged.noteCompletions = Array.isArray(parsed.noteCompletions) ? parsed.noteCompletions.filter(function (item) {
         return item && typeof item.id === 'string' && item.id && typeof item.skillId === 'string' && item.skillId &&
           typeof item.skillName === 'string' && item.skillName.trim() && Number.isFinite(Number(item.hours)) &&
-          Number(item.hours) > 0 && Number(item.hours) <= MAX_MANUAL_SKILL_HOURS &&
+          Number(item.hours) !== 0 && Math.abs(Number(item.hours)) <= MAX_MANUAL_SKILL_HOURS &&
           typeof item.completedAt === 'string' && Number.isFinite(Date.parse(item.completedAt));
       }).map(function (item) { return Object.assign({}, item, { hours: Number(item.hours) }); }) : [];
       merged.trashEntries = Array.isArray(parsed.trashEntries) ? parsed.trashEntries.map(function (item) {
@@ -714,6 +722,7 @@
         merged.ui.noteScrollTops[filter] = Number.isFinite(top) ? Math.max(0, top) : 0;
       });
       merged.ui.noteCompleteSkillId = typeof parsedUi.noteCompleteSkillId === 'string' ? parsedUi.noteCompleteSkillId : '';
+      merged.ui.regressionSkillId = typeof parsedUi.regressionSkillId === 'string' ? parsedUi.regressionSkillId : '';
       merged.ui.nameDraft = typeof parsedUi.nameDraft === 'string' ? parsedUi.nameDraft : null;
       ['noteEditDraft', 'noteCompleteDraft'].forEach(function (key) {
         var draft = parsedUi[key];
@@ -722,6 +731,17 @@
         merged.ui[key] = {};
         fields.forEach(function (field) { merged.ui[key][field] = typeof draft[field] === 'string' ? draft[field] : ''; });
       });
+      var regressionDraft = parsedUi.regressionDraft;
+      if (parsedUi.noteCompleteDraft && parsedUi.noteCompleteDraft.mode === 'regression') {
+        regressionDraft = regressionDraft || parsedUi.noteCompleteDraft;
+        merged.ui.noteCompleteDraft = null;
+      }
+      if (regressionDraft && typeof regressionDraft.id === 'string' && regressionDraft.id) {
+        merged.ui.regressionDraft = {};
+        ['id', 'skillId', 'hours'].forEach(function (field) {
+          merged.ui.regressionDraft[field] = typeof regressionDraft[field] === 'string' ? regressionDraft[field] : '';
+        });
+      }
       var taskDraft = parsedUi.taskSubmitDraft;
       if (taskDraft && ['main', 'side'].indexOf(taskDraft.kind) >= 0 && Number.isFinite(Number(taskDraft.progress))) {
         merged.ui.taskSubmitDraft = {
@@ -743,7 +763,7 @@
       ['startDate', 'endDate', 'anchor'].forEach(function (key) {
         if (isValidDateString(review[key])) { merged.ui.review[key] = review[key]; }
       });
-      merged.ui.review.kind = ['all', 'entry', 'note'].includes(review.kind) ? review.kind : 'all';
+      merged.ui.review.kind = ['all', 'entry', 'note', 'regression'].includes(review.kind) ? review.kind : 'all';
       merged.ui.review.period = review.period === 'month' ? 'month' : 'week';
       merged.ui.review.includeTrash = review.includeTrash === true;
       merged.ui.review.page = Math.max(0, Math.floor(Number(review.page) || 0));
@@ -1051,7 +1071,7 @@
       if (control.form.id === 'entryForm' && control === el.entrySubmit) {
         return { start: el.category, submit: el.entryActions };
       }
-      if (['skillForm', 'sideQuestForm'].indexOf(control.form.id) >= 0) {
+      if (['skillForm', 'sideQuestForm', 'regressionForm'].indexOf(control.form.id) >= 0) {
         return { start: control.form.querySelector('input, select, textarea'), submit: control };
       }
       return null;
@@ -1067,7 +1087,7 @@
       }
       return null;
     }
-    if (['skillForm', 'sideQuestForm'].indexOf(control.form.id) < 0) { return null; }
+    if (['skillForm', 'sideQuestForm', 'regressionForm'].indexOf(control.form.id) < 0) { return null; }
     return {
       start: control,
       submit: control.form.querySelector('button[type="submit"]')
@@ -1575,6 +1595,7 @@
 
   function captureFormDrafts() {
     Object.keys(FORM_DRAFT_FIELDS).forEach(captureFormDraft);
+    captureRegressionDraft();
   }
 
   function captureDialogDrafts() {
@@ -1615,6 +1636,10 @@
       lastSkillLevel = el.skillLevel.value;
       el.skillLevelWrap.classList.toggle('hidden', el.skillMode.value !== 'level');
       el.skillHoursWrap.classList.toggle('hidden', el.skillMode.value === 'level');
+      var regression = state.ui.regressionDraft;
+      if (regression && completionForNote(regression.id)) { state.ui.regressionDraft = null; regression = null; }
+      el.regressionHours.value = regression ? regression.hours : '';
+      renderRegressionSkills(regression ? regression.skillId : state.ui.regressionSkillId);
 
       closeNameModal();
       closeNoteEditModal();
@@ -1649,6 +1674,10 @@
       if (['nameInput', 'noteEditInput', 'noteCompleteHours', 'noteCompleteSkill'].indexOf(field) >= 0) {
         if (field === 'noteCompleteSkill') { state.ui.noteCompleteSkillId = el.noteCompleteSkill.value; }
         saveDialogDrafts();
+      }
+      if (field === 'regressionHours' || field === 'regressionSkill') {
+        captureRegressionDraft();
+        persistUi();
       }
     });
   });
@@ -2177,7 +2206,7 @@
     }, 0);
   }
 
-  /* 技能实际小时 = 手动基准 + 时间记录 + 备注完成小时。 */
+  /* 技能实际小时 = 手动基准 + 时间记录 + 备注完成小时（含负数退步）。 */
   function entryHoursFor(name) {
     var key = normalize(name);
     var minutes = state.entries.reduce(function (sum, e) {
@@ -2398,6 +2427,9 @@
     el.detailPasteImport.classList.add('hidden');
     el.detailUploadImport.classList.add('hidden');
     el.detailChooseImport.classList.add('hidden');
+    el.detailFolderAction.classList.add('hidden');
+    el.detailFolderBack.classList.add('hidden');
+    el.detailFolderAction.disabled = false;
     el.detailTrashClear.classList.add('hidden');
     el.detailUploadImport.disabled = false;
     el.detailUpdateBackup.disabled = false;
@@ -2414,6 +2446,8 @@
     backupSession++;
     pendingImport = null;
     pendingFileUpdate = null;
+    pendingFolderImport = null;
+    pendingFolderUpdate = null;
     dialogs.close(el.detailModal, !restoringUi);
     backupCopyText = '';
   }
@@ -2422,7 +2456,7 @@
   el.detailCopyBackup.addEventListener('click', copyBackupJson);
   el.detailDownloadBackup.addEventListener('click', saveNewBackup);
   el.detailUpdateBackup.addEventListener('click', updateBackupFile);
-  el.detailChooseImport.addEventListener('click', function () { el.importFile.click(); });
+  el.detailChooseImport.addEventListener('click', chooseBackupFile);
   el.detailModal.addEventListener('click', function (event) {
     if (event.target === el.detailModal) { closeDetailModal(); }
   });
@@ -2790,7 +2824,7 @@
   function openNoteEditModal(id, draft) {
     if (!restoringUi) { syncBackupState(); }
     var note = state.notes.find(function (item) { return item.id === id; });
-    if (!note || note.deletedAt) { return false; }
+    if (!note || note.deletedAt || isRegressionNote(note)) { return false; }
     pendingNoteEdit = { id: id, originalText: draft ? draft.originalText : note.text };
     el.noteEditMeta.textContent = '记录于 ' + formatCreatedAt(note.createdAt) + (completionForNote(id) ? ' · 已完成' : ' · 未完成');
     el.noteEditInput.value = draft ? draft.text : note.text;
@@ -2806,7 +2840,7 @@
     if (!text) { toast('备注内容不能为空。', { level: 'WARN' }); el.noteEditInput.focus(); return; }
     syncBackupState();
     var note = state.notes.find(function (item) { return item.id === pendingNoteEdit.id; });
-    if (!note || note.deletedAt) {
+    if (!note || note.deletedAt || isRegressionNote(note)) {
       closeNoteEditModal();
       refreshAll();
       toast('这条备注已被删除或移入回收站，未保存修改。', { level: 'WARN' });
@@ -2887,6 +2921,7 @@
   });
   el.noteCompleteForm.addEventListener('submit', function (event) {
     event.preventDefault();
+    if (!pendingNoteId) { return; }
     syncBackupState();
     var note = state.notes.find(function (item) { return item.id === pendingNoteId; });
     if (!note || note.deletedAt || completionForNote(note.id)) {
@@ -2916,6 +2951,61 @@
     var saved = completionForNote(note.id);
     toast('备注已完成，技能【' + saved.skillName + '】计入 ' + saved.hours + ' 小时。', { level: 'TRAIN' });
     if (saved.skillId === skill.id) { notifySkillLevelUp(skill, previousHours, effectiveHours(skill)); }
+  });
+
+  /* 退步使用独立表单和列表，负数结算仍沿用原有小时账本，兼容旧备份。 */
+  function renderRegressionSkills(preferred) {
+    var current = preferred === undefined ? el.regressionSkill.value : preferred;
+    var choices = sortedSkills().map(function (skill) {
+      return '<option value="' + escapeHtml(skill.id) + '">' + escapeHtml(skill.name) + '</option>';
+    }).join('') || '<option value="">请先添加技能</option>';
+    if (el.regressionSkill.innerHTML !== choices) { el.regressionSkill.innerHTML = choices; }
+    var focus = skillByName(state.focus);
+    var candidates = [current, state.ui.regressionSkillId, focus && focus.id];
+    el.regressionSkill.value = candidates.find(function (id) {
+      return state.skills.some(function (skill) { return skill.id === id; });
+    }) || (sortedSkills()[0] || {}).id || '';
+  }
+
+  function captureRegressionDraft() {
+    state.ui.regressionSkillId = el.regressionSkill.value;
+    var hoursValue = el.regressionHours.value;
+    state.ui.regressionDraft = hoursValue.trim() ? {
+      id: state.ui.regressionDraft ? state.ui.regressionDraft.id : uid(),
+      skillId: el.regressionSkill.value, hours: hoursValue
+    } : null;
+  }
+
+  el.regressionForm.addEventListener('submit', function (event) {
+    event.preventDefault();
+    captureRegressionDraft();
+    var draft = state.ui.regressionDraft;
+    syncBackupState();
+    var skill = state.skills.find(function (item) { return item.id === el.regressionSkill.value; });
+    var hoursValue = Number(el.regressionHours.value.trim());
+    if (!skill) { toast('请先添加并选择一个技能。', { level: 'WARN' }); el.regressionSkill.focus(); return; }
+    if (!Number.isFinite(hoursValue) || hoursValue === 0 || Math.abs(hoursValue) > MAX_MANUAL_SKILL_HOURS) {
+      toast('退步时间需非 0，绝对值不超过 ' + MAX_MANUAL_SKILL_HOURS + ' 小时，可填写小数。', { level: 'WARN' });
+      el.regressionHours.focus();
+      return;
+    }
+    var id = draft.id;
+    if (completionForNote(id)) {
+      state.ui.regressionDraft = null;
+      el.regressionHours.value = '';
+      persistUi(); refreshAll();
+      return;
+    }
+    var regression = { id: id, skillId: skill.id, skillName: skill.name, hours: -Math.abs(hoursValue), completedAt: new Date().toISOString() };
+    if (!commitChange(function () {
+      state.noteCompletions.push(regression);
+      state.ui.regressionSkillId = skill.id;
+      state.ui.regressionDraft = null;
+    })) { return; }
+    el.regressionHours.value = '';
+    refreshAll();
+    flashTab('timeline');
+    toast('退步已记录，技能【' + skill.name + '】计入 ' + regression.hours + ' 小时。', { level: 'WARN' });
   });
 
   el.noteFilter.addEventListener('change', function () {
@@ -3061,7 +3151,7 @@
     var text = notes.map(function (note) {
       var completion = completionForNote(note.id);
       return '[' + formatCreatedAt(note.createdAt) + '] ' + note.text +
-        (completion ? '\n已完成 · ' + completion.skillName + ' +' + completion.hours + ' 小时' : '');
+        (completion ? '\n' + (completion.hours < 0 ? '退步' : '已完成') + ' · ' + completion.skillName + ' ' + (completion.hours > 0 ? '+' : '') + completion.hours + ' 小时' : '');
     }).join('\n');
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(function () {
@@ -3230,6 +3320,53 @@
   });
 
   /* ---------- 数据导入 / 导出 ---------- */
+  var backupLocations = TianDaoBackupLocations.create(function () { return window.indexedDB; }, renderBackupLocations);
+
+  function rememberedUpdateFolder() {
+    return backupLocations.get('update-folder') || backupLocations.get('import-folder');
+  }
+
+  function renderBackupLocations() {
+    if (!backupLocations) { return; }
+    var folderMode = el.backupFormat.value !== 'file';
+    var suffix = folderMode ? '-folder' : '-file';
+    var exported = backupLocations.get('export' + suffix), imported = backupLocations.get('import' + suffix);
+    var updated = rememberedUpdateFolder();
+    var labels = [];
+    if (exported) { labels.push('上次导出位置：' + exported.name); }
+    if (imported && !folderMode) { labels.push('上次导入：' + imported.name); }
+    el.folderUpdateLocation.textContent = updated ? '更新位置：' + updated.name : '更新位置：尚未选择';
+    var importDirectory = backupLocations.get('import-folder');
+    el.folderImportLocation.textContent = importDirectory ? '导入位置：' + importDirectory.name : '导入位置：尚未选择';
+    el.backupLocationHint.textContent = labels.length ? labels.join('；') :
+      window.showDirectoryPicker ? (folderMode ? '更新和导入直接使用上次路径，首次使用时选择文件夹。' : '导出和导入时会打开上次使用的位置。') : '保存和选择位置由浏览器管理。';
+  }
+
+  function renderBackupFormat() {
+    var folderMode = el.backupFormat.value !== 'file';
+    el.exportData.textContent = folderMode ? '导出文件夹' : '导出文件';
+    el.importBtn.textContent = folderMode ? '从文件夹导入' : '从文件导入';
+    el.updateFolder.classList.toggle('hidden', !folderMode);
+    el.folderPathControl.classList.toggle('hidden', !folderMode);
+    el.folderImportPathControl.classList.toggle('hidden', !folderMode);
+    renderBackupLocations();
+  }
+
+  el.backupFormat.addEventListener('change', renderBackupFormat);
+  renderBackupFormat();
+
+  function exportSelectedBackup() {
+    if (backupBusy) { return; }
+    if (el.backupFormat.value === 'file') { exportDataBackup(); }
+    else { exportBackupFolder(); }
+  }
+
+  function importSelectedBackup() {
+    if (backupBusy) { return; }
+    if (el.backupFormat.value === 'file') { showImportModal(); }
+    else { importBackupFolder(); }
+  }
+
   function loadBackupStatus() {
     try { return TianDaoBackupStatus.normalize(JSON.parse(window.localStorage.getItem(STORAGE_KEY + '.backup-status'))); }
     catch (error) { return TianDaoBackupStatus.normalize(null); }
@@ -3270,7 +3407,7 @@
   el.backupReminderDismiss.addEventListener('click', function () {
     saveBackupStatus(Object.assign({}, backupStatus, { dismissedFingerprint: currentBackupFingerprint }));
   });
-  el.backupRemindExport.addEventListener('click', exportDataBackup);
+  el.backupRemindExport.addEventListener('click', exportSelectedBackup);
   el.backupConfirmDownloaded.addEventListener('click', function () {
     var pending = backupStatus.pendingDownload;
     if (pending) { recordBackupSaved(pending.fingerprint, pending.name); }
@@ -3312,6 +3449,8 @@
       backupSession++;
       pendingImport = null;
       pendingFileUpdate = null;
+      pendingFolderImport = null;
+      pendingFolderUpdate = null;
       backupFilename = newBackupFilename();
       showExportModal(backupFilename, JSON.stringify(state, null, 2));
     } catch (e) {
@@ -3357,7 +3496,8 @@
     if (nameElement) { nameElement.textContent = filename; }
     try {
       if (window.showDirectoryPicker) {
-        var directory = await window.showDirectoryPicker({ mode: 'readwrite' });
+        var directory = await window.showDirectoryPicker(backupLocations.options('export-file', { mode: 'readwrite' }));
+        await backupLocations.remember('export-file', directory);
         var savedName = await TianDaoBackup.writeNewFile(directory, filename, json);
         recordBackupSaved(TianDaoBackupStatus.fingerprint(JSON.parse(json)), savedName);
         toast('已另存为「' + savedName + '」。', { level: 'SYSTEM' });
@@ -3400,10 +3540,13 @@
     backupBusy = true;
     var session = backupSession;
     try {
-      var handles = await window.showOpenFilePicker({ multiple: false, types: [{ description: '系统数据备份', accept: { 'application/json': ['.json'] } }] });
+      var handles = await window.showOpenFilePicker(backupLocations.options('update-file', { multiple: false,
+        types: [{ description: '系统数据备份', accept: { 'application/json': ['.json'] } }] }));
       var file = await handles[0].getFile();
       var raw = await file.text();
       var existing = readBackupText(raw);
+      if (session !== backupSession) { return; }
+      await backupLocations.remember('update-file', handles[0]);
       if (session !== backupSession) { return; }
       syncBackupState();
       pendingFileUpdate = { handle: handles[0], name: file.name, raw: raw, existing: existing, baseline: backupFingerprint(state) };
@@ -3449,18 +3592,291 @@
     } finally { backupBusy = false; }
   }
 
-  function importModesHtml() {
+  /* ---------- 文件夹备份 ---------- */
+  function validateFolderDocument(doc) {
+    readBackupText(JSON.stringify(TianDaoFolder.assemble([doc], defaultState())));
+  }
+
+  function folderDocumentSummary(doc) {
+    if (doc.type === 'profile') { return '宿主属性、技能基准与主修方向'; }
+    if (doc.type === 'tasks') { return '主线、支线、成就与点数余额'; }
+    if (doc.type === 'preferences') { return '标签、筛选、草稿与界面设置'; }
+    var data = doc.data;
+    return data.entries.length + ' 条日志 · ' + data.notes.length + ' 条备注 · ' +
+      data.noteCompletions.filter(function (item) { return item.hours < 0; }).length + ' 条退步 · ' +
+      data.trashEntries.length + ' 条回收站日志 · ' + data.notifications.length + ' 条提示';
+  }
+
+  function beginFolderOperation(title) {
+    backupSession++;
+    pendingImport = null; pendingFileUpdate = null; pendingFolderImport = null; pendingFolderUpdate = null;
+    openDetailModal(title, '<p class="backup-summary" role="status">正在读取和检查，请稍候……</p>');
+    return backupSession;
+  }
+
+  function downloadFolderZip(snapshot, name) {
+    var bundle = TianDaoFolder.packageFiles(snapshot, newBackupFilename().replace(/\.json$/, ''));
+    var blob = TianDaoFolder.zipFiles(bundle.files, name);
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement('a');
+    link.href = url; link.download = name + '.zip';
+    document.body.appendChild(link); link.click(); link.remove();
+    window.setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+    saveBackupStatus(Object.assign({}, backupStatus, { pendingDownload: {
+      fingerprint: TianDaoBackupStatus.fingerprint(snapshot), name: name + '.zip', startedAt: new Date().toISOString()
+    } }));
+    toast('已下载文件夹压缩包，解压后可按通用文档和日期选择导入。请确认文件已保存。', { level: 'SYSTEM' });
+  }
+
+  async function exportBackupFolder() {
+    if (backupBusy) { return; }
+    backupBusy = true;
+    var session = beginFolderOperation('导出为文件夹');
+    try {
+      syncBackupState();
+      var snapshot = cloneState(state);
+      var name = '天道酬勤';
+      if (!window.showDirectoryPicker) {
+        downloadFolderZip(snapshot, name);
+        if (session === backupSession) { closeDetailModal(); }
+        return;
+      }
+      var parent = await window.showDirectoryPicker(backupLocations.options('export-folder', { mode: 'readwrite' }));
+      await backupLocations.remember('export-folder', parent);
+      if (session !== backupSession) { return; }
+      var directory = await TianDaoFolder.uniqueDirectory(parent, name);
+      await TianDaoFolder.writeDirectory(directory, snapshot, newBackupFilename().replace(/\.json$/, ''), null,
+        function () { return session === backupSession; });
+      await backupLocations.remember('update-folder', directory);
+      recordBackupSaved(TianDaoBackupStatus.fingerprint(snapshot), directory.name + '/');
+      if (session === backupSession) { closeDetailModal(); }
+      toast('已导出文件夹「' + directory.name + '」，包含属性、任务与成就、界面设置和日期文档。', { level: 'SYSTEM' });
+    } catch (error) {
+      if (session === backupSession) { closeDetailModal(); }
+      backupError(error);
+    } finally { backupBusy = false; }
+  }
+
+  function renderFolderDocuments() {
+    var pending = pendingFolderImport;
+    if (!pending) { return; }
+    pendingImport = null;
+    openDetailModal('选择文件夹中的文档', '<p class="backup-summary">文件夹：' + escapeHtml(pending.snapshot.name) +
+      '</p><p class="hint">可全部导入，也可只选择属性或某些日期。日志按开始日期归档，跨天日志保持完整；备注连同完成记录保存。</p>' +
+      '<div class="log-actions"><button type="button" class="btn ghost" data-folder-select="all">全选可用文档</button>' +
+      '<button type="button" class="btn ghost" data-folder-select="none">清空选择</button></div>' +
+      '<div class="folder-documents">' + pending.snapshot.records.map(function (record, index) {
+        return '<label class="folder-document' + (record.error ? ' invalid' : '') + '"><input type="checkbox" data-folder-document="' + index + '"' +
+          (pending.selected.has(index) ? ' checked' : '') + (record.error ? ' disabled' : '') + '><span>' + escapeHtml(record.name) +
+          '<small>' + escapeHtml(record.error ? '无法导入：' + record.error : folderDocumentSummary(record.document)) + '</small></span></label>';
+      }).join('') + '</div><p class="hint" id="folderSelectionCount" role="status"></p>');
+    el.detailFolderAction.textContent = '检查所选文档';
+    el.detailFolderAction.classList.remove('hidden');
+    updateFolderSelectionCount();
+  }
+
+  function updateFolderSelectionCount() {
+    var count = pendingFolderImport.selected.size;
+    var label = document.getElementById('folderSelectionCount');
+    if (label) { label.textContent = '已选 ' + count + ' / ' + pendingFolderImport.snapshot.records.length + ' 份文档'; }
+    el.detailFolderAction.disabled = count === 0;
+  }
+
+  async function loadFolderImport(read, session) {
+    backupBusy = true;
+    try {
+      var snapshot = await read();
+      if (session !== backupSession) { return; }
+      pendingFolderImport = { snapshot: snapshot, selected: new Set() };
+      snapshot.records.forEach(function (record, index) { if (!record.error) { pendingFolderImport.selected.add(index); } });
+      renderFolderDocuments();
+    } catch (error) {
+      if (session === backupSession) { closeDetailModal(); }
+      backupError(error);
+    } finally { backupBusy = false; }
+  }
+
+  function importBackupFolder(changePath) {
+    if (backupBusy) { return; }
+    var changingPath = changePath === true;
+    var session = beginFolderOperation(changingPath ? '更改导入路径' : '从文件夹导入');
+    if (!window.showDirectoryPicker) { el.importFolderFiles.click(); return; }
+    loadFolderImport(async function () {
+      await backupLocations.ready;
+      if (session !== backupSession) { return; }
+      var directory = changingPath ? null : backupLocations.get('import-folder');
+      if (!directory) {
+        directory = await window.showDirectoryPicker(backupLocations.options('import-folder', { mode: 'read' }));
+      } else if (directory.queryPermission && await directory.queryPermission({ mode: 'read' }) !== 'granted') {
+        if (session !== backupSession) { return; }
+        if (!directory.requestPermission || await directory.requestPermission({ mode: 'read' }) !== 'granted') {
+          throw new Error('未获得文件夹读取权限。可再次点击导入进行授权，或点击导入位置旁的「更改路径」选择其他文件夹。');
+        }
+      }
+      if (session !== backupSession) { return; }
+      var snapshot = await TianDaoFolder.readDirectory(directory, validateFolderDocument);
+      if (session === backupSession) { await backupLocations.remember('import-folder', directory); }
+      return snapshot;
+    }, session);
+  }
+
+  async function prepareFolderImport() {
+    var pending = pendingFolderImport;
+    if (!pending || !pending.selected.size || backupBusy) { return; }
+    backupBusy = true;
+    var session = backupSession;
+    try {
+      var selected = Array.from(pending.selected).map(function (index) { return pending.snapshot.records[index]; });
+      // 目录授权和文件选择均在确认前复读，避免使用已被修改的预览。
+      if (await pending.snapshot.readText(TianDaoFolder.manifestName) !== pending.snapshot.raw) { throw new Error('文件夹清单已变化，请重新选择文件夹。'); }
+      for (var record of selected) {
+        if (await pending.snapshot.readText(record.path) !== record.raw) { throw new Error('文档已变化，请重新选择文件夹：' + record.name); }
+      }
+      if (session !== backupSession) { return; }
+      syncBackupState();
+      pendingImport = { documents: selected.map(function (record) { return record.document; }), choices: {},
+        name: pending.snapshot.name + '（' + selected.length + ' 份文档）', partial: selected.length !== pending.snapshot.records.length,
+        baseline: backupFingerprint(state) };
+      importMode = 'merge';
+      renderImportReview();
+    } catch (error) { backupError(error); }
+    finally { backupBusy = false; }
+  }
+
+  async function updateBackupFolder(changePath) {
+    if (backupBusy) { return; }
+    if (!window.showDirectoryPicker) { toast('更新文件夹需要桌面版 Chrome 或 Edge 的文件夹写入支持。', { level: 'WARN' }); return; }
+    backupBusy = true;
+    var changingPath = changePath === true;
+    var session = beginFolderOperation(changingPath ? '更改更新路径' : '更新文件夹');
+    try {
+      await backupLocations.ready;
+      if (session !== backupSession) { return; }
+      var directory = changingPath ? null : rememberedUpdateFolder();
+      if (!directory) {
+        directory = await window.showDirectoryPicker(backupLocations.options('update-folder', { mode: 'readwrite' }));
+      } else if (directory.queryPermission && await directory.queryPermission({ mode: 'readwrite' }) !== 'granted') {
+        if (session !== backupSession) { return; }
+        if (!directory.requestPermission || await directory.requestPermission({ mode: 'readwrite' }) !== 'granted') {
+          throw new Error('未获得文件夹读写权限。可再次点击更新进行授权，或点击「更改路径」选择其他备份文件夹。');
+        }
+      }
+      if (session !== backupSession) { return; }
+      var snapshot = await TianDaoFolder.readDirectory(directory, validateFolderDocument);
+      if (session !== backupSession) { return; }
+      await TianDaoFolder.verifySnapshot(snapshot);
+      var existing = readBackupText(JSON.stringify(TianDaoFolder.assemble(snapshot.records.map(function (record) { return record.document; }), defaultState())));
+      if (session !== backupSession) { return; }
+      await backupLocations.remember('update-folder', directory);
+      if (session !== backupSession) { return; }
+      if (changingPath) {
+        closeDetailModal();
+        toast('更新位置已改为「' + directory.name + '」。点击「更新文件夹」即可使用。', { level: 'SYSTEM' });
+        return;
+      }
+      syncBackupState();
+      pendingFolderUpdate = { snapshot: snapshot, choices: {}, baseline: backupFingerprint(state),
+        existing: existing };
+      renderFolderUpdate();
+    } catch (error) {
+      if (session === backupSession) { closeDetailModal(); }
+      backupError(error);
+    } finally { backupBusy = false; }
+  }
+
+  function renderFolderUpdate(message) {
+    var pending = pendingFolderUpdate;
+    var plan = TianDaoBackup.planMerge(pending.existing, state, pending.choices, defaultState());
+    openDetailModal('检查文件夹更新', '<p class="backup-summary">文件夹：' + escapeHtml(pending.snapshot.name) +
+      '</p><p class="hint">保留文件夹独有的记录，加入当前数据。原版本会保留；冲突可逐项选择。</p>' +
+      (message ? '<p class="backup-warning">' + escapeHtml(message) + '</p>' : '') +
+      '<p class="backup-summary">' + plan.conflicts.length + ' 项冲突，剩余 ' + plan.unresolved + ' 项待处理。</p>' +
+      (plan.conflicts.length ? '<div class="log-actions"><button type="button" class="btn ghost" data-folder-choice="current">全部保留文件夹</button>' +
+        '<button type="button" class="btn ghost" data-folder-choice="incoming">全部采用当前数据</button></div>' : '') +
+      renderBackupConflicts(plan, '文件夹中', '当前数据', true, { current: '保留文件夹', incoming: '采用当前数据' }));
+    el.detailFolderAction.textContent = '确认更新文件夹';
+    el.detailFolderAction.disabled = plan.unresolved > 0;
+    el.detailFolderAction.classList.remove('hidden');
+  }
+
+  async function commitFolderUpdate() {
+    if (backupBusy || !pendingFolderUpdate) { return; }
+    backupBusy = true;
+    var pending = pendingFolderUpdate, session = backupSession;
+    el.detailFolderAction.disabled = true;
+    try {
+      syncBackupState();
+      if (pending.baseline !== backupFingerprint(state)) {
+        pending.choices = {}; pending.baseline = backupFingerprint(state);
+        renderFolderUpdate('当前数据已变化，请重新检查并确认。');
+        return;
+      }
+      var plan = TianDaoBackup.planMerge(pending.existing, state, pending.choices, defaultState());
+      if (plan.unresolved) { renderFolderUpdate(); return; }
+      var result = TianDaoBackup.preserveDisplacedEntries(pending.existing, plan.state, new Date().toISOString());
+      result.ui = cloneState(state.ui); result.viewDate = state.viewDate; result.entryCategory = state.entryCategory;
+      var coversCurrent = TianDaoBackup.planMerge(result, state, {}, defaultState()).conflicts.length === 0;
+      var fingerprint = TianDaoBackupStatus.fingerprint(coversCurrent ? state : result);
+      await TianDaoFolder.writeDirectory(pending.snapshot.directory, result, newBackupFilename().replace(/\.json$/, ''), pending.snapshot,
+        function () { return session === backupSession; });
+      recordBackupSaved(fingerprint, pending.snapshot.name + '/');
+      if (session === backupSession) { closeDetailModal(); }
+      toast('文件夹已更新，上一版本已保留。', { level: 'SYSTEM' });
+    } catch (error) {
+      if (session === backupSession) { closeDetailModal(); }
+      backupError(error);
+    } finally { backupBusy = false; }
+  }
+
+  el.updateFolder.addEventListener('click', updateBackupFolder);
+  el.changeFolderPath.addEventListener('click', function () { updateBackupFolder(true); });
+  el.changeImportFolderPath.addEventListener('click', function () { importBackupFolder(true); });
+  el.importFolderFiles.addEventListener('change', function () {
+    var files = Array.from(el.importFolderFiles.files || []);
+    el.importFolderFiles.value = '';
+    if (files.length) { loadFolderImport(function () { return TianDaoFolder.readFiles(files, validateFolderDocument); }, backupSession); }
+  });
+  el.importFolderFiles.addEventListener('cancel', function () { closeDetailModal(); });
+  el.detailFolderBack.addEventListener('click', renderFolderDocuments);
+  el.detailFolderAction.addEventListener('click', function () { if (pendingFolderUpdate) { commitFolderUpdate(); } else { prepareFolderImport(); } });
+  el.detailBody.addEventListener('change', function (event) {
+    if (!pendingFolderImport || !event.target.matches('[data-folder-document]')) { return; }
+    var index = Number(event.target.dataset.folderDocument);
+    if (event.target.checked) { pendingFolderImport.selected.add(index); } else { pendingFolderImport.selected.delete(index); }
+    updateFolderSelectionCount();
+  });
+  el.detailBody.addEventListener('click', function (event) {
+    var selection = event.target.closest('[data-folder-select]');
+    if (selection && pendingFolderImport) {
+      pendingFolderImport.selected.clear();
+      if (selection.dataset.folderSelect === 'all') {
+        pendingFolderImport.snapshot.records.forEach(function (record, index) { if (!record.error) { pendingFolderImport.selected.add(index); } });
+      }
+      renderFolderDocuments();
+    }
+    var choice = event.target.closest('[data-folder-choice], [data-backup-conflict]');
+    if (!choice || !pendingFolderUpdate) { return; }
+    var pending = pendingFolderUpdate;
+    if (choice.dataset.folderChoice) {
+      TianDaoBackup.planMerge(pending.existing, state, pending.choices, defaultState()).conflicts.forEach(function (item) { pending.choices[item.id] = choice.dataset.folderChoice; });
+    } else { pending.choices[choice.dataset.backupConflict] = choice.dataset.backupChoice; }
+    renderFolderUpdate();
+  });
+
+  function importModesHtml(partial) {
     return '<fieldset class="backup-modes"><legend>导入方式</legend>' +
       '<label><input type="radio" name="backupImportMode" value="merge"' + (importMode === 'merge' ? ' checked' : '') +
       '><span>兼容扩充<small>保留双方记录、自动去重，逐项处理冲突；重叠时间只替换选中的部分。</small></span></label>' +
-      '<label><input type="radio" name="backupImportMode" value="replace"' + (importMode === 'replace' ? ' checked' : '') +
-      '><span>覆盖当前数据<small>以导入文件为准，替换当前全部数据。</small></span></label></fieldset>';
+      (partial ? '' : '<label><input type="radio" name="backupImportMode" value="replace"' + (importMode === 'replace' ? ' checked' : '') +
+      '><span>覆盖当前数据<small>以导入文件为准，替换当前全部数据。</small></span></label>') + '</fieldset>';
   }
 
   function showImportModal() {
     backupSession++;
     pendingImport = null;
     pendingFileUpdate = null;
+    pendingFolderImport = null;
+    pendingFolderUpdate = null;
     importMode = 'merge';
     openDetailModal('启封系统数据', importModesHtml() + '<p class="hint backup-hint">选择备份文件，或粘贴数据后点击「检查数据」。检查期间不会修改当前记录。</p>' +
       '<textarea id="importJsonInput" class="import-json-input" spellcheck="false" placeholder="此处显示系统被封印数据"></textarea>');
@@ -3505,7 +3921,8 @@
     }).join('\n');
   }
 
-  function renderBackupConflicts(plan, currentLabel, incomingLabel, editable) {
+  function renderBackupConflicts(plan, currentLabel, incomingLabel, editable, choiceLabels) {
+    choiceLabels = choiceLabels || { current: '保留当前', incoming: '采用导入' };
     return plan.conflicts.map(function (conflict, index) {
       var localLabel = conflict.scope === 'current' ? currentLabel + '（记录一）' : currentLabel;
       var importedLabel = conflict.scope === 'current' ? currentLabel + '（记录二）' : incomingLabel;
@@ -3514,17 +3931,24 @@
         '<div><strong>' + importedLabel + '</strong><pre>' + escapeHtml(describeBackupValue(conflict.incoming)) + '</pre></div></div>' +
         (editable ? '<div class="backup-choices">' + ['current', 'incoming'].map(function (choice) {
           return '<button type="button" class="btn ghost" data-backup-conflict="' + escapeHtml(conflict.id) + '" data-backup-choice="' + choice +
-            '" aria-pressed="' + (conflict.choice === choice) + '">' + (conflict.scope === 'current' ? (choice === 'current' ? '采用记录一' : '采用记录二') : (choice === 'current' ? '保留当前' : '采用导入')) + '</button>';
+            '" aria-pressed="' + (conflict.choice === choice) + '">' + (conflict.scope === 'current' ? (choice === 'current' ? '采用记录一' : '采用记录二') : choiceLabels[choice]) + '</button>';
         }).join('') + '</div>' : '') + '</section>';
     }).join('');
   }
 
   function renderImportReview(message) {
     var pending = pendingImport;
+    if (pending.documents) {
+      pending.imported = readBackupText(JSON.stringify(TianDaoFolder.assemble(pending.documents, defaultState(), pending.partial ? state : null)));
+      if (pending.partial) { importMode = 'merge'; }
+    }
     var imported = pending.imported;
     var plan = TianDaoBackup.planMerge(state, imported, pending.choices, defaultState());
     var merging = importMode === 'merge';
-    openDetailModal('检查导入数据', importModesHtml() + '<p class="backup-summary">来源：' + escapeHtml(pending.name) + '<br>' +
+    openDetailModal('检查导入数据', importModesHtml(pending.partial) +
+      (pending.partial ? '<p class="hint">仅导入所选文档，未选择的现有数据会保留。' +
+        (pending.documents.some(function (doc) { return doc.type === 'profile'; }) ? '属性中的技能基准若有冲突，可逐项确认。' :
+          '缺失的关联技能以 0 基准小时建立，已有技能的基准小时不变。') + '</p>' : '') + '<p class="backup-summary">来源：' + escapeHtml(pending.name) + '<br>' +
       imported.entries.length + ' 条时间记录 · ' + imported.notes.length + ' 条备注 · ' + imported.skills.length + ' 项技能 · ' + imported.quests.side.length + ' 条支线</p>' +
       (message ? '<p class="backup-warning">' + escapeHtml(message) + '</p>' : '') +
       (merging ? '<p class="backup-summary" role="status">已识别 ' + plan.duplicates + ' 项重复数据，' + plan.conflicts.length + ' 项冲突，剩余 ' + plan.unresolved + ' 项待处理。</p>' +
@@ -3536,11 +3960,16 @@
     el.detailUploadImport.disabled = merging && plan.unresolved > 0;
     el.detailUploadImport.classList.remove('hidden');
     el.detailChooseImport.classList.remove('hidden');
+    if (pending.documents) {
+      el.detailChooseImport.classList.add('hidden');
+      el.detailFolderBack.classList.remove('hidden');
+    }
   }
 
   el.detailBody.addEventListener('change', function (event) {
     if (event.target.name !== 'backupImportMode') { return; }
     importMode = event.target.value;
+    if (pendingImport && pendingImport.partial) { importMode = 'merge'; }
     if (pendingImport) {
       renderImportReview();
       el.detailBody.querySelector('input[name="backupImportMode"][value="' + importMode + '"]').focus({ preventScroll: true });
@@ -3569,6 +3998,7 @@
   function commitBackupImport() {
     syncBackupState();
     var pending = pendingImport;
+    if (pending.partial) { importMode = 'merge'; }
     if (pending.baseline !== backupFingerprint(state)) {
       pending.choices = {};
       pending.baseline = backupFingerprint(state);
@@ -3581,6 +4011,9 @@
     var previousPrimary = window.localStorage.getItem(STORAGE_KEY);
     var previousBackup = window.localStorage.getItem(STORAGE_BACKUP_KEY);
     state = importMode === 'merge' ? plan.state : cloneState(pending.imported);
+    if (pending.documents && pending.documents.some(function (doc) { return doc.type === 'preferences'; })) {
+      ['ui', 'viewDate', 'entryCategory', 'noticeSeenCount'].forEach(function (key) { state[key] = cloneState(pending.imported[key]); });
+    }
     state = TianDaoBackup.preserveDisplacedEntries(previousState, state, new Date().toISOString());
     if (!persist(true)) {
       state = previousState;
@@ -3624,7 +4057,7 @@
     if (copiedByCommand) { copied(); } else { failed(); }
   }
 
-  el.exportData.addEventListener('click', exportDataBackup);
+  el.exportData.addEventListener('click', exportSelectedBackup);
 
   el.detailPasteImport.addEventListener('click', function () {
     var input = document.getElementById('importJsonInput');
@@ -3651,7 +4084,7 @@
       importJsonText(input.value);
       return;
     }
-    el.importFile.click();
+    chooseBackupFile();
   });
 
   function importJsonText(rawText, filename) {
@@ -3665,7 +4098,25 @@
     }
   }
 
-  el.importBtn.addEventListener('click', showImportModal);
+  async function chooseBackupFile() {
+    if (backupBusy) { return; }
+    if (!window.showOpenFilePicker) { el.importFile.click(); return; }
+    backupBusy = true;
+    var session = backupSession, readVersion = ++importReadVersion;
+    try {
+      var handles = await window.showOpenFilePicker(backupLocations.options('import-file', { multiple: false,
+        types: [{ description: '系统数据备份', accept: { 'application/json': ['.json', '.txt'] } }] }));
+      var file = await handles[0].getFile();
+      var raw = await file.text();
+      if (session !== backupSession || readVersion !== importReadVersion) { return; }
+      await backupLocations.remember('import-file', handles[0]);
+      if (session !== backupSession || readVersion !== importReadVersion) { return; }
+      importJsonText(raw, file.name);
+    } catch (error) { backupError(error); }
+    finally { backupBusy = false; }
+  }
+
+  el.importBtn.addEventListener('click', importSelectedBackup);
   el.importFile.addEventListener('change', function () {
     var file = el.importFile.files && el.importFile.files[0];
     if (!file) { return; }
@@ -3821,8 +4272,12 @@
     return cursor.snap !== null ? cursor.snap : cursor.rangeRatio * DAY_MINUTES;
   }
 
+  function isRegressionNote(note) {
+    return (state.noteCompletions || []).some(function (item) { return item.id === note.id && item.hours < 0; });
+  }
+
   function allNotes() {
-    return state.notes.slice().sort(function (a, b) {
+    return state.notes.filter(function (note) { return !isRegressionNote(note); }).sort(function (a, b) {
       return Date.parse(a.createdAt) - Date.parse(b.createdAt);
     });
   }
@@ -3836,7 +4291,7 @@
   }
 
   function notesByDate(dateStr) {
-    return state.notes.filter(function (note) { return !note.deletedAt && note.date === dateStr; }).sort(function (a, b) {
+    return state.notes.filter(function (note) { return !note.deletedAt && !isRegressionNote(note) && note.date === dateStr; }).sort(function (a, b) {
       return Date.parse(a.createdAt) - Date.parse(b.createdAt);
     });
   }
@@ -4403,6 +4858,22 @@
     el.logView.scrollTop = state.ui.logScrollTop;
   }
 
+  function renderRegressions() {
+    var counted = new Set();
+    var records = state.noteCompletions.filter(function (item) {
+      if (item.hours >= 0 || counted.has(item.id)) { return false; }
+      counted.add(item.id);
+      return true;
+    }).sort(function (a, b) { return Date.parse(a.completedAt) - Date.parse(b.completedAt); });
+    el.regressionCountLabel.textContent = records.length + ' 条';
+    el.regressionView.innerHTML = records.length ? records.map(function (item) {
+      var skill = state.skills.find(function (skill) { return skill.id === item.skillId; });
+      return '<div class="log-line regression-entry"><time class="ts" datetime="' + escapeHtml(item.completedAt) + '">[' +
+        escapeHtml(formatCreatedAt(item.completedAt)) + ']</time><div class="msg">' + escapeHtml(skill ? skill.name : item.skillName) +
+        ' · ' + item.hours + ' 小时</div></div>';
+    }).join('') : '<div class="empty">暂无退步记录。</div>';
+  }
+
   function renderNotes() {
     var notes = filteredNotes();
     var filter = state.ui.noteFilter || 'pending';
@@ -4424,7 +4895,7 @@
         '<time class="ts" datetime="' + escapeHtml(note.createdAt) + '">[' + escapeHtml(formatCreatedAt(note.createdAt)) + ']</time>' + actions + '</div>' +
         '<div class="log-entry-content">' +
         '<div class="msg log-entry-activity">' + escapeHtml(note.text) + '</div>' +
-        (completion ? '<div class="note-completion">已完成 · ' + escapeHtml(completion.skillName) + ' +' + completion.hours + ' 小时</div>' : '') +
+        (completion ? '<div class="note-completion">' + (completion.hours < 0 ? '退步' : '已完成') + ' · ' + escapeHtml(completion.skillName) + ' ' + (completion.hours > 0 ? '+' : '') + completion.hours + ' 小时</div>' : '') +
         (note.deletedAt ? '<div class="trash-entry-meta">删除于 ' + escapeHtml(formatCreatedAt(note.deletedAt)) + '</div>' : '') + '</div></div>';
     }).join('') : '<div class="empty">' + (filter === 'trash' ? '回收站为空。' : '暂无' + label + '备注。') + '</div>';
     el.noteView.scrollTop = state.ui.noteScrollTops[filter];
@@ -4564,7 +5035,7 @@
     }
     // 主修方向即技能：进度直接沿用该技能已累计的小时，不会从零开始。
     var h = effectiveHours(skill);
-    var percent = Math.min(h / GOAL_HOURS * 100, 100);
+    var percent = Math.max(0, Math.min(h / GOAL_HOURS * 100, 100));
     var currentLevel = levelForHours(h);
     var currentLevelIndex = SKILL_LEVELS.indexOf(currentLevel);
     var nextLevel = SKILL_LEVELS[currentLevelIndex + 1];
@@ -4818,17 +5289,22 @@
       var trend = TianDaoHistory.trend(state, review.anchor, review.period, reviewSkillValue());
       el.reviewRange.textContent = trend.startDate + ' 至 ' + trend.endDate;
       el.reviewSummary.innerHTML = [['累计投入', trend.totalHours.toFixed(2) + ' h'], ['日志时长', trend.logHours.toFixed(2) + ' h'],
-        ['备注补记', trend.noteHours.toFixed(2) + ' h'], ['有投入的日期', trend.activeDays + ' 天'],
+        ['备注补记', trend.noteHours.toFixed(2) + ' h'], ['退步扣减', trend.regressionHours.toFixed(2) + ' h'], ['有投入的日期', trend.activeDays + ' 天'],
         [review.period === 'month' ? '较上月' : '较上周', (trend.changeHours > 0 ? '+' : '') + trend.changeHours.toFixed(2) + ' h']].map(function (item) {
         return '<div><span>' + item[0] + '</span><b>' + item[1] + '</b></div>';
       }).join('');
-      var maximum = Math.max(1, ...trend.days.map(function (day) { return day.totalHours; }));
+      var positiveMaximum = Math.max(0, ...trend.days.map(function (day) { return day.logHours + day.noteHours; }));
+      var negativeMaximum = Math.max(0, ...trend.days.map(function (day) { return -day.regressionHours; }));
+      var scale = 120 / Math.max(1, positiveMaximum + negativeMaximum);
       el.reviewChart.innerHTML = trend.days.map(function (day) {
-        var label = day.date + '：日志 ' + day.logHours.toFixed(2) + ' 小时，备注补记 ' + day.noteHours.toFixed(2) + ' 小时';
+        var label = day.date + '：日志 ' + day.logHours.toFixed(2) + ' 小时，备注补记 ' + day.noteHours.toFixed(2) + ' 小时，退步扣减 ' + day.regressionHours.toFixed(2) + ' 小时';
         return '<li tabindex="0" aria-label="' + label + '" title="' + label + '"><div class="review-bar" aria-hidden="true">' +
           '<span class="review-bar-label">' + (day.totalHours ? day.totalHours.toFixed(1) : '') + '</span>' +
-          '<span class="review-bar-note" style="height:' + (day.noteHours / maximum * 120) + 'px"></span>' +
-          '<span class="review-bar-log" style="height:' + (day.logHours / maximum * 120) + 'px"></span></div>' + day.date.slice(5) + '</li>';
+          '<div class="review-bar-positive" style="height:' + (positiveMaximum * scale) + 'px">' +
+          '<span class="review-bar-note" style="height:' + (day.noteHours * scale) + 'px"></span>' +
+          '<span class="review-bar-log" style="height:' + (day.logHours * scale) + 'px"></span></div>' +
+          (negativeMaximum ? '<div class="review-bar-negative" style="height:' + (negativeMaximum * scale) + 'px">' +
+            '<span class="review-bar-regression" style="height:' + (-day.regressionHours * scale) + 'px"></span></div>' : '') + '</div>' + day.date.slice(5) + '</li>';
       }).join('');
     } catch (error) {
       el.reviewRange.textContent = error.message;
@@ -4840,12 +5316,12 @@
       reviewRows = results.rows;
       el.reviewCount.textContent = '找到 ' + results.total + ' 条记录，按日期从新到旧排列';
       el.reviewResults.innerHTML = results.rows.length ? results.rows.map(function (row) {
-        var label = row.kind === 'entry' ? '日志' : row.completed ? '已完成备注' : '未完成备注';
+        var label = row.kind === 'entry' ? '日志' : row.kind === 'regression' ? '退步' : row.completed ? '已完成备注' : '未完成备注';
         var date = row.kind === 'entry' ? row.date + ' ' + toClock(row.start) + ' → ' + row.endDate + ' ' + toClock(row.end) : row.date;
         return '<article class="review-result"><div class="review-result-meta">' + label + (row.trash ? ' · 回收站' : '') + ' · ' + date +
           '<br>' + escapeHtml(row.skill || '未指定技能') + (row.hours ? ' · ' + Number(row.hours).toFixed(2) + ' 小时' : '') + '</div>' +
           '<div class="review-result-text">' + escapeHtml(row.text) + '</div>' +
-          (!row.trash ? '<button type="button" class="btn ghost" data-review-key="' + escapeHtml(row.key) + '">' +
+          (!row.trash && row.kind !== 'regression' ? '<button type="button" class="btn ghost" data-review-key="' + escapeHtml(row.key) + '">' +
             (row.kind === 'entry' ? '查看当日时间轴' : '修改备注') + '</button>' : '') + '</article>';
       }).join('') : '<p class="empty">没有匹配的记录，可调整关键词、日期或技能。</p>';
       el.reviewPage.textContent = (results.page + 1) + ' / ' + results.pages;
@@ -5397,6 +5873,8 @@
     renderTimelineNoteMarkers();
     renderLog(state.viewDate);
     renderNotes();
+    renderRegressions();
+    renderRegressionSkills();
     el.logTrash.textContent = '回收站 · ' + state.trashEntries.length;
     if (logTrashOpen) { renderLogTrashModal(); }
     renderFocus();

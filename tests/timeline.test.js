@@ -56,7 +56,7 @@ function timeline() {
     persist: () => {}, persistUi: () => context.persist()
   });
   const names = ['toClock', 'timelineZoomRange', 'normalizeTimelineCursors', 'timelineCursorMinutes', 'timelineNotePosition',
-    'notesByDate', 'noteMinutes', 'timelineSnapPoints', 'timelineSnapKind', 'syncTimelineCursorSnapStyles',
+    'isRegressionNote', 'notesByDate', 'noteMinutes', 'timelineSnapPoints', 'timelineSnapKind', 'syncTimelineCursorSnapStyles',
     'renderTimelineNoteLines', 'updateTimelineNoteMarkerPositions', 'updateTimelineZoomLabel', 'renderTimeline', 'syncCollapseState',
     'setTimelineZoom', 'timelineZoomFromCursors', 'moveTimelineCursor', 'bindTimelineCursor', 'resetTimelineZoom'];
   names.forEach(name => {
