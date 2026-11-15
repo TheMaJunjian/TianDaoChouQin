@@ -55,6 +55,8 @@
     var conflicts = [];
     var added = 0;
     var duplicates = 0;
+    var additions = { entries: 0, notes: 0, noteCompletions: 0, regressions: 0, skills: 0,
+      achievements: 0, quests: 0, trashEntries: 0, notifications: 0 };
     var skillIds = Object.create(null);
     var noteIds = Object.create(null);
     var entryMetadata = new WeakMap();
@@ -109,6 +111,7 @@
 
     function mergeList(local, imported, kind, title, equivalent, matching) {
       var list = [];
+      var newIndices = new Set();
       var byId = new Map();
       var byContent = new Map();
       function contentKey(item) {
@@ -127,7 +130,7 @@
           list.push(clone(item));
           if (item.id) { byId.set(item.id, found); }
           if (matching) { byContent.set(key, found); }
-          if (!localSource) { added++; }
+          if (!localSource) { added++; newIndices.add(found); }
           return;
         }
         var existing = list[found];
@@ -143,6 +146,9 @@
       }
       (local || []).forEach(function (item, index) { addItem(item, index, true); });
       (imported || []).forEach(function (item, index) { addItem(item, index, false); });
+      newIndices.forEach(function (index) {
+        additions[kind === 'noteCompletions' && list[index].hours < 0 ? 'regressions' : kind]++;
+      });
       return list;
     }
     function sameObject(a, b) { return equal(a, b, ['id']); }
@@ -178,33 +184,82 @@
     result.quests.side = mergeList(result.quests.side, (incoming.quests || {}).side, 'quests', '支线任务', sameObject);
     result.notifications = mergeList(result.notifications, incoming.notifications, 'notifications', '系统提示', sameObject, sameObject);
     result.entries = [];
+    var originalEntryIds = new Set((current.entries || []).map(function (entry) { return entry.id; }).filter(Boolean));
+    var originalEntryKeys = new Set((current.entries || []).map(function (entry) { return metadata(entry).key; }));
+    var entryKeys = new Set(), entryIds = new Map(), dayEntries = new Map(), longEntries = new Set();
+    function days(info) {
+      var start = Math.floor(info.start / 1440), end = Math.ceil(info.end / 1440) - 1;
+      return Number.isFinite(start) && Number.isFinite(end) && end - start < 32 ? [start, end] : null;
+    }
+    function indexEntry(entry, order) {
+      var info = metadata(entry); info.order = order;
+      entryKeys.add(info.key);
+      if (!entryIds.has(entry.id)) { entryIds.set(entry.id, new Set()); }
+      entryIds.get(entry.id).add(entry);
+      var span = days(info);
+      if (!span) { longEntries.add(entry); return; }
+      for (var day = span[0]; day <= span[1]; day++) {
+        if (!dayEntries.has(day)) { dayEntries.set(day, new Set()); }
+        dayEntries.get(day).add(entry);
+      }
+    }
+    function rebuildEntryIndex() {
+      entryKeys.clear(); entryIds.clear(); dayEntries.clear(); longEntries.clear();
+      result.entries.forEach(indexEntry);
+    }
     function addEntry(entry, index, localSource) {
       var info = metadata(entry);
-      if (result.entries.some(function (candidate) { return metadata(candidate).key === info.key; })) { duplicates++; return; }
-      var clashes = result.entries.filter(function (candidate) {
+      var newOrigin = !localSource && !originalEntryIds.has(entry.id) && !originalEntryKeys.has(info.key) ?
+        (entry.id ? 'id:' + entry.id : 'content:' + info.key) : undefined;
+      function markNew(part) { if (newOrigin !== undefined) { metadata(part).newOrigin = newOrigin; } return part; }
+      if (entryKeys.has(info.key)) { duplicates++; return; }
+      var span = days(info), candidates;
+      if (!span) { candidates = result.entries; }
+      else {
+        var matching = new Set(entryIds.get(entry.id) || []);
+        longEntries.forEach(function (item) { matching.add(item); });
+        for (var day = span[0]; day <= span[1]; day++) {
+          (dayEntries.get(day) || []).forEach(function (item) { matching.add(item); });
+        }
+        candidates = Array.from(matching).sort(function (a, b) { return metadata(a).order - metadata(b).order; });
+      }
+      var clashes = candidates.filter(function (candidate) {
         var other = metadata(candidate);
         return candidate.id === entry.id || (other.start < info.end && info.start < other.end);
       });
-      if (!clashes.length) { result.entries.push(clone(entry)); if (!localSource) { added++; } return; }
+      if (!clashes.length) {
+        var copied = markNew(clone(entry)); indexEntry(copied, result.entries.length); result.entries.push(copied);
+        if (!localSource) { added++; } return;
+      }
       var choice = conflict((localSource ? 'local:' : '') + 'entries:' + (entry.id || index), '时间记录冲突：' + (entry.startDate || entry.date), clashes, [entry], localSource ? 'current' : '');
       if (choice === 'incoming') {
         result.entries = result.entries.reduce(function (list, candidate) {
           if (candidate.id === entry.id) { return list; }
-          return list.concat(subtract(candidate, [entry]));
-        }, []).concat([clone(entry)]);
+          var origin = metadata(candidate).newOrigin;
+          return list.concat(subtract(candidate, [entry]).map(function (part) {
+            if (origin !== undefined) { metadata(part).newOrigin = origin; }
+            return part;
+          }));
+        }, []).concat([markNew(clone(entry))]);
+        rebuildEntryIndex();
       } else if (choice === 'current' && !clashes.some(function (candidate) { return candidate.id === entry.id; })) {
-        result.entries = result.entries.concat(subtract(entry, clashes));
+        subtract(entry, clashes).forEach(function (part) { markNew(part); indexEntry(part, result.entries.length); result.entries.push(part); });
       }
     }
     (current.entries || []).forEach(function (entry, index) { addEntry(entry, index, true); });
     (incoming.entries || []).forEach(function (entry, index) { addEntry(entry, index, false); });
+    // 同一条日志因冲突拆成多段仍计一条；替换已有 ID 的日志属于修改。
+    additions.entries = new Set(result.entries.map(function (entry) { return metadata(entry).newOrigin; })
+      .filter(function (origin) { return origin !== undefined; })).size;
     ['hiddenSkills', 'hiddenAchievements'].forEach(function (key) {
       var ids = (result[key] || []).concat(incoming[key] || []).map(function (id) { return key === 'hiddenSkills' ? (skillIds[id] || id) : id; });
       result[key] = Array.from(new Set(ids));
     });
     ['focus', 'entryCategory'].forEach(function (key) { if (!result[key]) { result[key] = incoming[key] || ''; } });
     result.firstRun = false;
-    return { state: result, conflicts: conflicts, unresolved: conflicts.filter(function (item) { return !item.choice; }).length, added: added, duplicates: duplicates };
+    additions.total = Object.keys(additions).reduce(function (total, key) { return total + (key === 'notifications' ? 0 : additions[key]); }, 0);
+    return { state: result, conflicts: conflicts, unresolved: conflicts.filter(function (item) { return !item.choice; }).length,
+      added: added, duplicates: duplicates, additions: additions };
   }
 
   function uniqueFilename(now, token) {
@@ -222,10 +277,19 @@
     (before.trashEntries || []).forEach(function (item) {
       if (!ids.has(item.id)) { result.trashEntries.push(clone(item)); ids.add(item.id); }
     });
+    var exact = new Set(), byContent = new Map();
+    function content(entry) { return JSON.stringify([entry.category, entry.activity, entry.level || 'INFO']); }
+    (result.entries || []).forEach(function (entry) {
+      exact.add(JSON.stringify(entryContent(entry)));
+      var key = content(entry);
+      if (!byContent.has(key)) { byContent.set(key, []); }
+      byContent.get(key).push({ entry: entry, start: stamp(entry, false), end: stamp(entry, true) });
+    });
     (before.entries || []).forEach(function (entry) {
-      var retained = (result.entries || []).filter(function (candidate) {
-        return candidate.category === entry.category && candidate.activity === entry.activity && (candidate.level || 'INFO') === (entry.level || 'INFO');
-      });
+      if (exact.has(JSON.stringify(entryContent(entry)))) { return; }
+      var start = stamp(entry, false), end = stamp(entry, true);
+      var retained = (byContent.get(content(entry)) || []).filter(function (item) { return item.start < end && start < item.end; })
+        .map(function (item) { return item.entry; });
       subtract(entry, retained).forEach(function (part) {
         var id = 'imported-' + entry.id + '-' + Math.round(stamp(part, false) * 60000) + '-' + Math.round(stamp(part, true) * 60000) + '-' + deletedAt;
         if (!ids.has(id)) {

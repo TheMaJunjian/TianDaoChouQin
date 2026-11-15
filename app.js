@@ -3614,6 +3614,45 @@
     return backupSession;
   }
 
+  async function resolveFolderSelection(directory, mode, session, exporting) {
+    var identified = await TianDaoFolder.inspectDirectory(directory,
+      [backupLocations.get('update-folder'), backupLocations.get('import-folder')].filter(Boolean),
+      [backupLocations.get('export-folder')].filter(Boolean));
+    if (session !== backupSession) { throw new DOMException('操作已取消', 'AbortError'); }
+    if (identified.kind === 'inside') {
+      directory = identified.directory;
+      if (directory.queryPermission && await directory.queryPermission({ mode: mode }) !== 'granted') {
+        if (session !== backupSession) { throw new DOMException('操作已取消', 'AbortError'); }
+        if (!directory.requestPermission || await directory.requestPermission({ mode: mode }) !== 'granted') {
+          throw new Error('所选位置在天道酬勤目录内部，请授权所属目录，或直接选择包含「备份清单.json」的外层文件夹。');
+        }
+      }
+      return TianDaoFolder.readManifest(directory);
+    }
+    if (identified.kind === 'root') { return identified.header; }
+    if (identified.kind === 'internal') {
+      throw new Error('所选的是版本或日期子目录。请选择包含「备份清单.json」的天道酬勤文件夹，或它的上一级目录。');
+    }
+    if (exporting) { return { parent: directory }; }
+    if (identified.candidates.length === 1) { return identified.candidates[0]; }
+    if (identified.candidates.length > 1) {
+      throw new Error('此位置包含多个天道酬勤目录：' + identified.candidates.map(function (item) { return item.name; }).join('、') + '。请明确选择其中一个，避免更新或导入错误目录。');
+    }
+    throw new Error('未找到天道酬勤目录。请选择包含「备份清单.json」的文件夹，或它的上一级目录。');
+  }
+
+  async function prepareFolderUpdate(header, session) {
+    var snapshot = await TianDaoFolder.readDirectory(header.directory, null, header);
+    if (session !== backupSession) { return; }
+    if (snapshot.records.some(function (record) { return record.error; })) { throw new Error('文件夹含缺失或无效文档，不能更新。'); }
+    var existing = readBackupText(JSON.stringify(TianDaoFolder.assemble(snapshot.records.map(function (record) { return record.document; }), defaultState())));
+    await backupLocations.remember('update-folder', header.directory);
+    if (session !== backupSession) { return; }
+    syncBackupState();
+    pendingFolderUpdate = { snapshot: snapshot, choices: {}, baseline: backupFingerprint(state), existing: existing };
+    renderFolderUpdate();
+  }
+
   function downloadFolderZip(snapshot, name) {
     var bundle = TianDaoFolder.packageFiles(snapshot, newBackupFilename().replace(/\.json$/, ''));
     var blob = TianDaoFolder.zipFiles(bundle.files, name);
@@ -3642,6 +3681,10 @@
         return;
       }
       var parent = await window.showDirectoryPicker(backupLocations.options('export-folder', { mode: 'readwrite' }));
+      await backupLocations.ready;
+      var target = await resolveFolderSelection(parent, 'readwrite', session, true);
+      if (session !== backupSession) { return; }
+      if (target.directory) { await prepareFolderUpdate(target, session); return; }
       await backupLocations.remember('export-folder', parent);
       if (session !== backupSession) { return; }
       var directory = await TianDaoFolder.uniqueDirectory(parent, name);
@@ -3714,8 +3757,10 @@
         }
       }
       if (session !== backupSession) { return; }
-      var snapshot = await TianDaoFolder.readDirectory(directory, validateFolderDocument);
-      if (session === backupSession) { await backupLocations.remember('import-folder', directory); }
+      var header = await resolveFolderSelection(directory, 'read', session);
+      if (session !== backupSession) { return; }
+      var snapshot = await TianDaoFolder.readDirectory(header.directory, validateFolderDocument, header);
+      if (session === backupSession) { await backupLocations.remember('import-folder', header.directory); }
       return snapshot;
     }, session);
   }
@@ -3762,22 +3807,17 @@
         }
       }
       if (session !== backupSession) { return; }
-      var snapshot = await TianDaoFolder.readDirectory(directory, validateFolderDocument);
-      if (session !== backupSession) { return; }
-      await TianDaoFolder.verifySnapshot(snapshot);
-      var existing = readBackupText(JSON.stringify(TianDaoFolder.assemble(snapshot.records.map(function (record) { return record.document; }), defaultState())));
-      if (session !== backupSession) { return; }
-      await backupLocations.remember('update-folder', directory);
+      var header = await resolveFolderSelection(directory, 'readwrite', session);
       if (session !== backupSession) { return; }
       if (changingPath) {
+        // 更改位置只检查清单；全部文档在真正更新时再读取和验证。
+        await backupLocations.remember('update-folder', header.directory);
+        if (session !== backupSession) { return; }
         closeDetailModal();
-        toast('更新位置已改为「' + directory.name + '」。点击「更新文件夹」即可使用。', { level: 'SYSTEM' });
+        toast('更新位置已改为「' + header.name + '」。点击「更新文件夹」即可使用。', { level: 'SYSTEM' });
         return;
       }
-      syncBackupState();
-      pendingFolderUpdate = { snapshot: snapshot, choices: {}, baseline: backupFingerprint(state),
-        existing: existing };
-      renderFolderUpdate();
+      await prepareFolderUpdate(header, session);
     } catch (error) {
       if (session === backupSession) { closeDetailModal(); }
       backupError(error);
@@ -3787,9 +3827,19 @@
   function renderFolderUpdate(message) {
     var pending = pendingFolderUpdate;
     var plan = TianDaoBackup.planMerge(pending.existing, state, pending.choices, defaultState());
+    var additions = plan.additions;
+    var details = [['entries', '日志', '条'], ['notes', '备注', '条'], ['regressions', '退步', '条'],
+      ['noteCompletions', '备注完成记录', '条'], ['skills', '技能', '项'], ['quests', '支线任务', '项'],
+      ['achievements', '成就', '项'], ['trashEntries', '回收站日志', '条']].filter(function (item) {
+      return additions[item[0]] > 0;
+    }).map(function (item) { return item[1] + ' ' + additions[item[0]] + ' ' + item[2]; }).join(' · ');
     openDetailModal('检查文件夹更新', '<p class="backup-summary">文件夹：' + escapeHtml(pending.snapshot.name) +
       '</p><p class="hint">保留文件夹独有的记录，加入当前数据。原版本会保留；冲突可逐项选择。</p>' +
       (message ? '<p class="backup-warning">' + escapeHtml(message) + '</p>' : '') +
+      '<div class="backup-summary" id="folderUpdateSummary" role="status"><strong>预计新增 ' + additions.total + ' 条记录</strong>' +
+      (details ? '<br>' + details : '<br>暂无新增记录') +
+      (additions.notifications ? '<br>另新增系统提示 ' + additions.notifications + ' 条' : '') + '</div>' +
+      '<p class="hint">按当前选择计算，不含重复记录和已有记录的修改；重叠日志拆分后仍按原始记录计数。</p>' +
       '<p class="backup-summary">' + plan.conflicts.length + ' 项冲突，剩余 ' + plan.unresolved + ' 项待处理。</p>' +
       (plan.conflicts.length ? '<div class="log-actions"><button type="button" class="btn ghost" data-folder-choice="current">全部保留文件夹</button>' +
         '<button type="button" class="btn ghost" data-folder-choice="incoming">全部采用当前数据</button></div>' : '') +
@@ -3815,13 +3865,14 @@
       if (plan.unresolved) { renderFolderUpdate(); return; }
       var result = TianDaoBackup.preserveDisplacedEntries(pending.existing, plan.state, new Date().toISOString());
       result.ui = cloneState(state.ui); result.viewDate = state.viewDate; result.entryCategory = state.entryCategory;
+      result.focus = state.focus;
       var coversCurrent = TianDaoBackup.planMerge(result, state, {}, defaultState()).conflicts.length === 0;
       var fingerprint = TianDaoBackupStatus.fingerprint(coversCurrent ? state : result);
-      await TianDaoFolder.writeDirectory(pending.snapshot.directory, result, newBackupFilename().replace(/\.json$/, ''), pending.snapshot,
+      var written = await TianDaoFolder.writeDirectory(pending.snapshot.directory, result, newBackupFilename().replace(/\.json$/, ''), pending.snapshot,
         function () { return session === backupSession; });
       recordBackupSaved(fingerprint, pending.snapshot.name + '/');
       if (session === backupSession) { closeDetailModal(); }
-      toast('文件夹已更新，上一版本已保留。', { level: 'SYSTEM' });
+      toast(written.unchanged ? '文件夹已是最新，无需写入。' : '文件夹已更新：写入 ' + written.changed + ' 份文档，' + written.reused + ' 份无需重写。上一版本已保留。', { level: 'SYSTEM' });
     } catch (error) {
       if (session === backupSession) { closeDetailModal(); }
       backupError(error);

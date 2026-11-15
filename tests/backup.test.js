@@ -29,6 +29,21 @@ function noOverlaps(entries) {
   times.forEach((span, index) => { if (index) { assert.ok(times[index - 1][1] <= span[0]); } });
 }
 
+test('indexed log merging preserves long spans and same-ID edits across distant days', () => {
+  const original = state({ entries: [entry('long', 0, 60, '跨月', '2026-01-01', '2026-03-01'),
+    entry('moved', 60, 120, '原日志', '2026-04-01')] });
+  const incoming = state({ entries: [entry('inside', 60, 120, '新日志', '2026-02-01'),
+    entry('moved', 60, 120, '改期', '2026-06-01')] });
+  const plan = resolved(original, incoming, 'incoming');
+  assert.equal(plan.state.entries.filter(item => item.id === 'moved').length, 1);
+  assert.equal(plan.state.entries.find(item => item.id === 'moved').date, '2026-06-01');
+  assert.equal(plan.state.entries.filter(item => item.activity === '跨月').length, 2);
+  noOverlaps(plan.state.entries);
+  const repeated = backup.planMerge(plan.state, incoming, {}, state());
+  assert.equal(repeated.unresolved, 0);
+  assert.deepEqual(repeated.state.entries, plan.state.entries);
+});
+
 test('disjoint backups preserve both sides, deduplicate repeated imports, and do not mutate inputs', () => {
   const local = state({ entries: [entry('a', 60, 120)], skills: [{ id: 's', name: '阅读', hours: 10 }] });
   const incoming = state({ entries: [entry('b', 120, 180)], notes: [{ id: 'n', date: '2026-10-24', createdAt: '2026-10-24T00:00:00Z', text: '备注' }] });
@@ -42,6 +57,40 @@ test('disjoint backups preserve both sides, deduplicate repeated imports, and do
   const repeated = backup.planMerge(plan.state, incoming, {}, state());
   assert.equal(repeated.unresolved, 0);
   assert.deepEqual(repeated.state, plan.state);
+});
+
+test('addition summaries count distinct records by type, exclude edits and list notifications separately', () => {
+  const note = { id: 'old-note', text: '已有备注', date: '2026-10-24', createdAt: '2026-10-24T00:00:00Z' };
+  const current = state({ entries: [entry('old-entry', 0, 60)], notes: [note], skills: [{ id: 'read', name: '阅读', hours: 0 }],
+    notifications: [{ id: 'old-notice', text: '旧提示', ts: 1 }] });
+  const incoming = state({
+    entries: [entry('old-entry', 180, 240, '修改已有日志'), entry('new-entry', 60, 120)],
+    notes: [Object.assign({}, note, { id: 'same-note-new-id' }), { id: 'new-note', text: '新备注', date: '2026-10-24' }],
+    skills: [{ id: 'read', name: '阅读', hours: 0 }, { id: 'code', name: '编程', hours: 10 }],
+    noteCompletions: [{ id: 'new-note', skillId: 'read', skillName: '阅读', hours: 1, completedAt: '2026-10-24T01:00:00Z' },
+      { id: 'loss', skillId: 'read', skillName: '阅读', hours: -1, completedAt: '2026-10-24T02:00:00Z' }],
+    achievements: [{ id: 'ach', name: '新成就', points: 1 }], quests: { side: [{ id: 'quest', title: '新任务' }] },
+    trashEntries: [{ id: 'trash', entry: entry('removed', 300, 360), deletedAt: '2026-10-24T03:00:00Z' }],
+    notifications: current.notifications.concat([{ id: 'new-notice', text: '新提示', ts: 2 }])
+  });
+  const plan = resolved(current, incoming, 'incoming');
+  assert.deepEqual(plan.additions, { entries: 1, notes: 1, noteCompletions: 1, regressions: 1, skills: 1,
+    achievements: 1, quests: 1, trashEntries: 1, notifications: 1, total: 8 });
+  assert.equal(backup.planMerge(plan.state, incoming, {}, state()).additions.total, 0);
+});
+
+test('addition summaries follow conflict choices without counting split or displaced logs twice', () => {
+  const current = state({ entries: [entry('existing', 60, 120)] });
+  const incoming = state({ entries: [entry('new', 0, 180)] });
+  assert.equal(backup.planMerge(current, incoming, {}, state()).additions.entries, 0);
+  const keep = resolved(current, incoming, 'current');
+  assert.equal(keep.state.entries.length, 3);
+  assert.equal(keep.additions.entries, 1, 'two uncovered fragments belong to one incoming log');
+  assert.equal(resolved(current, incoming, 'incoming').additions.entries, 1);
+  const competing = state({ entries: [entry('first', 0, 60), entry('second', 0, 60)] });
+  assert.equal(resolved(state(), competing, 'incoming').additions.entries, 1, 'the displaced new log is no longer counted');
+  const edited = state({ entries: [entry('existing', 0, 180)] });
+  assert.equal(resolved(current, edited, 'incoming').additions.entries, 0, 'changing an existing ID is an edit');
 });
 
 test('semantic duplicate entries and notes with different IDs do not accumulate', () => {

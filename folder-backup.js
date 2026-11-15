@@ -13,6 +13,18 @@
     day: ['entries', 'notes', 'noteCompletions', 'trashEntries', 'notifications']
   };
   var NAMES = { profile: '属性.json', tasks: '任务与成就.json', preferences: '界面设置.json' };
+  async function parallel(items, limit, action) {
+    var results = new Array(items.length), next = 0, failure;
+    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async function () {
+      while (!failure && next < items.length) {
+        var index = next++;
+        try { results[index] = await action(items[index], index); }
+        catch (error) { failure = error; }
+      }
+    }));
+    if (failure) { throw failure; }
+    return results;
+  }
   function clone(value) { return JSON.parse(JSON.stringify(value)); }
   function normalized(value) { return String(value || '').trim().toLowerCase(); }
   function validDate(value) {
@@ -47,8 +59,14 @@
       return days.get(date).data;
     }
     var notes = new Map((state.notes || []).map(function (note) { return [note.id, note]; }));
+    var regressions = new Map((state.noteCompletions || []).filter(function (item) { return item.hours < 0; })
+      .map(function (item) { return [item.id, item]; }));
     (state.entries || []).forEach(function (entry) { day(entry.startDate || entry.date).entries.push(clone(entry)); });
-    (state.notes || []).forEach(function (note) { day(note.date).notes.push(clone(note)); });
+    (state.notes || []).forEach(function (note) {
+      var regression = regressions.get(note.id);
+      // 旧版退步备注与扣减记录同行，部分导入也不能把它恢复成未完成备注。
+      day(regression ? localDate(regression.completedAt) : note.date).notes.push(clone(note));
+    });
     (state.noteCompletions || []).forEach(function (item) {
       var note = notes.get(item.id);
       // 正数完成记录与备注同行，选择部分日期时也不能把已完成备注变回未完成。
@@ -116,19 +134,30 @@
     });
     return result;
   }
-  function packageFiles(state, token) {
+  function packageFiles(state, token, previous) {
     safePath(token);
     if (token.includes('/')) { throw new Error('备份版本名无效。'); }
     var files = new Map();
+    var old = new Map((previous ? previous.records : []).map(function (record) { return [record.name, record]; }));
+    var reused = 0;
     var manifest = { format: FORMAT, version: 1, savedAt: new Date().toISOString(), documents: [] };
     createDocuments(state).forEach(function (doc) {
       var name = documentPath(doc);
       var path = '版本/' + token + '/' + name;
-      files.set(path, JSON.stringify(doc, null, 2));
+      var text = JSON.stringify(doc, null, 2);
+      var existing = old.get(name);
+      if (existing && !existing.error && existing.raw === text) { path = existing.path; reused++; }
+      else { files.set(path, text); }
       manifest.documents.push({ path: path, name: name, type: doc.type });
     });
-    files.set(MANIFEST, JSON.stringify(manifest, null, 2));
-    return { manifest: manifest, files: files };
+    var changed = files.size;
+    var unchanged = !!previous && changed === 0 && previous.records.length === manifest.documents.length;
+    var raw = JSON.stringify(manifest, null, 2);
+    // 每个版本保留清单，未变化文档可引用旧版本，仍能还原任一历史快照。
+    files.set('版本/' + token + '/版本清单.json', raw);
+    if (previous) { files.set('版本/' + token + '/上一版本清单.json', previous.raw); }
+    files.set(MANIFEST, raw);
+    return { manifest: manifest, files: files, changed: changed, reused: reused, unchanged: unchanged };
   }
   function parseManifest(raw) {
     var value = JSON.parse(String(raw).replace(/^\uFEFF/, ''));
@@ -143,31 +172,95 @@
     if (!Object.values(NAMES).every(function (name) { return names.has(name); })) { throw new Error('备份清单缺少通用文档。'); }
     return value;
   }
-  async function fileAt(directory, path, create) {
-    var parts = safePath(path).split('/');
-    for (var part of parts.slice(0, -1)) { directory = await directory.getDirectoryHandle(part, { create: !!create }); }
-    return directory.getFileHandle(parts.at(-1), { create: !!create });
+  function directoryAccess(directory, create) {
+    var directories = new Map([['', Promise.resolve(directory)]]), files = new Map();
+    function directoryAt(path) {
+      if (!directories.has(path)) {
+        var parts = path.split('/'), name = parts.pop();
+        directories.set(path, directoryAt(parts.join('/')).then(function (parent) { return parent.getDirectoryHandle(name, { create: !!create }); }));
+      }
+      return directories.get(path);
+    }
+    function fileAt(path) {
+      safePath(path);
+      if (!files.has(path)) {
+        var parts = path.split('/'), name = parts.pop();
+        files.set(path, directoryAt(parts.join('/')).then(function (parent) { return parent.getFileHandle(name, { create: !!create }); }));
+      }
+      return files.get(path);
+    }
+    return { fileAt: fileAt, readText: async function (path) { return (await (await fileAt(path)).getFile()).text(); } };
   }
-  async function readSource(readText, validate) {
+  async function readManifest(directory) {
+    var access = directoryAccess(directory, false);
+    var raw = await access.readText(MANIFEST);
+    return { raw: raw, manifest: parseManifest(raw), readText: access.readText, directory: directory, name: directory.name };
+  }
+  async function probeManifest(directory) {
+    try { return await readManifest(directory); }
+    catch (error) { if (error.name === 'NotFoundError') { return null; } throw error; }
+  }
+  async function inspectDirectory(directory, knownRoots, knownParents) {
+    var header = await probeManifest(directory);
+    if (header) { return { kind: 'root', directory: directory, header: header }; }
+    // resolve 只比较真正的目录关系，不按目录名称猜测，也不会把同级目录当成内部目录。
+    for (var root of knownRoots || []) {
+      if (!root || !root.resolve) { continue; }
+      try {
+        var relative = await root.resolve(directory);
+        if (relative && relative.length) { return { kind: 'inside', directory: root }; }
+      } catch (ignored) { /* 失效的旧句柄不影响新目录识别。 */ }
+    }
+    for (var parent of knownParents || []) {
+      if (!parent || !parent.resolve) { continue; }
+      try {
+        var path = await parent.resolve(directory);
+        if (path && path.length > 1) {
+          var ancestor = await parent.getDirectoryHandle(path[0]);
+          if (await probeManifest(ancestor)) { return { kind: 'inside', directory: ancestor }; }
+        }
+      } catch (ignored) { /* 只在已经授权的范围内寻找根目录。 */ }
+    }
+    var children = [], candidates = [], sampleFile;
+    for await (var [name, child] of directory.entries()) {
+      if (name === '版本清单.json' || name === '上一版本清单.json') { return { kind: 'internal' }; }
+      if (child.kind === 'directory') { children.push(child); }
+      else if (name === '属性.json' || /^\d{4}-\d{2}-\d{2}\.json$/.test(name)) { sampleFile = sampleFile || child; }
+      if (children.length > 256) { throw new Error('此目录包含较多子目录，请直接选择天道酬勤文件夹。'); }
+    }
+    if (sampleFile) {
+      try {
+        var doc = JSON.parse(await (await sampleFile.getFile()).text());
+        if (doc && doc.format === 'tiandao-document') { return { kind: 'internal' }; }
+      } catch (ignored) { /* 普通目录中的同名文件不是识别依据。 */ }
+    }
+    var headers = await parallel(children, 8, async function (child) {
+      try { return await probeManifest(child); } catch (ignored) { return null; }
+    });
+    headers.forEach(function (item) { if (item) { candidates.push(item); } });
+    if (!candidates.length && directory.name === '版本') { return { kind: 'internal' }; }
+    return { kind: 'parent', directory: directory, candidates: candidates };
+  }
+  async function readSource(readText, validate, header) {
     var raw;
-    try { raw = await readText(MANIFEST); }
+    try { raw = header ? header.raw : await readText(MANIFEST); }
     catch (error) {
       if (error.name === 'NotFoundError' || error.message === '缺少文档：' + MANIFEST) { throw new Error('请选择包含「' + MANIFEST + '」的备份文件夹。'); }
       throw error;
     }
-    var manifest = parseManifest(raw);
-    var records = await Promise.all(manifest.documents.map(async function (descriptor) {
+    var manifest = header ? header.manifest : parseManifest(raw);
+    var records = await parallel(manifest.documents, 12, async function (descriptor) {
       try {
         var text = await readText(descriptor.path);
         var document = parseDocument(text, descriptor);
         if (validate) { validate(document); }
         return { ...descriptor, raw: text, document: document };
       } catch (error) { return { ...descriptor, error: error.message }; }
-    }));
+    });
     return { raw: raw, manifest: manifest, records: records, readText: readText };
   }
-  async function readDirectory(directory, validate) {
-    var result = await readSource(async function (path) { return (await (await fileAt(directory, path)).getFile()).text(); }, validate);
+  async function readDirectory(directory, validate, header) {
+    var result = await readSource(header ? header.readText : directoryAccess(directory, false).readText, validate, header);
     result.directory = directory;
     result.name = directory.name;
     return result;
@@ -183,7 +276,14 @@
       if (texts.has(path)) { throw new Error('文件夹包含重复路径。'); }
       texts.set(path, file);
     });
+    var prefix = '';
+    if (!texts.has(MANIFEST)) {
+      var roots = Array.from(texts.keys()).filter(function (path) { return path.split('/').length === 2 && path.endsWith('/' + MANIFEST); });
+      if (roots.length > 1) { throw new Error('此位置包含多个天道酬勤目录，请选择其中一个文件夹。'); }
+      if (roots.length === 1) { prefix = roots[0].slice(0, -MANIFEST.length); name = prefix.slice(0, -1); }
+    }
     var result = await readSource(async function (path) {
+      path = prefix + path;
       if (!texts.has(path)) { throw new Error('缺少文档：' + path); }
       return texts.get(path).text();
     }, validate);
@@ -193,9 +293,9 @@
   async function verifySnapshot(snapshot) {
     if (snapshot.records.some(function (item) { return item.error; })) { throw new Error('文件夹含缺失或无效文档，不能更新。'); }
     if (await snapshot.readText(MANIFEST) !== snapshot.raw) { throw new Error('文件夹在检查后已发生变化，请重新选择。'); }
-    for (var item of snapshot.records) {
+    await parallel(snapshot.records, 12, async function (item) {
       if (await snapshot.readText(item.path) !== item.raw) { throw new Error('文件夹文档在检查后已发生变化：' + item.name); }
-    }
+    });
   }
   async function uniqueDirectory(parent, name) {
     safePath(name);
@@ -217,24 +317,28 @@
   async function writeDirectory(directory, state, token, expected, isCurrent) {
     function checkSession() { if (isCurrent && !isCurrent()) { throw Object.assign(new Error('文件夹操作已取消。'), { name: 'AbortError' }); } }
     checkSession();
-    if (expected) { await verifySnapshot(expected); }
+    if (expected && expected.records.some(function (item) { return item.error; })) { throw new Error('文件夹含缺失或无效文档，不能更新。'); }
+    if (expected && await expected.readText(MANIFEST) !== expected.raw) { throw new Error('文件夹在检查后已发生变化，请重新选择。'); }
+    var bundle = packageFiles(state, token, expected);
+    if (bundle.unchanged) { await verifySnapshot(expected); checkSession(); return bundle; }
     var versions = await directory.getDirectoryHandle('版本', { create: true });
     var version = await uniqueDirectory(versions, token);
-    var bundle = packageFiles(state, version.name);
-    for (var [path, text] of bundle.files) {
-      if (path === MANIFEST) { continue; }
+    if (version.name !== token) { bundle = packageFiles(state, version.name, expected); }
+    var access = directoryAccess(directory, true);
+    await parallel(Array.from(bundle.files).filter(function (item) { return item[0] !== MANIFEST; }), 6, async function (item) {
+      var path = item[0], text = item[1];
       checkSession();
-      var handle = await fileAt(directory, path, true);
+      var handle = await access.fileAt(path);
       await backup.writeFile(handle, text, '');
       if (await (await handle.getFile()).text() !== text) { throw new Error('文档写入校验失败：' + path); }
-    }
-    if (expected) { await verifySnapshot(expected); }
+    });
     checkSession();
     // 最后原子替换清单；此前产生的未完成版本不会被导入流程读取。
-    var manifest = await fileAt(directory, MANIFEST, true);
+    var manifest = await access.fileAt(MANIFEST);
     await backup.writeFile(manifest, bundle.files.get(MANIFEST), expected ? expected.raw : '', async function () {
       checkSession();
       if (expected) { await verifySnapshot(expected); }
+      checkSession();
     });
     return bundle;
   }
@@ -267,6 +371,7 @@
     return new Blob(chunks.concat(central, [end.data]), { type: 'application/zip' });
   }
   return { manifestName: MANIFEST, createDocuments: createDocuments, parseDocument: parseDocument, documentPath: documentPath,
+    readManifest: readManifest, inspectDirectory: inspectDirectory,
     assemble: assemble, packageFiles: packageFiles, readDirectory: readDirectory, readFiles: readFiles,
     verifySnapshot: verifySnapshot, uniqueDirectory: uniqueDirectory, writeDirectory: writeDirectory, zipFiles: zipFiles };
 });

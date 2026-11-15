@@ -1009,6 +1009,7 @@ test('browser persistence and refresh recovery', { skip: !browserPath, timeout: 
       await p.click('#hostName');
       await p.set('nameInput', '更新文件夹的宿主');
       await p.click('#nameConfirm');
+      await p.set('focusCategory', '编程', 'change');
       await p.click('#updateFolder');
       await until(() => p.run(() => document.getElementById('detailTitle').textContent === '检查文件夹更新'));
       assert.equal(await p.run(() => document.getElementById('detailFolderAction').disabled), true);
@@ -1019,10 +1020,102 @@ test('browser persistence and refresh recovery', { skip: !browserPath, timeout: 
       const updated = await p.run(async () => {
         const snapshot = await TianDaoFolder.readDirectory(window.folderRoot);
         return { host: snapshot.records.find(item => item.document.type === 'profile').document.data.host.name,
+          focus: snapshot.records.find(item => item.document.type === 'profile').document.data.focus,
           versions: (await window.folderRoot.getDirectoryHandle('版本')).children.size };
       });
       assert.equal(updated.host, '更新文件夹的宿主');
+      assert.equal(updated.focus, '编程');
       assert.equal(updated.versions, 2);
+      await p.set('focusCategory', '', 'change');
+      await p.click('#updateFolder');
+      await until(() => p.run(() => document.getElementById('detailTitle').textContent === '检查文件夹更新'));
+      await p.click('#detailFolderAction');
+      await until(async () => !await p.visible('detailModal'));
+      assert.equal(await p.run(async () => (await TianDaoFolder.readDirectory(window.folderRoot)).records
+        .find(item => item.document.type === 'profile').document.data.focus), '');
+      assert.equal(await p.run(() => document.getElementById('backupStatus').textContent), '当前业务数据已备份到文件');
+      await p.close();
+    });
+
+    await t.test('folder update preview shows additions by type and zero on repeated updates', async () => {
+      const p = await page(fixture({
+        entries: [{ id: 'new-log', date: '2026-11-06', startDate: '2026-11-06', endDate: '2026-11-06',
+          start: 60, end: 120, category: '阅读', activity: '新增阅读', level: 'INFO' }],
+        notes: [{ id: 'old-note', text: '旧备注', date: '2026-11-06', createdAt: '2026-11-06T08:00:00Z' },
+          { id: 'new-note', text: '新备注', date: '2026-11-06', createdAt: '2026-11-06T09:00:00Z' }],
+        noteCompletions: [{ id: 'new-loss', hours: -1, skillId: 'reading', skillName: '阅读', completedAt: '2026-11-06T10:00:00Z' }]
+      }));
+      await folderSetup(p);
+      await p.run(async data => {
+        data.host.name = '文件夹中的旧称号'; data.entries = []; data.notes = data.notes.slice(0, 1); data.noteCompletions = [];
+        await TianDaoFolder.writeDirectory(window.folderRoot, data, 'original');
+      }, await p.state());
+      await p.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+      await p.click('[data-tab="entry"]'); await p.click('#updateFolder');
+      await until(() => p.run(() => !!document.getElementById('folderUpdateSummary')));
+      const summary = await p.run(() => document.getElementById('folderUpdateSummary').textContent);
+      assert.match(summary, /预计新增 3 条记录/);
+      for (const kind of ['日志', '备注', '退步']) { assert.ok(summary.includes(kind + ' 1 条')); }
+      assert.equal(await p.run(() => document.getElementById('detailFolderAction').disabled), true);
+      assert.equal(await p.run(() => document.documentElement.scrollWidth <= innerWidth), true);
+      await p.click('[data-folder-choice="incoming"]');
+      assert.match(await p.run(() => document.getElementById('folderUpdateSummary').textContent), /预计新增 3 条记录/);
+      await p.click('#detailFolderAction');
+      await until(async () => !await p.visible('detailModal'));
+      await p.click('#updateFolder');
+      await until(() => p.run(() => !!document.getElementById('folderUpdateSummary')));
+      assert.match(await p.run(() => document.getElementById('folderUpdateSummary').textContent), /预计新增 0 条记录/);
+      await p.close();
+    });
+
+    await t.test('directory recognition handles parents and internal paths without nested exports or full reads on path changes', async () => {
+      const p = await page();
+      await p.run(async () => {
+        const root = await navigator.storage.getDirectory();
+        window.folderParent = await root.getDirectoryHandle('导出位置', { create: true });
+        window.showDirectoryPicker = async () => window.folderParent;
+      });
+      await p.click('[data-tab="entry"]'); await p.click('#exportData');
+      await until(() => p.run(key => !!JSON.parse(localStorage.getItem(key + '.backup-status'))?.lastSavedAt, storageKey));
+      await p.run(async () => {
+        window.exportedDirectory = await window.folderParent.getDirectoryHandle('天道酬勤');
+        const versions = await window.exportedDirectory.getDirectoryHandle('版本');
+        for await (const version of versions.values()) { window.internalDirectory = await version.getDirectoryHandle('日期'); break; }
+        window.fullFolderReads = 0;
+        const originalRead = TianDaoFolder.readDirectory;
+        TianDaoFolder.readDirectory = async (...args) => { window.fullFolderReads++; return originalRead(...args); };
+        window.showDirectoryPicker = async () => window.internalDirectory;
+      });
+      await p.click('#changeFolderPath');
+      await until(async () => !await p.visible('detailModal'));
+      assert.equal(await p.run(() => window.fullFolderReads), 0, 'changing paths only resolves the root and checks its manifest');
+      assert.equal(await p.run(() => document.getElementById('folderUpdateLocation').textContent), '更新位置：天道酬勤');
+      await p.click('#exportData');
+      await until(() => p.run(() => document.getElementById('detailTitle').textContent === '检查文件夹更新'));
+      assert.equal(await p.run(() => window.fullFolderReads), 1);
+      assert.equal(await p.run(async () => {
+        try { await window.exportedDirectory.getDirectoryHandle('天道酬勤'); return true; }
+        catch (error) { if (error.name === 'NotFoundError') { return false; } throw error; }
+      }), false, 'exporting inside an existing root offers an update instead of nesting another folder');
+      await p.click('#detailClose');
+      await p.run(() => { window.showDirectoryPicker = async () => window.folderParent; });
+      await p.click('#changeImportFolderPath');
+      await until(() => p.run(() => !!document.querySelector('[data-folder-document]')));
+      assert.equal(await p.run(() => document.getElementById('folderImportLocation').textContent), '导入位置：天道酬勤');
+      await p.click('#detailClose');
+      await p.run(async data => {
+        window.siblingDirectory = await window.folderParent.getDirectoryHandle('同级另一份', { create: true });
+        await TianDaoFolder.writeDirectory(window.siblingDirectory, data, 'initial');
+      }, await p.state());
+      await p.click('#changeFolderPath');
+      await until(async () => !await p.visible('detailModal'));
+      assert.equal(await p.run(() => document.getElementById('folderUpdateLocation').textContent), '更新位置：天道酬勤');
+      assert.equal((await p.state()).notifications.some(item => item.text.includes('多个天道酬勤目录')), true);
+      await p.run(() => { window.showDirectoryPicker = async () => window.siblingDirectory; });
+      await p.click('#changeFolderPath');
+      await until(async () => !await p.visible('detailModal'));
+      assert.equal(await p.run(() => document.getElementById('folderUpdateLocation').textContent), '更新位置：同级另一份');
+      assert.equal(await p.run(() => document.getElementById('folderImportLocation').textContent), '导入位置：天道酬勤');
       await p.close();
     });
 

@@ -6,6 +6,19 @@ function memoryDirectory(name = 'backups', control = { writes: 0 }) {
   const mismatch = () => Object.assign(new Error('Different entry type'), { name: 'TypeMismatchError' });
   return { name, kind: 'directory', children, control,
     async *keys() { yield* children.keys(); },
+    async *entries() { yield* children.entries(); },
+    async isSameEntry(other) { return this === other; },
+    async resolve(other) {
+      if (this === other) { return []; }
+      for (const [name, child] of children) {
+        if (child === other) { return [name]; }
+        if (child.kind === 'directory') {
+          const path = await child.resolve(other);
+          if (path) { return [name, ...path]; }
+        }
+      }
+      return null;
+    },
     async getDirectoryHandle(name, options = {}) {
       if (!children.has(name)) {
         if (!options.create) { throw missing(); }
@@ -18,7 +31,8 @@ function memoryDirectory(name = 'backups', control = { writes: 0 }) {
       if (!children.has(name)) {
         if (!options.create) { throw missing(); }
         children.set(name, { name, kind: 'file', contents: '',
-          async getFile() { const text = this.contents; return { name, size: new TextEncoder().encode(text).length, text: async () => text }; },
+          async getFile() { const text = this.contents; return { name, size: new TextEncoder().encode(text).length,
+            text: async () => { control.reads = (control.reads || 0) + 1; return text; } }; },
           async createWritable() {
             const file = this; let pending;
             return { async write(text) {

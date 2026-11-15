@@ -40,6 +40,18 @@ test('partial dates retain current profile and rewards and remap skill reference
   assert.equal(backup.planMerge(current, partial, {}, defaults()).unresolved, 0);
   assert.equal(folder.assemble(docs, defaults()).skills[0].hours, 0);
 });
+test('partial date imports keep legacy regression notes with their deductions', () => {
+  const input = state({
+    notes: [{ id: 'legacy-loss', date: '2026-11-12', createdAt: '2026-11-12T12:00:00Z', text: '旧退步' }],
+    noteCompletions: [{ id: 'legacy-loss', skillId: 'read', skillName: '阅读', hours: -2, completedAt: '2026-11-15T12:00:00' }]
+  });
+  const days = folder.createDocuments(input).filter(doc => doc.type === 'day');
+  assert.equal(days.length, 1, 'a partial import must not revive a regression as an unfinished note');
+  assert.equal(days[0].date, '2026-11-15', 'regressions are archived by submission date');
+  const restored = folder.assemble(days, defaults());
+  assert.deepEqual(restored.notes, input.notes);
+  assert.deepEqual(restored.noteCompletions, input.noteCompletions);
+});
 test('folder update commits a new version and retains old version and unrelated files', async () => {
   const root = memoryDirectory();
   const directory = await folder.uniqueDirectory(root, 'backup');
@@ -133,4 +145,55 @@ test('ZIP fallback contains UTF-8 filenames and the exact manifest and documents
   assert.deepEqual(actual, new Map(Array.from(bundle.files, ([path, text]) => ['备份/' + path, text])));
   assert.equal(bytes.readUInt32LE(bytes.length - 22), 0x06054b50);
   assert.equal(bytes.readUInt16LE(bytes.length - 12), bundle.files.size);
+});
+test('folder recognition distinguishes roots, parents, siblings and authorized internal paths', async () => {
+  const parent = memoryDirectory('保存位置');
+  const first = await parent.getDirectoryHandle('任意名称', { create: true });
+  await folder.writeDirectory(first, sample(), 'initial');
+  assert.equal((await folder.inspectDirectory(first)).kind, 'root');
+  const detectedParent = await folder.inspectDirectory(parent);
+  assert.deepEqual(detectedParent.candidates.map(item => item.name), ['任意名称']);
+  const version = await (await first.getDirectoryHandle('版本')).getDirectoryHandle('initial');
+  const dates = await version.getDirectoryHandle('日期');
+  assert.equal((await folder.inspectDirectory(dates, [first])).directory, first);
+  assert.equal((await folder.inspectDirectory(dates, [], [parent])).directory, first);
+  assert.equal((await folder.inspectDirectory(dates)).kind, 'internal');
+  assert.equal((await folder.inspectDirectory(version)).kind, 'internal');
+  const sibling = await parent.getDirectoryHandle('同级其他目录', { create: true });
+  assert.equal((await folder.inspectDirectory(sibling, [first], [parent])).kind, 'parent');
+  await folder.writeDirectory(sibling, state(), 'another');
+  assert.equal((await folder.inspectDirectory(sibling, [first])).directory, sibling);
+  assert.equal((await folder.inspectDirectory(parent)).candidates.length, 2);
+  const fromParent = await folder.readFiles(Array.from(folder.packageFiles(sample(), 'one').files, ([path, text]) =>
+    ({ webkitRelativePath: '保存位置/任意名称/' + path, text: async () => text })));
+  assert.equal(fromParent.name, '任意名称');
+  assert.equal(fromParent.records.length, 5);
+});
+test('incremental updates only write changed documents and retain manifests for complete history', async () => {
+  const root = memoryDirectory();
+  const data = state({ notes: Array.from({ length: 300 }, (_, i) => ({ id: 'note-' + i, text: '记录',
+    date: new Date(Date.UTC(2025, 0, 1 + i)).toISOString().slice(0, 10) })) });
+  await folder.writeDirectory(root, data, 'initial');
+  const before = await folder.readDirectory(root);
+  root.control.reads = 0;
+  const inspected = await folder.inspectDirectory(root);
+  assert.equal(inspected.kind, 'root');
+  assert.equal(root.control.reads, 1, 'path validation reads only the manifest, not 303 documents');
+  data.notes[42].text = '修改一条';
+  const writes = root.control.writes;
+  const written = await folder.writeDirectory(root, data, 'changed', before);
+  assert.equal(written.changed, 1);
+  assert.equal(written.reused, 302);
+  assert.equal(root.control.writes - writes, 4, 'one document, two historical manifests and the current manifest');
+  const after = await folder.readDirectory(root);
+  const reused = after.records.find(record => record.name === '属性.json');
+  assert.equal(reused.path, before.records.find(record => record.name === '属性.json').path);
+  const version = await (await root.getDirectoryHandle('版本')).getDirectoryHandle('changed');
+  assert.equal(await (await (await version.getFileHandle('上一版本清单.json')).getFile()).text(), before.raw);
+  assert.equal(await (await (await version.getFileHandle('版本清单.json')).getFile()).text(), after.raw);
+  assert.deepEqual(folder.assemble(after.records.map(record => record.document), defaults()), data);
+  const unchangedWrites = root.control.writes;
+  assert.equal((await folder.writeDirectory(root, data, 'unchanged', after)).unchanged, true);
+  assert.equal(root.control.writes, unchangedWrites);
+  assert.equal((await root.getDirectoryHandle('版本')).children.size, 2);
 });
