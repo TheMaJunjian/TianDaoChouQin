@@ -61,10 +61,13 @@
     var noteIds = Object.create(null);
     var entryMetadata = new WeakMap();
     function metadata(entry) {
-      if (!entryMetadata.has(entry)) {
-        entryMetadata.set(entry, { start: stamp(entry, false), end: stamp(entry, true), key: JSON.stringify(entryContent(entry)) });
+      var info = entryMetadata.get(entry);
+      if (!info) {
+        var content = entryContent(entry);
+        info = { start: content[0], end: content[1], key: JSON.stringify(content) };
+        entryMetadata.set(entry, info);
       }
-      return entryMetadata.get(entry);
+      return info;
     }
     function conflict(id, title, local, imported, scope) {
       var choice = choices[id];
@@ -127,7 +130,7 @@
         var found = item.id && byId.has(item.id) ? byId.get(item.id) : (matching && byContent.has(key) ? byContent.get(key) : -1);
         if (found < 0) {
           found = list.length;
-          list.push(clone(item));
+          list.push(localSource ? item : clone(item));
           if (item.id) { byId.set(item.id, found); }
           if (matching) { byContent.set(key, found); }
           if (!localSource) { added++; newIndices.add(found); }
@@ -162,6 +165,8 @@
       notesById.set(note.id, note);
       notesByContent.set(JSON.stringify([note.date, note.createdAt, note.text]), note);
     });
+    var skillsById = new Map();
+    result.skills.forEach(function (skill) { if (!skillsById.has(skill.id)) { skillsById.set(skill.id, skill); } });
     function completionRecord(item) {
       var record = clone(item);
       record.id = noteIds[record.id] || record.id;
@@ -171,7 +176,7 @@
         if (note) { record.id = note.id; }
       }
       record.skillId = skillIds[record.skillId] || record.skillId;
-      var skill = result.skills.find(function (candidate) { return candidate.id === record.skillId; });
+      var skill = skillsById.get(record.skillId);
       if (skill) { record.skillName = skill.name; }
       return record;
     }
@@ -183,9 +188,9 @@
     result.achievements = mergeList(result.achievements, incoming.achievements, 'achievements', '成就', sameObject);
     result.quests.side = mergeList(result.quests.side, (incoming.quests || {}).side, 'quests', '支线任务', sameObject);
     result.notifications = mergeList(result.notifications, incoming.notifications, 'notifications', '系统提示', sameObject, sameObject);
+    var localEntries = result.entries || [];
     result.entries = [];
-    var originalEntryIds = new Set((current.entries || []).map(function (entry) { return entry.id; }).filter(Boolean));
-    var originalEntryKeys = new Set((current.entries || []).map(function (entry) { return metadata(entry).key; }));
+    var originalEntryIds = new Set(), originalEntryKeys = new Set();
     var entryKeys = new Set(), entryIds = new Map(), dayEntries = new Map(), longEntries = new Set();
     function days(info) {
       var start = Math.floor(info.start / 1440), end = Math.ceil(info.end / 1440) - 1;
@@ -209,44 +214,59 @@
     }
     function addEntry(entry, index, localSource) {
       var info = metadata(entry);
+      if (localSource) {
+        if (entry.id) { originalEntryIds.add(entry.id); }
+        originalEntryKeys.add(info.key);
+      }
       var newOrigin = !localSource && !originalEntryIds.has(entry.id) && !originalEntryKeys.has(info.key) ?
         (entry.id ? 'id:' + entry.id : 'content:' + info.key) : undefined;
       function markNew(part) { if (newOrigin !== undefined) { metadata(part).newOrigin = newOrigin; } return part; }
-      if (entryKeys.has(info.key)) { duplicates++; return; }
-      var span = days(info), candidates;
-      if (!span) { candidates = result.entries; }
-      else {
-        var matching = new Set(entryIds.get(entry.id) || []);
-        longEntries.forEach(function (item) { matching.add(item); });
-        for (var day = span[0]; day <= span[1]; day++) {
-          (dayEntries.get(day) || []).forEach(function (item) { matching.add(item); });
-        }
-        candidates = Array.from(matching).sort(function (a, b) { return metadata(a).order - metadata(b).order; });
+      function copyEntry() {
+        // 本地记录已随 current 整体复制；传入的记录只在确定保留时复制。
+        if (localSource) { return entry; }
+        var copy = clone(entry);
+        entryMetadata.set(copy, { start: info.start, end: info.end, key: info.key, newOrigin: newOrigin });
+        return copy;
       }
-      var clashes = candidates.filter(function (candidate) {
+      if (entryKeys.has(info.key)) { duplicates++; return; }
+      var span = days(info), matching = new Set(entryIds.get(entry.id));
+      function findOverlap(candidate) {
         var other = metadata(candidate);
-        return candidate.id === entry.id || (other.start < info.end && info.start < other.end);
-      });
-      if (!clashes.length) {
-        var copied = markNew(clone(entry)); indexEntry(copied, result.entries.length); result.entries.push(copied);
+        if (other.start < info.end && info.start < other.end) { matching.add(candidate); }
+      }
+      if (!span) { result.entries.forEach(findOverlap); }
+      else {
+        longEntries.forEach(findOverlap);
+        for (var day = span[0]; day <= span[1]; day++) {
+          var bucket = dayEntries.get(day);
+          if (bucket) { bucket.forEach(findOverlap); }
+        }
+      }
+      if (!matching.size) {
+        var copied = copyEntry(); indexEntry(copied, result.entries.length); result.entries.push(copied);
         if (!localSource) { added++; } return;
       }
+      var clashes = Array.from(matching).sort(function (a, b) { return metadata(a).order - metadata(b).order; });
       var choice = conflict((localSource ? 'local:' : '') + 'entries:' + (entry.id || index), '时间记录冲突：' + (entry.startDate || entry.date), clashes, [entry], localSource ? 'current' : '');
       if (choice === 'incoming') {
-        result.entries = result.entries.reduce(function (list, candidate) {
-          if (candidate.id === entry.id) { return list; }
+        var retained = [];
+        result.entries.forEach(function (candidate) {
+          if (!matching.has(candidate)) { retained.push(candidate); return; }
+          if (candidate.id === entry.id) { return; }
           var origin = metadata(candidate).newOrigin;
-          return list.concat(subtract(candidate, [entry]).map(function (part) {
+          subtract(candidate, [entry]).forEach(function (part) {
             if (origin !== undefined) { metadata(part).newOrigin = origin; }
-            return part;
-          }));
-        }, []).concat([markNew(clone(entry))]);
+            retained.push(part);
+          });
+        });
+        retained.push(copyEntry());
+        result.entries = retained;
         rebuildEntryIndex();
       } else if (choice === 'current' && !clashes.some(function (candidate) { return candidate.id === entry.id; })) {
         subtract(entry, clashes).forEach(function (part) { markNew(part); indexEntry(part, result.entries.length); result.entries.push(part); });
       }
     }
-    (current.entries || []).forEach(function (entry, index) { addEntry(entry, index, true); });
+    localEntries.forEach(function (entry, index) { addEntry(entry, index, true); });
     (incoming.entries || []).forEach(function (entry, index) { addEntry(entry, index, false); });
     // 同一条日志因冲突拆成多段仍计一条；替换已有 ID 的日志属于修改。
     additions.entries = new Set(result.entries.map(function (entry) { return metadata(entry).newOrigin; })
@@ -316,17 +336,22 @@
     await writeFile(handle, text);
     return candidate;
   }
-  async function writeFile(handle, text, expectedText, beforeCommit) {
+  async function writeFile(handle, text, expectedText, beforeCommit, resolveBeforeClose) {
     // 在打开写入流前和提交前复查，发现文件在预览后变化就中止。
-    if (expectedText !== undefined && await (await handle.getFile()).text() !== expectedText) {
-      throw new Error('文件在检查后已发生变化，请重新选择并检查。');
+    async function matchesExpected(currentHandle) {
+      var file = await currentHandle.getFile();
+      return expectedText === '' ? file.size === 0 : (await file.text()) === expectedText;
+    }
+    if (expectedText !== undefined && !await matchesExpected(handle)) {
+      throw Object.assign(new Error('文件在检查后已发生变化，请重新选择并检查。'), { name: 'BackupFileChangedError' });
     }
     var writable = await handle.createWritable();
     try {
       await writable.write(text);
       if (beforeCommit) { await beforeCommit(); }
-      if (expectedText !== undefined && await (await handle.getFile()).text() !== expectedText) {
-        throw new Error('文件在检查后已发生变化，更新已取消。');
+      var currentHandle = resolveBeforeClose ? await resolveBeforeClose() : handle;
+      if (expectedText !== undefined && !await matchesExpected(currentHandle)) {
+        throw Object.assign(new Error('文件在检查后已发生变化，更新已取消。'), { name: 'BackupFileChangedError' });
       }
       await writable.close();
     } catch (error) {

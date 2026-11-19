@@ -3528,8 +3528,10 @@
     }
   }
 
-  function backupFingerprint(value) {
-    return JSON.stringify(['entries', 'notes', 'noteCompletions', 'trashEntries', 'host', 'skills', 'achievements', 'points', 'quests', 'hiddenSkills', 'hiddenAchievements'].map(function (key) {
+  function backupFingerprint(value, forUpdate) {
+    var fields = ['entries', 'notes', 'noteCompletions', 'trashEntries', 'host', 'skills', 'achievements', 'points', 'quests', 'hiddenSkills', 'hiddenAchievements'];
+    if (forUpdate) { fields.push('notifications', 'focus', 'entryCategory'); }
+    return JSON.stringify(fields.map(function (key) {
       return value[key];
     }));
   }
@@ -3549,7 +3551,7 @@
       await backupLocations.remember('update-file', handles[0]);
       if (session !== backupSession) { return; }
       syncBackupState();
-      pendingFileUpdate = { handle: handles[0], name: file.name, raw: raw, existing: existing, baseline: backupFingerprint(state) };
+      pendingFileUpdate = { handle: handles[0], name: file.name, raw: raw, existing: existing, baseline: backupFingerprint(state, true) };
       renderBackupUpdate();
     } catch (error) { backupError(error); }
     finally { backupBusy = false; }
@@ -3558,6 +3560,8 @@
   function renderBackupUpdate(message) {
     var pending = pendingFileUpdate;
     var plan = TianDaoBackup.planMerge(pending.existing, state, {}, defaultState());
+    plan.state.focus = state.focus;
+    pending.plan = plan;
     openDetailModal('检查文件更新', '<p class="backup-summary">文件：' + escapeHtml(pending.name) + '<br>更新会保留文件中独有的数据，并加入当前数据。</p>' +
       (message ? '<p class="backup-warning">' + escapeHtml(message) + '</p>' : '') +
       (plan.conflicts.length ? '<p class="backup-warning">发现 ' + plan.conflicts.length + ' 项冲突，不能更新。请先导入此文件，在兼容扩充中处理冲突，再另存新文件。</p>' :
@@ -3573,12 +3577,13 @@
     el.detailUpdateBackup.disabled = true;
     try {
       syncBackupState();
-      if (pending.baseline !== backupFingerprint(state)) {
-        pending.baseline = backupFingerprint(state);
+      var baseline = backupFingerprint(state, true);
+      if (pending.baseline !== baseline) {
+        pending.baseline = baseline;
         renderBackupUpdate('当前数据已变化，已重新检查，请查看结果后再次确认。');
         return;
       }
-      var plan = TianDaoBackup.planMerge(pending.existing, state, {}, defaultState());
+      var plan = pending.plan;
       if (plan.conflicts.length) { renderBackupUpdate(); return; }
       var coveredFingerprint = TianDaoBackupStatus.fingerprint(state);
       await TianDaoBackup.writeFile(pending.handle, JSON.stringify(plan.state, null, 2), pending.raw);
@@ -3594,7 +3599,7 @@
 
   /* ---------- 文件夹备份 ---------- */
   function validateFolderDocument(doc) {
-    readBackupText(JSON.stringify(TianDaoFolder.assemble([doc], defaultState())));
+    validateBackupState(TianDaoFolder.assemble([doc], defaultState()));
   }
 
   function folderDocumentSummary(doc) {
@@ -3641,20 +3646,21 @@
     throw new Error('未找到天道酬勤目录。请选择包含「备份清单.json」的文件夹，或它的上一级目录。');
   }
 
-  async function prepareFolderUpdate(header, session) {
-    var snapshot = await TianDaoFolder.readDirectory(header.directory, null, header);
+  async function prepareFolderUpdate(header, session, reread) {
+    var snapshot = await TianDaoFolder.readDirectory(header.directory, null, header, reread ? undefined : state);
     if (session !== backupSession) { return; }
     if (snapshot.records.some(function (record) { return record.error; })) { throw new Error('文件夹含缺失或无效文档，不能更新。'); }
-    var existing = readBackupText(JSON.stringify(TianDaoFolder.assemble(snapshot.records.map(function (record) { return record.document; }), defaultState())));
+    var existing = validateBackupState(TianDaoFolder.assemble(snapshot.records.map(function (record) { return record.document; }), defaultState()));
     await backupLocations.remember('update-folder', header.directory);
     if (session !== backupSession) { return; }
     syncBackupState();
-    pendingFolderUpdate = { snapshot: snapshot, choices: {}, baseline: backupFingerprint(state), existing: existing };
-    renderFolderUpdate();
+    pendingFolderUpdate = { snapshot: snapshot, choices: {}, existing: existing };
+    renderFolderUpdate(undefined, reread ? '文件夹内容已变化，已重新读取。请核对最新结果后再确认。' : '');
   }
 
-  function downloadFolderZip(snapshot, name) {
-    var bundle = TianDaoFolder.packageFiles(snapshot, newBackupFilename().replace(/\.json$/, ''));
+  async function downloadFolderZip(snapshot, name, session) {
+    var bundle = await TianDaoFolder.packageHashedFiles(snapshot, newBackupFilename().replace(/\.json$/, ''));
+    if (session !== backupSession) { return; }
     var blob = TianDaoFolder.zipFiles(bundle.files, name);
     var url = URL.createObjectURL(blob);
     var link = document.createElement('a');
@@ -3676,7 +3682,7 @@
       var snapshot = cloneState(state);
       var name = '天道酬勤';
       if (!window.showDirectoryPicker) {
-        downloadFolderZip(snapshot, name);
+        await downloadFolderZip(snapshot, name, session);
         if (session === backupSession) { closeDetailModal(); }
         return;
       }
@@ -3693,7 +3699,7 @@
       await backupLocations.remember('update-folder', directory);
       recordBackupSaved(TianDaoBackupStatus.fingerprint(snapshot), directory.name + '/');
       if (session === backupSession) { closeDetailModal(); }
-      toast('已导出文件夹「' + directory.name + '」，包含属性、任务与成就、界面设置和日期文档。', { level: 'SYSTEM' });
+      toast('已导出文件夹「' + directory.name + '」，包含属性、任务与成就、界面设置和日期文档。', { level: 'SYSTEM', transient: true });
     } catch (error) {
       if (session === backupSession) { closeDetailModal(); }
       backupError(error);
@@ -3824,9 +3830,14 @@
     } finally { backupBusy = false; }
   }
 
-  function renderFolderUpdate(message) {
+  function renderFolderUpdate(baseline, message) {
     var pending = pendingFolderUpdate;
+    baseline = baseline || backupFingerprint(state, true);
+    var changed = pending.baseline !== undefined && pending.baseline !== baseline;
+    if (changed) { pending.choices = {}; }
+    pending.baseline = baseline;
     var plan = TianDaoBackup.planMerge(pending.existing, state, pending.choices, defaultState());
+    pending.plan = plan;
     var additions = plan.additions;
     var details = [['entries', '日志', '条'], ['notes', '备注', '条'], ['regressions', '退步', '条'],
       ['noteCompletions', '备注完成记录', '条'], ['skills', '技能', '项'], ['quests', '支线任务', '项'],
@@ -3834,11 +3845,14 @@
       return additions[item[0]] > 0;
     }).map(function (item) { return item[1] + ' ' + additions[item[0]] + ' ' + item[2]; }).join(' · ');
     openDetailModal('检查文件夹更新', '<p class="backup-summary">文件夹：' + escapeHtml(pending.snapshot.name) +
-      '</p><p class="hint">保留文件夹独有的记录，加入当前数据。原版本会保留；冲突可逐项选择。</p>' +
-      (message ? '<p class="backup-warning">' + escapeHtml(message) + '</p>' : '') +
+      '</p><p class="hint">更新会保留文件夹独有的记录，冲突可逐项选择。确认时会核对磁盘内容。</p>' +
+      (changed || message ? '<p class="backup-warning">' + escapeHtml(message || '当前数据已变化，请重新检查并确认。') + '</p>' : '') +
       '<div class="backup-summary" id="folderUpdateSummary" role="status"><strong>预计新增 ' + additions.total + ' 条记录</strong>' +
       (details ? '<br>' + details : '<br>暂无新增记录') +
-      (additions.notifications ? '<br>另新增系统提示 ' + additions.notifications + ' 条' : '') + '</div>' +
+      (additions.notifications ? '<br>另新增系统提示 ' + additions.notifications + ' 条' : '') +
+      (pending.snapshot.hashMatches ? '<br>哈希匹配 ' + pending.snapshot.hashMatches + ' 份文档，本次预览读盘 ' +
+        (pending.snapshot.records.length - pending.snapshot.hashMatches) + ' 份文档' : '') +
+      '<div id="folderWriteSummary"></div></div>' +
       '<p class="hint">按当前选择计算，不含重复记录和已有记录的修改；重叠日志拆分后仍按原始记录计数。</p>' +
       '<p class="backup-summary">' + plan.conflicts.length + ' 项冲突，剩余 ' + plan.unresolved + ' 项待处理。</p>' +
       (plan.conflicts.length ? '<div class="log-actions"><button type="button" class="btn ghost" data-folder-choice="current">全部保留文件夹</button>' +
@@ -3847,36 +3861,78 @@
     el.detailFolderAction.textContent = '确认更新文件夹';
     el.detailFolderAction.disabled = plan.unresolved > 0;
     el.detailFolderAction.classList.remove('hidden');
+    pending.prepared = null;
+    // 有冲突时，以实际确认时间记录被替换的日志。
+    if (!plan.conflicts.length) {
+      var prepared = prepareReviewedFolderWrite(pending);
+      pending.prepared = prepared;
+      prepared.writer.then(function (writer) {
+        if (pending !== pendingFolderUpdate || prepared !== pending.prepared) { return; }
+        var summary = document.getElementById('folderWriteSummary');
+        if (!summary) { return; }
+        summary.textContent = writer.unchanged ? '与备份清单一致，无需更新，可以直接关闭。' : writer.changed ?
+          '预计写入 ' + writer.changed + ' 份文档，沿用 ' + writer.reused + ' 份。' : '只需更新清单，全部文档沿用原文件。';
+        if (writer.unchanged && !pending.committing) { el.detailFolderAction.textContent = '核验磁盘内容'; }
+      }, function () {
+        if (pending.prepared === prepared) { pending.prepared = null; } // 确认时可重试。
+      });
+    }
+  }
+
+  function prepareReviewedFolderWrite(pending) {
+    var plan = pending.plan;
+    var result = plan.conflicts.length ? TianDaoBackup.preserveDisplacedEntries(pending.existing, plan.state, new Date().toISOString()) : Object.assign({}, plan.state);
+    result.ui = cloneState(state.ui); result.viewDate = state.viewDate; result.entryCategory = state.entryCategory;
+    result.focus = state.focus;
+    var coversCurrent = backupFingerprint(result, true) === pending.baseline || TianDaoBackup.planMerge(result, state, {}, defaultState()).conflicts.length === 0;
+    return {
+      settings: JSON.stringify([result.ui, result.viewDate]),
+      fingerprint: TianDaoBackupStatus.fingerprint(coversCurrent ? state : result),
+      writer: TianDaoFolder.prepareDirectoryWrite(pending.snapshot.directory, result, newBackupFilename().replace(/\.json$/, ''), pending.snapshot)
+    };
   }
 
   async function commitFolderUpdate() {
     if (backupBusy || !pendingFolderUpdate) { return; }
     backupBusy = true;
     var pending = pendingFolderUpdate, session = backupSession;
+    pending.committing = true;
     el.detailFolderAction.disabled = true;
+    el.detailFolderAction.textContent = '正在核验并更新…';
     try {
       syncBackupState();
-      if (pending.baseline !== backupFingerprint(state)) {
-        pending.choices = {}; pending.baseline = backupFingerprint(state);
-        renderFolderUpdate('当前数据已变化，请重新检查并确认。');
+      var baseline = backupFingerprint(state, true);
+      if (pending.baseline !== baseline) {
+        renderFolderUpdate(baseline);
         return;
       }
-      var plan = TianDaoBackup.planMerge(pending.existing, state, pending.choices, defaultState());
-      if (plan.unresolved) { renderFolderUpdate(); return; }
-      var result = TianDaoBackup.preserveDisplacedEntries(pending.existing, plan.state, new Date().toISOString());
-      result.ui = cloneState(state.ui); result.viewDate = state.viewDate; result.entryCategory = state.entryCategory;
-      result.focus = state.focus;
-      var coversCurrent = TianDaoBackup.planMerge(result, state, {}, defaultState()).conflicts.length === 0;
-      var fingerprint = TianDaoBackupStatus.fingerprint(coversCurrent ? state : result);
-      var written = await TianDaoFolder.writeDirectory(pending.snapshot.directory, result, newBackupFilename().replace(/\.json$/, ''), pending.snapshot,
-        function () { return session === backupSession; });
-      recordBackupSaved(fingerprint, pending.snapshot.name + '/');
+      if (pending.plan.unresolved) { renderFolderUpdate(); return; }
+      var prepared = pending.prepared;
+      if (prepared && prepared.settings !== JSON.stringify([state.ui, state.viewDate])) {
+        renderFolderUpdate(baseline, '界面设置已变化，请核对最新结果后再确认。');
+        return;
+      }
+      if (!prepared) { prepared = prepareReviewedFolderWrite(pending); }
+      var writer = await prepared.writer;
+      var written = await writer.commit(function () { return session === backupSession; });
+      recordBackupSaved(prepared.fingerprint, pending.snapshot.name + '/');
       if (session === backupSession) { closeDetailModal(); }
-      toast(written.unchanged ? '文件夹已是最新，无需写入。' : '文件夹已更新：写入 ' + written.changed + ' 份文档，' + written.reused + ' 份无需重写。上一版本已保留。', { level: 'SYSTEM' });
+      var message = written.unchanged ? '文件夹已是最新，无需写入。' : written.changed ?
+        '文件夹已更新：写入 ' + written.changed + ' 份文档，沿用 ' + written.reused + ' 份。上一版本已保留。' :
+        '已更新哈希清单，沿用全部 ' + written.reused + ' 份文档。';
+      toast(message, { level: 'SYSTEM', transient: true });
     } catch (error) {
-      if (session === backupSession) { closeDetailModal(); }
-      backupError(error);
-    } finally { backupBusy = false; }
+      if (session !== backupSession) { return; }
+      if (error.name === 'FolderSnapshotChangedError') {
+        try {
+          openDetailModal('重新检查文件夹', '<p class="backup-summary" role="status">文件夹内容已变化，正在读取最新文档……</p>');
+          var header = await TianDaoFolder.readManifest(pending.snapshot.directory);
+          if (session === backupSession) { await prepareFolderUpdate(header, session, true); }
+          return;
+        } catch (readError) { error = readError; }
+      }
+      if (session === backupSession) { closeDetailModal(); backupError(error); }
+    } finally { pending.committing = false; backupBusy = false; }
   }
 
   el.updateFolder.addEventListener('click', updateBackupFolder);
@@ -3906,10 +3962,10 @@
       renderFolderDocuments();
     }
     var choice = event.target.closest('[data-folder-choice], [data-backup-conflict]');
-    if (!choice || !pendingFolderUpdate) { return; }
+    if (!choice || !pendingFolderUpdate || backupBusy) { return; }
     var pending = pendingFolderUpdate;
     if (choice.dataset.folderChoice) {
-      TianDaoBackup.planMerge(pending.existing, state, pending.choices, defaultState()).conflicts.forEach(function (item) { pending.choices[item.id] = choice.dataset.folderChoice; });
+      pending.plan.conflicts.forEach(function (item) { pending.choices[item.id] = choice.dataset.folderChoice; });
     } else { pending.choices[choice.dataset.backupConflict] = choice.dataset.backupChoice; }
     renderFolderUpdate();
   });
@@ -3938,7 +3994,10 @@
   }
 
   function readBackupText(rawText) {
-    var parsed = JSON.parse(String(rawText).replace(/^\uFEFF/, ''));
+    return validateBackupState(JSON.parse(String(rawText).replace(/^\uFEFF/, '')));
+  }
+
+  function validateBackupState(parsed) {
     if (!isImportableState(parsed)) { throw new Error('不是有效的系统数据。'); }
     if (Object.keys(parsed.points).some(function (key) {
       return parsed.points[key] === null || parsed.points[key] === '' || !Number.isFinite(Number(parsed.points[key]));
@@ -3990,7 +4049,7 @@
   function renderImportReview(message) {
     var pending = pendingImport;
     if (pending.documents) {
-      pending.imported = readBackupText(JSON.stringify(TianDaoFolder.assemble(pending.documents, defaultState(), pending.partial ? state : null)));
+      pending.imported = validateBackupState(TianDaoFolder.assemble(pending.documents, defaultState(), pending.partial ? state : null));
       if (pending.partial) { importMode = 'merge'; }
     }
     var imported = pending.imported;

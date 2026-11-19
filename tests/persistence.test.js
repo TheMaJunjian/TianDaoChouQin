@@ -1068,6 +1068,128 @@ test('browser persistence and refresh recovery', { skip: !browserPath, timeout: 
       await p.close();
     });
 
+    await t.test('backup updates recheck changed notifications and commit the reviewed plan', async () => {
+      for (const format of ['folder', 'file']) {
+        const p = await page();
+        await folderSetup(p);
+        await p.run(async (data, format) => {
+          if (format === 'folder') {
+            await TianDaoFolder.writeDirectory(window.folderRoot, data, 'initial');
+          } else {
+            window.existingFile = await window.folderRoot.getFileHandle('系统.json', { create: true });
+            window.existingFile.contents = JSON.stringify(data);
+            window.showOpenFilePicker = async () => [window.existingFile];
+          }
+          const merge = TianDaoBackup.planMerge;
+          window.reviewMerges = 0;
+          TianDaoBackup.planMerge = function (current, ...args) {
+            window.reviewSource ??= current;
+            if (current === window.reviewSource) { window.reviewMerges++; }
+            return merge(current, ...args);
+          };
+        }, await p.state(), format);
+        await p.click('[data-tab="entry"]');
+        if (format === 'file') {
+          await p.set('backupFormat', 'file', 'change');
+          await p.click('#exportData');
+          await p.click('#detailUpdateBackup');
+        } else { await p.click('#updateFolder'); }
+        await until(() => p.run(() => window.reviewMerges === 1));
+        const writes = await p.run(() => window.folderRoot.control.writes);
+        await p.run(key => {
+          const changed = JSON.parse(localStorage.getItem(key));
+          changed.notifications.push({ id: 'after-review', text: '检查后新增的提示', ts: Date.now(), level: 'INFO' });
+          localStorage.setItem(key, JSON.stringify(changed));
+        }, storageKey);
+        const confirm = format === 'folder' ? '#detailFolderAction' : '#detailUpdateBackup';
+        await p.click(confirm);
+        assert.match(await p.run(() => document.getElementById('detailBody').textContent), /当前数据已变化/);
+        assert.equal(await p.run(() => window.folderRoot.control.writes), writes);
+        assert.equal(await p.run(() => window.reviewMerges), 2);
+        await p.click(confirm);
+        await until(async () => !await p.visible('detailModal'));
+        assert.equal(await p.run(() => window.reviewMerges), 2, 'confirmation reuses the updated review');
+        const notifications = await p.run(async format => format === 'file'
+          ? JSON.parse(window.existingFile.contents).notifications
+          : (await TianDaoFolder.readDirectory(window.folderRoot)).records.flatMap(record => record.document.data.notifications || []), format);
+        assert.ok(notifications.some(item => item.id === 'after-review'));
+        await p.close();
+      }
+    });
+
+    await t.test('single-file updates save a changed or cleared focus before marking it backed up', async () => {
+      const p = await page();
+      await folderSetup(p);
+      await p.run(async data => {
+        window.existingFile = await window.folderRoot.getFileHandle('系统.json', { create: true });
+        window.existingFile.contents = JSON.stringify(data);
+        window.showOpenFilePicker = async () => [window.existingFile];
+      }, await p.state());
+      await p.set('backupFormat', 'file', 'change');
+      for (const focus of ['编程', '']) {
+        await p.click('[data-tab="attr"]');
+        await p.set('focusCategory', focus, 'change');
+        await p.click('[data-tab="entry"]');
+        await p.click('#exportData');
+        await p.click('#detailUpdateBackup');
+        await until(() => p.run(() => document.getElementById('detailTitle').textContent === '检查文件更新'));
+        await p.click('#detailUpdateBackup');
+        await until(async () => !await p.visible('detailModal'));
+        assert.equal(await p.run(() => JSON.parse(window.existingFile.contents).focus), focus);
+        assert.equal(await p.run(() => document.getElementById('backupStatus').textContent), '当前业务数据已备份到文件');
+      }
+      await p.close();
+    });
+
+    await t.test('repeated folder updates stay read-only and external edits get a fresh review', async () => {
+      const p = await page();
+      await folderSetup(p);
+      await p.click('[data-tab="entry"]');
+      await p.click('#exportData');
+      await until(async () => !await p.visible('detailModal'));
+      const initial = await p.run(async () => {
+        window.exported = window.folderRoot.children.get('天道酬勤');
+        const header = await TianDaoFolder.readManifest(window.exported);
+        const day = header.manifest.documents.find(item => item.name === '日期/2026-11-06.json');
+        let handle = window.exported;
+        for (const part of day.path.split('/')) { handle = handle.children.get(part); }
+        window.exportedDay = handle;
+        return { digest: day.sha256, writes: window.exported.control.writes, raw: header.raw };
+      });
+      assert.match(initial.digest, /^[0-9a-f]{64}$/);
+      const savedAt = await p.run(key => JSON.parse(localStorage.getItem(key + '.backup-status')).lastSavedAt, storageKey);
+      await p.click('#updateFolder');
+      await until(() => p.run(() => document.getElementById('detailFolderAction').textContent === '核验磁盘内容'));
+      assert.match(await p.run(() => document.getElementById('folderWriteSummary').textContent), /无需更新/);
+      await p.click('#detailClose');
+      assert.equal(await p.run(() => window.exported.control.writes), initial.writes);
+      assert.equal(await p.run(key => JSON.parse(localStorage.getItem(key + '.backup-status')).lastSavedAt, storageKey), savedAt);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await p.click('#updateFolder');
+        await until(() => p.run(() => !!document.getElementById('folderUpdateSummary')));
+        await p.click('#detailFolderAction');
+        await until(async () => !await p.visible('detailModal'));
+        assert.equal(await p.run(() => window.exported.control.writes), initial.writes);
+      }
+      await p.click('#updateFolder');
+      await until(() => p.run(() => !!document.getElementById('folderUpdateSummary')));
+      await p.run(() => {
+        const doc = JSON.parse(window.exportedDay.contents);
+        doc.data.notes[0].text = '另一个程序修改的备注';
+        window.exportedDay.contents = JSON.stringify(doc, null, 2);
+      });
+      await p.click('#detailFolderAction');
+      await until(() => p.run(() => document.getElementById('detailBody').textContent.includes('文件夹内容已变化，已重新读取')));
+      assert.equal(await p.run(async () => (await TianDaoFolder.readManifest(window.exported)).raw), initial.raw);
+      assert.equal(await p.run(() => document.getElementById('detailFolderAction').disabled), true);
+      assert.match(await p.run(() => document.getElementById('detailBody').textContent), /另一个程序修改的备注/);
+      await p.click('[data-folder-choice="current"]');
+      await p.click('#detailFolderAction');
+      await until(async () => !await p.visible('detailModal'));
+      assert.match(await p.run(() => window.exportedDay.contents), /另一个程序修改的备注/);
+      await p.close();
+    });
+
     await t.test('directory recognition handles parents and internal paths without nested exports or full reads on path changes', async () => {
       const p = await page();
       await p.run(async () => {

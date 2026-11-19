@@ -44,6 +44,18 @@ test('indexed log merging preserves long spans and same-ID edits across distant 
   assert.deepEqual(repeated.state.entries, plan.state.entries);
 });
 
+test('moving a log shows same-ID and overlapping records in backup order and trims only those overlaps', () => {
+  const local = state({ entries: [entry('left', 0, 40), entry('moved', 0, 30, '原日志', '2026-10-25'),
+    entry('right', 60, 120), entry('untouched', 240, 300)] });
+  const incoming = state({ entries: [entry('moved', 20, 90)] });
+  const review = backup.planMerge(local, incoming, {}, state());
+  assert.deepEqual(review.conflicts[0].current.map(item => item.id), ['left', 'moved', 'right']);
+  const merged = backup.planMerge(local, incoming, { 'entries:moved': 'incoming' }, state());
+  assert.deepEqual(merged.state.entries.map(item => [item.activity, item.start, item.end]), [
+    ['left', 0, 20], ['right', 90, 120], ['untouched', 240, 300], ['moved', 20, 90]
+  ]);
+});
+
 test('disjoint backups preserve both sides, deduplicate repeated imports, and do not mutate inputs', () => {
   const local = state({ entries: [entry('a', 60, 120)], skills: [{ id: 's', name: '阅读', hours: 10 }] });
   const incoming = state({ entries: [entry('b', 120, 180)], notes: [{ id: 'n', date: '2026-10-24', createdAt: '2026-10-24T00:00:00Z', text: '备注' }] });

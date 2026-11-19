@@ -28,6 +28,31 @@ test('folder documents round-trip all state and keep note completion with its or
   assert.equal(day.data.entries[0].endDate, '2026-11-13');
   assert.equal(day.data.noteCompletions[0].id, day.data.notes[0].id);
 });
+test('skill aliases follow document order and leave source records isolated', () => {
+  const input = sample();
+  input.skills = [{ id: 'first', name: '阅读', hours: 20 }, { id: 'second', name: '旧称', hours: 30 },
+    { id: 'third', name: ' 阅读 ', hours: 40 }];
+  input.noteCompletions[0].skillId = 'legacy';
+  input.noteCompletions[0].skillName = '旧称';
+  const docs = folder.createDocuments(input);
+  const day = docs.find(doc => doc.date === '2026-11-12');
+  assert.equal(day.skillRefs[0].id, 'first', 'entry uses the first skill with a matching normalized name');
+  // legacy → second → first. A later reference for legacy only affects IDs still named legacy.
+  day.skillRefs = [{ id: 'first', name: '阅读' }, { id: 'legacy', name: '旧称' }, { id: 'second', name: ' 阅读 ' },
+    { id: 'legacy', name: '另一名称' }];
+  for (const selection of [docs, [day]]) {
+    const result = folder.assemble(selection, defaults(), input);
+    assert.equal(result.noteCompletions[0].skillId, 'first');
+    assert.equal(result.noteCompletions[0].skillName, '阅读');
+    result.entries[0].activity = '已修改';
+    result.skills[0].hours = 0;
+    assert.equal(day.data.entries[0].activity, '跨日阅读');
+    assert.equal(day.data.noteCompletions[0].skillId, 'legacy');
+    assert.equal(input.skills[0].hours, 20);
+  }
+  day.data.entries[0].activity = '修改文档';
+  assert.equal(input.entries[0].activity, '跨日阅读');
+});
 test('partial dates retain current profile and rewards and remap skill references without adding baseline hours', () => {
   const docs = folder.createDocuments(sample()).filter(doc => doc.date === '2026-11-12');
   const current = state({ host: { name: '现有宿主' }, skills: [{ id: 'local', name: '阅读', hours: 100 }], points: { attribute: 99 } });
@@ -196,4 +221,50 @@ test('incremental updates only write changed documents and retain manifests for 
   assert.equal((await folder.writeDirectory(root, data, 'unchanged', after)).unchanged, true);
   assert.equal(root.control.writes, unchangedWrites);
   assert.equal((await root.getDirectoryHandle('版本')).children.size, 2);
+});
+test('large date directories batch only active handles and bound the search in sparse directories', async () => {
+  const root = memoryDirectory();
+  const data = state({ notes: Array.from({ length: 60 }, (_, i) => ({ id: 'note-' + i, text: '记录',
+    date: new Date(Date.UTC(2025, 0, 1 + i)).toISOString().slice(0, 10) })) });
+  await folder.writeDirectory(root, data, 'one');
+  const dates = root.children.get('版本').children.get('one').children.get('日期');
+  const getFileHandle = dates.getFileHandle.bind(dates);
+  let lookups = 0;
+  dates.getFileHandle = (...args) => { lookups++; return getFileHandle(...args); };
+  const header = (await folder.inspectDirectory(root)).header;
+  const snapshot = await folder.readDirectory(root, null, header);
+  assert.equal(snapshot.records.length, 63);
+  assert.ok(snapshot.records.every(record => !record.error));
+  assert.equal(lookups, 0, 'the date handles come from the directory listing');
+
+  let inspected = 0;
+  dates.entries = async function* () {
+    for (let i = 0; i < 1000; i++) { inspected++; yield ['unrelated-' + i, { kind: 'file' }]; }
+    yield* dates.children;
+  };
+  dates.children.delete('2025-01-03.json');
+  const sparse = await folder.readDirectory(root);
+  assert.ok(inspected <= 120, 'stop listing and fall back to exact paths');
+  assert.equal(lookups, 60);
+  assert.deepEqual(sparse.records.filter(record => record.error).map(record => record.name), ['日期/2025-01-03.json']);
+});
+test('commits verify old and staged document contents without reading empty targets', async () => {
+  const root = memoryDirectory();
+  const data = sample();
+  const first = await folder.writeDirectory(root, data, 'first');
+  assert.equal(root.control.reads, first.changed + 1, 'verify each document and the staged version manifest');
+  const before = await folder.readDirectory(root);
+  data.host.name = '新宿主';
+  root.control.reads = 0;
+  await folder.writeDirectory(root, data, 'second', before);
+  assert.equal(root.control.reads, before.records.length + 6, 'each reviewed document, three staged files and three manifest checks');
+  const next = await folder.readDirectory(root);
+  root.control.reads = 0;
+  assert.ok((await folder.writeDirectory(root, data, 'no-changes', next)).unchanged);
+  assert.equal(root.control.reads, next.records.length + 1);
+  const profile = root.children.get('版本').children.get('second').children.get('属性.json');
+  profile.contents = profile.contents.replace('新宿主', '旧宿主');
+  const writes = root.control.writes;
+  await assert.rejects(folder.writeDirectory(root, data, 'same-size-edit', next), /文档在检查后已发生变化/);
+  assert.equal(root.control.writes, writes);
 });
